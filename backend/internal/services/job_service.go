@@ -119,12 +119,12 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 	var jobs []models.Job
 	for rows.Next() {
 		var job models.Job
-		var vessel, duration, salary, description, requirements, sourceURL sql.NullString
+		var vessel, duration, salary, description, requirements, sourceURL, source sql.NullString
 		
 		err := rows.Scan(
 			&job.ID, &job.Title, &job.Company, &job.Location, &job.Type,
 			&vessel, &duration, &salary, &description,
-			&requirements, &sourceURL, &job.Source, &job.PostedAt,
+			&requirements, &sourceURL, &source, &job.PostedAt,
 			&job.ScrapedAt, &job.CreatedAt, &job.UpdatedAt,
 		)
 		if err != nil {
@@ -149,6 +149,9 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 		}
 		if sourceURL.Valid {
 			job.SourceURL = sourceURL.String
+		}
+		if source.Valid {
+			job.Source = source.String
 		}
 		
 		jobs = append(jobs, job)
@@ -223,12 +226,12 @@ func (s *JobService) GetJobByID(jobID string) (*models.Job, error) {
 		`
 	}
 	
-	var vessel, duration, salary, description, requirements, sourceURL sql.NullString
+	var vessel, duration, salary, description, requirements, sourceURL, source sql.NullString
 	
 	err := s.db.QueryRow(query, jobID).Scan(
 		&job.ID, &job.Title, &job.Company, &job.Location, &job.Type,
 		&vessel, &duration, &salary, &description,
-		&requirements, &sourceURL, &job.Source, &job.PostedAt,
+		&requirements, &sourceURL, &source, &job.PostedAt,
 		&job.ScrapedAt, &job.CreatedAt, &job.UpdatedAt,
 	)
 	if err != nil {
@@ -253,6 +256,9 @@ func (s *JobService) GetJobByID(jobID string) (*models.Job, error) {
 	}
 	if sourceURL.Valid {
 		job.SourceURL = sourceURL.String
+	}
+	if source.Valid {
+		job.Source = source.String
 	}
 	
 	return job, nil
