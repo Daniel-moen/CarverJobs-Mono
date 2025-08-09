@@ -162,15 +162,27 @@ func SetupRoutes(
 	authHandler *handlers.AuthHandler,
 	jobHandler *handlers.JobHandler,
 	jwtService *auth.JWTService,
+	db *database.DB,
 ) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			// Health check
+			// Health check with database connectivity
 			e.GET("/health", func(c echo.Context) error {
-				return c.JSON(http.StatusOK, map[string]string{
+				status := map[string]interface{}{
 					"status": "healthy",
 					"time":   time.Now().Format(time.RFC3339),
-				})
+				}
+				
+				// Check database connectivity
+				if err := db.Ping(); err != nil {
+					status["status"] = "unhealthy"
+					status["database"] = "disconnected"
+					status["database_error"] = err.Error()
+					return c.JSON(http.StatusServiceUnavailable, status)
+				}
+				
+				status["database"] = "connected"
+				return c.JSON(http.StatusOK, status)
 			})
 
 			// API routes

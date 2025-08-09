@@ -3,7 +3,9 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
@@ -45,7 +47,37 @@ func NewConfig() Config {
 		}
 	}
 
-	// Use PostgreSQL
+	// Parse and validate PostgreSQL URL
+	if strings.HasPrefix(databaseURL, "postgres://") || strings.HasPrefix(databaseURL, "postgresql://") {
+		// Parse and reconstruct URL to ensure it's in the correct format
+		parsedURL, err := url.Parse(databaseURL)
+		if err != nil {
+			panic(fmt.Sprintf("Invalid database URL format: %v", err))
+		}
+		
+		// Ensure we have all required components
+		if parsedURL.Host == "" {
+			panic("Database URL missing host")
+		}
+		if parsedURL.User == nil {
+			panic("Database URL missing user credentials")
+		}
+		
+		// Reconstruct URL to ensure proper format for pq driver
+		reconstructedURL := fmt.Sprintf("postgres://%s@%s%s?%s",
+			parsedURL.User.String(),
+			parsedURL.Host,
+			parsedURL.Path,
+			parsedURL.RawQuery,
+		)
+		
+		return Config{
+			DatabaseURL: reconstructedURL,
+			Driver:      "postgres",
+		}
+	}
+
+	// Use PostgreSQL as default for non-postgres URLs
 	if driver == "" {
 		driver = "postgres"
 	}
@@ -57,6 +89,15 @@ func NewConfig() Config {
 }
 
 func NewDB(config Config) (*DB, error) {
+	// Add debug logging for connection issues
+	fmt.Printf("Attempting to connect to database with driver: %s\n", config.Driver)
+	if config.Driver == "postgres" {
+		// Don't log the full URL for security, just the host part
+		if parsedURL, err := url.Parse(config.DatabaseURL); err == nil {
+			fmt.Printf("Connecting to PostgreSQL host: %s\n", parsedURL.Host)
+		}
+	}
+	
 	db, err := sql.Open(config.Driver, config.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
@@ -73,6 +114,7 @@ func NewDB(config Config) (*DB, error) {
 		}
 	}
 
+	fmt.Printf("Successfully connected to %s database\n", config.Driver)
 	return &DB{db}, nil
 }
 
