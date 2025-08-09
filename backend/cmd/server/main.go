@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -23,6 +24,15 @@ import (
 )
 
 func main() {
+	// Parse command line flags
+	migrateOnly := flag.Bool("migrate-only", false, "Run migrations and exit")
+	flag.Parse()
+
+	if *migrateOnly {
+		runMigrationOnly()
+		return
+	}
+
 	fx.New(
 		// Provide dependencies
 		fx.Provide(
@@ -41,6 +51,51 @@ func main() {
 		fx.Invoke(SetupRoutes),
 		fx.Invoke(StartScraper),
 	).Run()
+}
+
+func runMigrationOnly() {
+	fmt.Println("Running migrations only...")
+	
+	config := database.NewConfig()
+	db, err := database.NewDB(config)
+	if err != nil {
+		fmt.Printf("Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	var driver migrateDatabase.Driver
+	var driverName string
+
+	if config.Driver == "postgres" {
+		driver, err = postgres.WithInstance(db.DB, &postgres.Config{})
+		driverName = "postgres"
+	} else {
+		driver, err = sqlite3.WithInstance(db.DB, &sqlite3.Config{})
+		driverName = "sqlite3"
+	}
+
+	if err != nil {
+		fmt.Printf("Failed to create migration driver: %v\n", err)
+		os.Exit(1)
+	}
+
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://migrations",
+		driverName,
+		driver,
+	)
+	if err != nil {
+		fmt.Printf("Failed to create migration instance: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		fmt.Printf("Failed to run migrations: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Migrations completed successfully using %s\n", driverName)
 }
 
 // NewEcho creates a new Echo instance with middleware
