@@ -13,6 +13,7 @@ import (
 	"github.com/Daniel-moen/CarverJobs-Mono/backend/internal/scraper"
 	"github.com/Daniel-moen/CarverJobs-Mono/backend/internal/services"
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/labstack/echo/v4"
@@ -57,17 +58,29 @@ func NewEcho() *echo.Echo {
 }
 
 // RunMigrations runs database migrations
-func RunMigrations(lc fx.Lifecycle, db *database.DB) {
+func RunMigrations(lc fx.Lifecycle, db *database.DB, config database.Config) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			driver, err := sqlite3.WithInstance(db.DB, &sqlite3.Config{})
+			var driver migrate.DatabaseDriver
+			var err error
+			var driverName string
+
+			// Create appropriate driver based on database type
+			if config.Driver == "postgres" {
+				driver, err = postgres.WithInstance(db.DB, &postgres.Config{})
+				driverName = "postgres"
+			} else {
+				driver, err = sqlite3.WithInstance(db.DB, &sqlite3.Config{})
+				driverName = "sqlite3"
+			}
+
 			if err != nil {
 				return fmt.Errorf("failed to create migration driver: %w", err)
 			}
 
 			m, err := migrate.NewWithDatabaseInstance(
 				"file://migrations",
-				"sqlite3",
+				driverName,
 				driver,
 			)
 			if err != nil {
@@ -78,7 +91,7 @@ func RunMigrations(lc fx.Lifecycle, db *database.DB) {
 				return fmt.Errorf("failed to run migrations: %w", err)
 			}
 
-			fmt.Println("Database migrations completed successfully")
+			fmt.Printf("Database migrations completed successfully using %s\n", driverName)
 			return nil
 		},
 	})
