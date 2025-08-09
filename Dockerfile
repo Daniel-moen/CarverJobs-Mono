@@ -13,8 +13,9 @@ RUN go mod download
 # Copy backend source
 COPY backend/ ./
 
-# Build the application
+# Build the application and migration tool
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o main cmd/server/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o migrate cmd/migrate/main.go
 
 # Final stage
 FROM alpine:latest
@@ -23,9 +24,11 @@ RUN apk --no-cache add ca-certificates
 
 WORKDIR /app
 
-# Copy binary and migrations
+# Copy binaries and migrations
 COPY --from=builder /app/backend/main .
+COPY --from=builder /app/backend/migrate .
 COPY --from=builder /app/backend/migrations ./migrations
+COPY migrate.sh .
 
 # Create data directory (for SQLite fallback)
 RUN mkdir -p /app/data
