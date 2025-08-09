@@ -13,6 +13,7 @@ import (
 	"github.com/Daniel-moen/CarverJobs-Mono/backend/internal/scraper"
 	"github.com/Daniel-moen/CarverJobs-Mono/backend/internal/services"
 	"github.com/golang-migrate/migrate/v4"
+	migrateDatabase "github.com/golang-migrate/migrate/v4/database"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -61,7 +62,7 @@ func NewEcho() *echo.Echo {
 func RunMigrations(lc fx.Lifecycle, db *database.DB, config database.Config) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			var driver migrate.DatabaseDriver
+			var driver migrateDatabase.Driver
 			var err error
 			var driverName string
 
