@@ -105,7 +105,7 @@ func (s *YachtScraperService) ScrapeYachtJobs() error {
 	}
 
 	log.Println("🚀 Starting Yacht Job Scraper System")
-	log.Println("=" * 50)
+	log.Println("====================================================")
 
 	// Scrape Facebook groups
 	facebookPosts, err := s.scrapeFacebookGroups()
