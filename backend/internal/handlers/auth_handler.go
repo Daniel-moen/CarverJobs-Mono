@@ -80,4 +80,33 @@ func (h *AuthHandler) GetProfile(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, user)
+}
+
+// UpdateProfile updates the current user's profile
+func (h *AuthHandler) UpdateProfile(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
+	var req models.UpdateUserProfileRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	err := h.userService.UpdateUserProfile(userID, req)
+	if err != nil {
+		if err.Error() == "no fields to update" {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update profile")
+	}
+
+	// Return updated user profile
+	user, err := h.userService.GetUserByID(userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to retrieve updated profile")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "profile updated successfully",
+		"user":    user,
+	})
 } 

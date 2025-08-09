@@ -129,6 +129,7 @@ func SetupRoutes(
 			protected := api.Group("")
 			protected.Use(auth.JWTMiddleware(jwtService))
 			protected.GET("/auth/profile", authHandler.GetProfile)
+			protected.PUT("/auth/profile", authHandler.UpdateProfile)
 
 			// Admin routes
 			admin := api.Group("/admin")
