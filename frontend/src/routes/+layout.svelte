@@ -1,4 +1,4 @@
-<script lang="ts">
+<script>
   import '../app.css';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
@@ -6,7 +6,7 @@
   
   let isMenuOpen = false;
   let isAuthenticated = false;
-  let user: any = null;
+  let user = null;
   
   function logout() {
     isAuthenticated = false;

@@ -1,4 +1,4 @@
-<script lang="ts">
+<script>
   import { goto } from '$app/navigation';
   import { Search, MapPin, Clock, Users, TrendingUp, Anchor, Ship, Compass } from 'lucide-svelte';
   

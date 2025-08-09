@@ -1,4 +1,4 @@
-<script lang="ts">
+<script>
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { Search, Filter, MapPin, Clock, DollarSign, Ship, Users, Building } from 'lucide-svelte';
@@ -103,7 +103,7 @@
     goto(`/jobs?${params.toString()}`);
   }
   
-  function getJobTypeBadge(type: string) {
+  function getJobTypeBadge(type) {
     const badges = {
       deck: 'badge-deck',
       engine: 'badge-engine', 
@@ -113,7 +113,7 @@
     return badges[type] || 'badge-crew';
   }
   
-  function formatDate(dateString: string) {
+  function formatDate(dateString) {
     const date = new Date(dateString);
     const now = new Date();
     const diffTime = Math.abs(now.getTime() - date.getTime());
