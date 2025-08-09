@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -118,15 +119,38 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 	var jobs []models.Job
 	for rows.Next() {
 		var job models.Job
+		var vessel, duration, salary, description, requirements, sourceURL sql.NullString
+		
 		err := rows.Scan(
 			&job.ID, &job.Title, &job.Company, &job.Location, &job.Type,
-			&job.Vessel, &job.Duration, &job.Salary, &job.Description,
-			&job.Requirements, &job.SourceURL, &job.Source, &job.PostedAt,
+			&vessel, &duration, &salary, &description,
+			&requirements, &sourceURL, &job.Source, &job.PostedAt,
 			&job.ScrapedAt, &job.CreatedAt, &job.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan job: %w", err)
 		}
+		
+		// Handle NULL values
+		if vessel.Valid {
+			job.Vessel = vessel.String
+		}
+		if duration.Valid {
+			job.Duration = duration.String
+		}
+		if salary.Valid {
+			job.Salary = salary.String
+		}
+		if description.Valid {
+			job.Description = description.String
+		}
+		if requirements.Valid {
+			job.Requirements = requirements.String
+		}
+		if sourceURL.Valid {
+			job.SourceURL = sourceURL.String
+		}
+		
 		jobs = append(jobs, job)
 	}
 
@@ -199,14 +223,37 @@ func (s *JobService) GetJobByID(jobID string) (*models.Job, error) {
 		`
 	}
 	
+	var vessel, duration, salary, description, requirements, sourceURL sql.NullString
+	
 	err := s.db.QueryRow(query, jobID).Scan(
 		&job.ID, &job.Title, &job.Company, &job.Location, &job.Type,
-		&job.Vessel, &job.Duration, &job.Salary, &job.Description,
-		&job.Requirements, &job.SourceURL, &job.Source, &job.PostedAt,
+		&vessel, &duration, &salary, &description,
+		&requirements, &sourceURL, &job.Source, &job.PostedAt,
 		&job.ScrapedAt, &job.CreatedAt, &job.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get job: %w", err)
 	}
+	
+	// Handle NULL values
+	if vessel.Valid {
+		job.Vessel = vessel.String
+	}
+	if duration.Valid {
+		job.Duration = duration.String
+	}
+	if salary.Valid {
+		job.Salary = salary.String
+	}
+	if description.Valid {
+		job.Description = description.String
+	}
+	if requirements.Valid {
+		job.Requirements = requirements.String
+	}
+	if sourceURL.Valid {
+		job.SourceURL = sourceURL.String
+	}
+	
 	return job, nil
 } 
