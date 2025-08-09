@@ -1,31 +1,144 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  * {
+    @apply border-dark-700;
+  }
+  
   html {
+    @apply dark bg-dark-950 text-dark-50;
     font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    @apply bg-dark-950 text-dark-50 antialiased;
   }
 }
 
 @layer components {
+  /* Buttons */
   .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-colors;
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200 border;
   }
   
   .btn-primary {
-    @apply bg-marine-600 text-white hover:bg-marine-700;
+    @apply bg-marine-600 hover:bg-marine-500 text-white border-marine-600 hover:border-marine-500;
+    @apply shadow-lg hover:shadow-marine-500/25;
   }
   
   .btn-secondary {
-    @apply bg-gray-200 text-gray-900 hover:bg-gray-300;
+    @apply bg-dark-800 hover:bg-dark-700 text-dark-100 border-dark-700 hover:border-dark-600;
   }
   
+  .btn-ghost {
+    @apply bg-transparent hover:bg-dark-800 text-dark-300 hover:text-dark-100 border-dark-700 hover:border-dark-600;
+  }
+  
+  .btn-outline {
+    @apply bg-transparent hover:bg-marine-600 text-marine-400 hover:text-white border-marine-600;
+  }
+
+  /* Cards */
   .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+    @apply bg-dark-900 rounded-xl border border-dark-700 p-6 transition-all duration-200;
+    @apply hover:border-dark-600 hover:shadow-lg hover:shadow-dark-950/50;
   }
   
+  .card-hover {
+    @apply hover:bg-dark-800 hover:border-marine-700 hover:shadow-marine-500/10;
+  }
+
+  /* Inputs */
   .input {
-    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-marine-500 focus:border-marine-500;
+    @apply w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg text-dark-100 placeholder-dark-400;
+    @apply focus:ring-2 focus:ring-marine-500 focus:border-marine-500 focus:outline-none;
+    @apply transition-all duration-200;
+  }
+  
+  .input:focus {
+    @apply bg-dark-800;
+  }
+
+  /* Navigation */
+  .nav-link {
+    @apply text-dark-300 hover:text-marine-400 transition-colors duration-200 font-medium;
+  }
+  
+  .nav-link-active {
+    @apply text-marine-400;
+  }
+
+  /* Job Type Badges */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border;
+  }
+  
+  .badge-deck {
+    @apply bg-blue-500/10 text-blue-400 border-blue-500/20;
+  }
+  
+  .badge-engine {
+    @apply bg-orange-500/10 text-orange-400 border-orange-500/20;
+  }
+  
+  .badge-interior {
+    @apply bg-purple-500/10 text-purple-400 border-purple-500/20;
+  }
+  
+  .badge-crew {
+    @apply bg-gray-500/10 text-gray-400 border-gray-500/20;
+  }
+
+  /* Glassmorphism effects */
+  .glass {
+    @apply bg-dark-900/80 backdrop-blur-sm border border-dark-700/50;
+  }
+  
+  .glass-nav {
+    @apply bg-dark-950/95 backdrop-blur-md border-b border-dark-800/50;
+  }
+
+  /* Minimal scrollbar */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-dark-800;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-dark-600 rounded-full;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-dark-500;
+  }
+
+  /* Loading animations */
+  .loading-skeleton {
+    @apply bg-dark-800 animate-pulse rounded;
+  }
+  
+  .loading-dot {
+    @apply w-2 h-2 bg-marine-500 rounded-full animate-pulse;
+  }
+
+  /* Focus states */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-marine-500 focus:ring-offset-2 focus:ring-offset-dark-950;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-marine-400 to-marine-600 bg-clip-text text-transparent;
+  }
+  
+  .border-gradient {
+    @apply border border-transparent bg-gradient-to-r from-marine-500 to-marine-700 bg-clip-border;
   }
 } 
