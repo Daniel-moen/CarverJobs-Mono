@@ -9,29 +9,62 @@ import (
 )
 
 type JobService struct {
-	db *database.DB
+	db     *database.DB
+	driver string
 }
 
 func NewJobService(db *database.DB) *JobService {
-	return &JobService{db: db}
+	// Get driver from the database instance
+	driver := "sqlite3" // default fallback
+	if db != nil {
+		driver = db.GetDriver()
+	}
+	return &JobService{
+		db:     db,
+		driver: driver,
+	}
 }
 
-func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, error) {
-	// Build dynamic query
+// getPlaceholder returns the appropriate placeholder for the database driver
+func (s *JobService) getPlaceholder(index int) string {
+	if s.driver == "postgres" {
+		return fmt.Sprintf("$%d", index)
+	}
+	return "?"
+}
+
+// buildWhereClause builds the WHERE clause with appropriate placeholders
+func (s *JobService) buildWhereClause(filter models.JobFilter) (string, []interface{}) {
 	whereClause := []string{}
 	args := []interface{}{}
+	argIndex := 1
 
 	if filter.Type != "" {
-		whereClause = append(whereClause, "type LIKE ?")
+		if s.driver == "postgres" {
+			whereClause = append(whereClause, fmt.Sprintf("type ILIKE %s", s.getPlaceholder(argIndex)))
+		} else {
+			whereClause = append(whereClause, fmt.Sprintf("type LIKE %s", s.getPlaceholder(argIndex)))
+		}
 		args = append(args, "%"+filter.Type+"%")
+		argIndex++
 	}
 	if filter.Location != "" {
-		whereClause = append(whereClause, "location LIKE ?")
+		if s.driver == "postgres" {
+			whereClause = append(whereClause, fmt.Sprintf("location ILIKE %s", s.getPlaceholder(argIndex)))
+		} else {
+			whereClause = append(whereClause, fmt.Sprintf("location LIKE %s", s.getPlaceholder(argIndex)))
+		}
 		args = append(args, "%"+filter.Location+"%")
+		argIndex++
 	}
 	if filter.Company != "" {
-		whereClause = append(whereClause, "company LIKE ?")
+		if s.driver == "postgres" {
+			whereClause = append(whereClause, fmt.Sprintf("company ILIKE %s", s.getPlaceholder(argIndex)))
+		} else {
+			whereClause = append(whereClause, fmt.Sprintf("company LIKE %s", s.getPlaceholder(argIndex)))
+		}
 		args = append(args, "%"+filter.Company+"%")
+		argIndex++
 	}
 
 	where := ""
@@ -39,6 +72,10 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 		where = "WHERE " + strings.Join(whereClause, " AND ")
 	}
 
+	return where, args
+}
+
+func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, error) {
 	// Set default pagination
 	if filter.Limit <= 0 || filter.Limit > 100 {
 		filter.Limit = 20
@@ -47,6 +84,9 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 		filter.Offset = 0
 	}
 
+	// Build WHERE clause
+	where, args := s.buildWhereClause(filter)
+	
 	// Get total count
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM jobs %s", where)
 	var total int
@@ -55,15 +95,18 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 		return nil, fmt.Errorf("failed to get job count: %w", err)
 	}
 
-	// Get jobs
+	// Build main query with proper placeholders
+	limitPlaceholder := s.getPlaceholder(len(args) + 1)
+	offsetPlaceholder := s.getPlaceholder(len(args) + 2)
+	
 	query := fmt.Sprintf(`
 		SELECT id, title, company, location, type, vessel, duration, salary, 
 		       description, requirements, source_url, source, posted_at, 
 		       scraped_at, created_at, updated_at
 		FROM jobs %s
 		ORDER BY posted_at DESC, created_at DESC
-		LIMIT ? OFFSET ?
-	`, where)
+		LIMIT %s OFFSET %s
+	`, where, limitPlaceholder, offsetPlaceholder)
 
 	args = append(args, filter.Limit, filter.Offset)
 	rows, err := s.db.Query(query, args...)
@@ -101,19 +144,35 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 }
 
 func (s *JobService) CreateJob(job *models.Job) error {
-	query := `
-		INSERT INTO jobs (
-			id, title, company, location, type, vessel, duration, salary,
-			description, requirements, source_url, source, posted_at,
-			scraped_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-	_, err := s.db.Exec(
-		query, job.ID, job.Title, job.Company, job.Location, job.Type,
+	var query string
+	var args []interface{}
+	
+	if s.driver == "postgres" {
+		query = `
+			INSERT INTO jobs (
+				id, title, company, location, type, vessel, duration, salary,
+				description, requirements, source_url, source, posted_at,
+				scraped_at, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		`
+	} else {
+		query = `
+			INSERT INTO jobs (
+				id, title, company, location, type, vessel, duration, salary,
+				description, requirements, source_url, source, posted_at,
+				scraped_at, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`
+	}
+	
+	args = []interface{}{
+		job.ID, job.Title, job.Company, job.Location, job.Type,
 		job.Vessel, job.Duration, job.Salary, job.Description,
 		job.Requirements, job.SourceURL, job.Source, job.PostedAt,
 		job.ScrapedAt, job.CreatedAt, job.UpdatedAt,
-	)
+	}
+	
+	_, err := s.db.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to create job: %w", err)
 	}
@@ -122,12 +181,24 @@ func (s *JobService) CreateJob(job *models.Job) error {
 
 func (s *JobService) GetJobByID(jobID string) (*models.Job, error) {
 	job := &models.Job{}
-	query := `
-		SELECT id, title, company, location, type, vessel, duration, salary,
-		       description, requirements, source_url, source, posted_at,
-		       scraped_at, created_at, updated_at
-		FROM jobs WHERE id = ?
-	`
+	var query string
+	
+	if s.driver == "postgres" {
+		query = `
+			SELECT id, title, company, location, type, vessel, duration, salary,
+			       description, requirements, source_url, source, posted_at,
+			       scraped_at, created_at, updated_at
+			FROM jobs WHERE id = $1
+		`
+	} else {
+		query = `
+			SELECT id, title, company, location, type, vessel, duration, salary,
+			       description, requirements, source_url, source, posted_at,
+			       scraped_at, created_at, updated_at
+			FROM jobs WHERE id = ?
+		`
+	}
+	
 	err := s.db.QueryRow(query, jobID).Scan(
 		&job.ID, &job.Title, &job.Company, &job.Location, &job.Type,
 		&job.Vessel, &job.Duration, &job.Salary, &job.Description,

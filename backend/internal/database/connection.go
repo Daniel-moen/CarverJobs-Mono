@@ -18,6 +18,7 @@ type Config struct {
 
 type DB struct {
 	*sql.DB
+	driver string
 }
 
 func NewConfig() Config {
@@ -115,7 +116,15 @@ func NewDB(config Config) (*DB, error) {
 	}
 
 	fmt.Printf("Successfully connected to %s database\n", config.Driver)
-	return &DB{db}, nil
+	return &DB{
+		DB:     db,
+		driver: config.Driver,
+	}, nil
+}
+
+// GetDriver returns the database driver type
+func (db *DB) GetDriver() string {
+	return db.driver
 }
 
 // Close closes the database connection
