@@ -1,0 +1,34 @@
+{
+  "name": "carverjobs-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite dev",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-auto": "^2.0.0",
+    "@sveltejs/kit": "^1.20.4",
+    "@tailwindcss/typography": "^0.5.10",
+    "@types/node": "^20.5.1",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.24",
+    "svelte": "^4.0.5",
+    "svelte-check": "^3.4.3",
+    "tailwindcss": "^3.3.0",
+    "tslib": "^2.4.1",
+    "typescript": "^5.0.0",
+    "vite": "^4.4.2"
+  },
+  "dependencies": {
+    "@trpc/client": "^10.45.0",
+    "@trpc/server": "^10.45.0",
+    "trpc-svelte-query": "^1.5.0",
+    "@tanstack/svelte-query": "^4.36.1",
+    "zod": "^3.22.4"
+  },
+  "type": "module"
+} 
