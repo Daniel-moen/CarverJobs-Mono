@@ -31,7 +31,7 @@ func main() {
 			services.NewJobService,
 			handlers.NewAuthHandler,
 			handlers.NewJobHandler,
-			scraper.NewScraperService,
+			scraper.NewYachtScraperService,
 			NewEcho,
 		),
 		// Register lifecycle hooks
@@ -143,15 +143,15 @@ func SetupRoutes(
 	})
 }
 
-// StartScraper starts the job scraping service
-func StartScraper(lc fx.Lifecycle, scraperService *scraper.ScraperService) {
+// StartScraper starts the yacht job scraping service
+func StartScraper(lc fx.Lifecycle, scraperService *scraper.YachtScraperService) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			// Start scraper in background
 			go func() {
 				// Run immediately on startup
-				if err := scraperService.ScrapeJobs(); err != nil {
-					fmt.Printf("Initial scraping failed: %v\n", err)
+				if err := scraperService.ScrapeYachtJobs(); err != nil {
+					fmt.Printf("Initial yacht scraping failed: %v\n", err)
 				}
 
 				// Then run every 6 hours
@@ -161,8 +161,8 @@ func StartScraper(lc fx.Lifecycle, scraperService *scraper.ScraperService) {
 				for {
 					select {
 					case <-ticker.C:
-						if err := scraperService.ScrapeJobs(); err != nil {
-							fmt.Printf("Scheduled scraping failed: %v\n", err)
+						if err := scraperService.ScrapeYachtJobs(); err != nil {
+							fmt.Printf("Scheduled yacht scraping failed: %v\n", err)
 						}
 					case <-ctx.Done():
 						return
@@ -170,7 +170,7 @@ func StartScraper(lc fx.Lifecycle, scraperService *scraper.ScraperService) {
 				}
 			}()
 
-			fmt.Println("Job scraper started - running every 6 hours")
+			fmt.Println("Yacht job scraper started - running every 6 hours")
 			return nil
 		},
 	})
