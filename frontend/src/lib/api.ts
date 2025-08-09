@@ -32,10 +32,18 @@ async function apiRequest(endpoint: string, options: ApiRequestOptions = {}): Pr
 
   try {
     const response = await fetch(url, mergedOptions);
-    const data = await response.json();
+    
+    // Handle cases where response is not JSON
+    let data;
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      data = { message: await response.text() };
+    }
 
     if (!response.ok) {
-      throw new ApiError(data.message || 'Request failed', response.status, data);
+      throw new ApiError(data.message || `Request failed with status ${response.status}`, response.status, data);
     }
 
     return data;
@@ -43,7 +51,13 @@ async function apiRequest(endpoint: string, options: ApiRequestOptions = {}): Pr
     if (error instanceof ApiError) {
       throw error;
     }
-    throw new ApiError('Network error', 0, null);
+    
+    // Network or other errors
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw new ApiError('Network error - please check your connection', 0, null);
+    }
+    
+    throw new ApiError('An unexpected error occurred', 0, null);
   }
 }
 
@@ -100,7 +114,20 @@ export const api = {
     const query = params.toString();
     const endpoint = query ? `/jobs?${query}` : '/jobs';
     
-    return apiRequest(endpoint);
+    const response = await apiRequest(endpoint);
+    
+    // Handle case where backend returns error message instead of expected format
+    if (response && typeof response === 'object' && 'message' in response && !('jobs' in response)) {
+      throw new ApiError(response.message, 500, response);
+    }
+    
+    // Ensure response has expected structure
+    return {
+      jobs: response?.jobs || [],
+      total: response?.total || 0,
+      page: response?.page || 1,
+      limit: response?.limit || 10
+    };
   },
 
   async getJobById(id: string) {

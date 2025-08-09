@@ -4,8 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Daniel-moen/CarverJobs-Mono/backend/internal/auth"
@@ -215,32 +217,15 @@ func SetupRoutes(
 
 // StartScraper starts the yacht job scraping service
 func StartScraper(lc fx.Lifecycle, scraperService *scraper.YachtScraperService) {
+	scraperEnabled, _ := strconv.ParseBool(os.Getenv("SCRAPER_ENABLED"))
+	if !scraperEnabled {
+		log.Println("Scraper is disabled by environment variable.")
+		return
+	}
+
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			// Start scraper in background
-			go func() {
-				// Run immediately on startup
-				if err := scraperService.ScrapeYachtJobs(); err != nil {
-					fmt.Printf("Initial yacht scraping failed: %v\n", err)
-				}
-
-				// Then run every 6 hours
-				ticker := time.NewTicker(6 * time.Hour)
-				defer ticker.Stop()
-
-				for {
-					select {
-					case <-ticker.C:
-						if err := scraperService.ScrapeYachtJobs(); err != nil {
-							fmt.Printf("Scheduled yacht scraping failed: %v\n", err)
-						}
-					case <-ctx.Done():
-						return
-					}
-				}
-			}()
-
-			fmt.Println("Yacht job scraper started - running every 6 hours")
+			go scraperService.ScrapeYachtJobs()
 			return nil
 		},
 	})

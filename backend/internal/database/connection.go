@@ -19,8 +19,12 @@ type DB struct {
 }
 
 func NewConfig() Config {
-	// Check if DATABASE_URL is set (PostgreSQL)
-	databaseURL := os.Getenv("DATABASE_URL")
+	// Check if DATABASE_PUBLIC_URL is set (Railway's public database URL)
+	databaseURL := os.Getenv("DATABASE_PUBLIC_URL")
+	if databaseURL == "" {
+		// Fallback to DATABASE_URL for backwards compatibility
+		databaseURL = os.Getenv("DATABASE_URL")
+	}
 	driver := os.Getenv("DB_DRIVER")
 
 	// Default to SQLite if no DATABASE_URL is provided
