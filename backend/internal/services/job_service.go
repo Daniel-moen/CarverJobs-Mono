@@ -119,19 +119,32 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 	var jobs []models.Job
 	for rows.Next() {
 		var job models.Job
-		var vessel, duration, salary, description, requirements, sourceURL, source sql.NullString
+		var title, company, location, jobType, vessel, duration, salary, description, requirements, sourceURL, source sql.NullString
+		var postedAt, scrapedAt, createdAt, updatedAt sql.NullTime
 		
 		err := rows.Scan(
-			&job.ID, &job.Title, &job.Company, &job.Location, &job.Type,
+			&job.ID, &title, &company, &location, &jobType,
 			&vessel, &duration, &salary, &description,
-			&requirements, &sourceURL, &source, &job.PostedAt,
-			&job.ScrapedAt, &job.CreatedAt, &job.UpdatedAt,
+			&requirements, &sourceURL, &source, &postedAt,
+			&scrapedAt, &createdAt, &updatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan job: %w", err)
 		}
 		
-		// Handle NULL values
+		// Handle NULL values for all string fields
+		if title.Valid {
+			job.Title = title.String
+		}
+		if company.Valid {
+			job.Company = company.String
+		}
+		if location.Valid {
+			job.Location = location.String
+		}
+		if jobType.Valid {
+			job.Type = jobType.String
+		}
 		if vessel.Valid {
 			job.Vessel = vessel.String
 		}
@@ -152,6 +165,20 @@ func (s *JobService) GetJobs(filter models.JobFilter) (*models.JobResponse, erro
 		}
 		if source.Valid {
 			job.Source = source.String
+		}
+		
+		// Handle NULL values for time fields
+		if postedAt.Valid {
+			job.PostedAt = postedAt.Time
+		}
+		if scrapedAt.Valid {
+			job.ScrapedAt = scrapedAt.Time
+		}
+		if createdAt.Valid {
+			job.CreatedAt = createdAt.Time
+		}
+		if updatedAt.Valid {
+			job.UpdatedAt = updatedAt.Time
 		}
 		
 		jobs = append(jobs, job)
@@ -227,12 +254,13 @@ func (s *JobService) GetJobByID(jobID string) (*models.Job, error) {
 	}
 	
 	var vessel, duration, salary, description, requirements, sourceURL, source sql.NullString
+	var postedAt, scrapedAt, createdAt, updatedAt sql.NullTime
 	
 	err := s.db.QueryRow(query, jobID).Scan(
 		&job.ID, &job.Title, &job.Company, &job.Location, &job.Type,
 		&vessel, &duration, &salary, &description,
-		&requirements, &sourceURL, &source, &job.PostedAt,
-		&job.ScrapedAt, &job.CreatedAt, &job.UpdatedAt,
+		&requirements, &sourceURL, &source, &postedAt,
+		&scrapedAt, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get job: %w", err)
@@ -259,6 +287,20 @@ func (s *JobService) GetJobByID(jobID string) (*models.Job, error) {
 	}
 	if source.Valid {
 		job.Source = source.String
+	}
+	
+	// Handle NULL values for time fields
+	if postedAt.Valid {
+		job.PostedAt = postedAt.Time
+	}
+	if scrapedAt.Valid {
+		job.ScrapedAt = scrapedAt.Time
+	}
+	if createdAt.Valid {
+		job.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		job.UpdatedAt = updatedAt.Time
 	}
 	
 	return job, nil
