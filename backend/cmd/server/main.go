@@ -206,11 +206,13 @@ func SetupRoutes(
 			admin.Use(auth.RequireRole("admin"))
 			admin.POST("/jobs", jobHandler.CreateJob)
 
-			// Serve static frontend files at root path
-			e.Static("/", "frontend/build")
+			// Serve static frontend files at root path (must be after API routes)
+			e.Static("/", "../frontend/build")
 			
-			// Fallback to index.html for SPA routing
-			e.File("/*", "frontend/build/index.html")
+			// Catch-all route for SPA routing (must be last)
+			e.GET("/*", func(c echo.Context) error {
+				return c.File("../frontend/build/index.html")
+			})
 
 			// Start server
 			port := os.Getenv("PORT")
