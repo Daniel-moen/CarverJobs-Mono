@@ -16,7 +16,7 @@ Authorization: Bearer <your-jwt-token>
 ### Authentication
 
 #### Register User
-- **POST** `/api/v1/auth/register`
+- **POST** `/api/auth/register`
 - Body:
 ```json
 {
@@ -29,7 +29,7 @@ Authorization: Bearer <your-jwt-token>
 - Response: `201 Created` with user data
 
 #### Login
-- **POST** `/api/v1/auth/login`
+- **POST** `/api/auth/login`
 - Body:
 ```json
 {
@@ -40,14 +40,14 @@ Authorization: Bearer <your-jwt-token>
 - Response: `200 OK` with JWT token and user data
 
 #### Get Profile (Protected)
-- **GET** `/api/v1/auth/profile`
+- **GET** `/api/auth/profile`
 - Requires: Bearer token
 - Response: User profile data
 
 ### Jobs
 
 #### Get Jobs (Public)
-- **GET** `/api/v1/jobs`
+- **GET** `/api/jobs`
 - Query parameters:
   - `type`: Filter by job type (deck, engine, catering, etc.)
   - `location`: Filter by location
@@ -66,11 +66,11 @@ Authorization: Bearer <your-jwt-token>
 ```
 
 #### Get Job by ID (Public)
-- **GET** `/api/v1/jobs/:id`
+- **GET** `/api/jobs/:id`
 - Response: Single job object
 
 #### Create Job (Admin Only)
-- **POST** `/api/v1/admin/jobs`
+- **POST** `/api/admin/jobs`
 - Requires: Bearer token with admin role
 - Body: Job object
 

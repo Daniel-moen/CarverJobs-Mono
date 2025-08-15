@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://carverjobs-mono-production.up.railway.app/api/v1';
+const API_BASE_URL = '/api';
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public data: any) {
@@ -136,7 +136,7 @@ export const api = {
 
   // Health check
   async healthCheck() {
-    const response = await fetch('https://carverjobs-mono-production.up.railway.app/health');
+    const response = await fetch('/health');
     return response.json();
   },
 }; 

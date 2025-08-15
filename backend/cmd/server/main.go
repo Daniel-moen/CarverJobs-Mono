@@ -186,7 +186,7 @@ func SetupRoutes(
 			})
 
 			// API routes
-			api := e.Group("/api/v1")
+			api := e.Group("/api")
 
 			// Public routes
 			api.POST("/auth/register", authHandler.RegisterUser)
@@ -205,6 +205,12 @@ func SetupRoutes(
 			admin.Use(auth.JWTMiddleware(jwtService))
 			admin.Use(auth.RequireRole("admin"))
 			admin.POST("/jobs", jobHandler.CreateJob)
+
+			// Serve static frontend files at root path
+			e.Static("/", "frontend/build")
+			
+			// Fallback to index.html for SPA routing
+			e.File("/*", "frontend/build/index.html")
 
 			// Start server
 			port := os.Getenv("PORT")

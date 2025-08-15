@@ -1,0 +1,39 @@
+# Railway deployment - Frontend served by Vite on port 5173
+FROM node:18-alpine
+
+# Install Go and build dependencies
+RUN apk add --no-cache go git gcc musl-dev postgresql-client
+
+# Set Go environment
+ENV GOPATH=/go
+ENV PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
+
+WORKDIR /app
+
+# Copy package files first for better caching
+COPY frontend/package*.json ./frontend/
+COPY backend/go.mod backend/go.sum ./backend/
+
+# Install dependencies
+RUN cd frontend && npm ci
+RUN cd backend && go mod download
+
+# Copy source code
+COPY frontend/ ./frontend/
+COPY backend/ ./backend/
+
+# Build frontend for production
+RUN cd frontend && npm run build
+
+# Build backend binary
+RUN cd backend && CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o main cmd/server/main.go
+
+# Environment variables for Railway
+ENV NODE_ENV=production
+ENV PORT=8080
+
+# Expose port 8080 (Railway will map this)
+EXPOSE 8080
+
+# Start the backend server (which serves frontend at / and API at /api)
+CMD ["./backend/main"] 

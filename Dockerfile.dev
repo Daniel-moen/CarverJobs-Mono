@@ -1,0 +1,40 @@
+# Development Docker setup for frontend and backend
+FROM node:18-alpine
+
+# Install Go
+RUN apk add --no-cache go git gcc musl-dev sqlite-dev postgresql-client
+
+# Set Go environment
+ENV GOPATH=/go
+ENV PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
+
+WORKDIR /app
+
+# Copy package files
+COPY frontend/package*.json ./frontend/
+COPY backend/go.mod backend/go.sum ./backend/
+
+# Install dependencies
+RUN cd frontend && npm ci
+RUN cd backend && go mod download
+
+# Copy source code
+COPY frontend/ ./frontend/
+COPY backend/ ./backend/
+
+# Expose ports
+EXPOSE 5173 8080
+
+# Environment variables
+ENV DATABASE_URL="postgresql://postgres:waIsiKtBzzncSxrWQbNnntXnTYmmKhpm@turntable.proxy.rlwy.net:45661/railway"
+ENV PORT=8080
+
+# Create startup script
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'echo "Starting backend server..."' >> /app/start.sh && \
+    echo 'cd /app/backend && go run cmd/server/main.go &' >> /app/start.sh && \
+    echo 'echo "Starting frontend server..."' >> /app/start.sh && \
+    echo 'cd /app/frontend && npm run dev -- --host 0.0.0.0 --port 5173' >> /app/start.sh && \
+    chmod +x /app/start.sh
+
+CMD ["/app/start.sh"] 
