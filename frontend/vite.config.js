@@ -4,12 +4,13 @@ import { defineConfig } from 'vite';
 export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
-		port: 3000,
+		port: 5173,
 		proxy: {
 			'/api': {
-				target: 'http://localhost:8080',
-				changeOrigin: true
+				target: 'https://carverjobs-mono-production.up.railway.app',
+				changeOrigin: true,
+				secure: true
 			}
 		}
 	}
-}); 
+});

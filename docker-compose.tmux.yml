@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.tmux
+    ports:
+      - "5173:5173"  # Svelte dev server
+      - "8080:8080"  # Go API server
+    volumes:
+      # Mount source code for hot reloading
+      - ./frontend:/app/frontend
+      - ./backend:/app/backend
+      # Preserve node_modules in container
+      - /app/frontend/node_modules
+    environment:
+      # Frontend environment
+      - VITE_API_URL=http://localhost:8080
+      # Backend environment  
+      - DATABASE_URL=postgresql://postgres:waIsiKtBzzncSxrWQbNnntXnTYmmKhpm@turntable.proxy.rlwy.net:45661/railway
+      - PORT=8080
+    tty: true
+    stdin_open: true
+    # Use init to handle signals properly
+    init: true
+    container_name: carverjobs-dev
