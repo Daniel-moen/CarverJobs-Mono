@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Daniel-moen/CarverJobs-Mono/backend/internal/auth"
@@ -290,11 +291,23 @@ func SetupRoutes(
 			} else {
 				fmt.Printf("Serving frontend static files from: %s\n", frontendBuildPath)
 				
-				// Serve static frontend files at root path (must be after API routes)
-				e.Static("/", frontendBuildPath)
+				// Serve static assets (JS, CSS, images, etc.) - must be before catch-all
+				e.Static("/_app", filepath.Join(frontendBuildPath, "_app"))
+				e.Static("/favicon.png", filepath.Join(frontendBuildPath, "favicon.png"))
+				e.Static("/favicon.ico", filepath.Join(frontendBuildPath, "favicon.ico"))
 				
-				// Catch-all route for SPA routing (must be last)
+				// Serve index.html for root path
+				e.GET("/", func(c echo.Context) error {
+					return c.File(filepath.Join(frontendBuildPath, "index.html"))
+				})
+				
+				// Catch-all route for SPA routing (must be last) - only for non-asset paths
 				e.GET("/*", func(c echo.Context) error {
+					path := c.Request().URL.Path
+					// Don't intercept requests for assets or API calls
+					if strings.HasPrefix(path, "/_app/") || strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") {
+						return echo.NewHTTPError(http.StatusNotFound)
+					}
 					return c.File(filepath.Join(frontendBuildPath, "index.html"))
 				})
 			}
