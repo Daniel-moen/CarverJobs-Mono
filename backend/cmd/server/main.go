@@ -282,32 +282,6 @@ func SetupRoutes(
 			admin.Use(auth.RequireRole("admin"))
 			admin.POST("/jobs", jobHandler.CreateJob)
 
-			// Get frontend build path dynamically
-			frontendBuildPath, err := getFrontendBuildPath()
-			if err != nil {
-				fmt.Printf("Warning: Frontend build directory not found: %v\n", err)
-				fmt.Printf("Frontend static files will not be served\n")
-			} else {
-				fmt.Printf("Serving frontend static files from: %s\n", frontendBuildPath)
-				
-				// Serve static files for the frontend
-				staticServer := http.FileServer(http.Dir(frontendBuildPath))
-				e.GET("/*", echo.WrapHandler(http.StripPrefix("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					// Let the static file server attempt to serve the file.
-					// If the file doesn't exist, it will write a 404, which we can intercept.
-					filePath := filepath.Join(frontendBuildPath, r.URL.Path)
-					_, err := os.Stat(filePath)
-
-					// For any path that is not a file, serve index.html for SPA routing.
-					if os.IsNotExist(err) {
-						http.ServeFile(w, r, filepath.Join(frontendBuildPath, "index.html"))
-						return
-					}
-
-					// Otherwise, serve the existing file.
-					staticServer.ServeHTTP(w, r)
-				}))))
-			}
 
 			// Start server
 			port := os.Getenv("PORT")
