@@ -26,7 +26,11 @@ COPY backend/ ./backend/
 RUN cd frontend && npm run build
 
 # Build backend binary
-RUN cd backend && CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
+WORKDIR /app/backend
+RUN CGO_ENABLED=1 GOOS=linux go build -v -a -installsuffix cgo -o main ./cmd/server
+
+# Reset workdir to /app for the CMD instruction
+WORKDIR /app
 
 # Environment variables for Railway
 ENV NODE_ENV=production
