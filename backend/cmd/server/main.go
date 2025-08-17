@@ -291,30 +291,46 @@ func SetupRoutes(
 			} else {
 				fmt.Printf("Serving frontend static files from: %s\n", frontendBuildPath)
 				
-				// Serve static files with a custom middleware to handle SPA routing
-				fs := echo.MustSubFS(os.DirFS(frontendBuildPath), ".")
-				e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-					return func(c echo.Context) error {
-						path := c.Request().URL.Path
+				// Serve static files with custom SPA routing and proper MIME types
+				e.GET("/*", func(c echo.Context) error {
+					path := c.Request().URL.Path
 
-						// Skip middleware for API and health check routes
-						if strings.HasPrefix(path, "/api/") || path == "/health" {
-							return next(c)
-						}
-
-						// Attempt to serve a static file
-						_, err := fs.Open(path[1:]) // path[1:] to remove leading '/'
-						if err == nil {
-							return next(c) // Let the default static handler do its job
-						}
-
-						// If the file is not found, serve index.html for SPA routing
-						return c.File(filepath.Join(frontendBuildPath, "index.html"))
+					// Clean the path and build file path
+					if path == "/" {
+						path = "/index.html"
 					}
-				})
+					filePath := filepath.Join(frontendBuildPath, path)
 
-				// The static middleware MUST be defined after the custom middleware
-				e.Static("/", frontendBuildPath)
+					// Check if file exists
+					if _, err := os.Stat(filePath); err == nil {
+						// Set appropriate MIME type based on file extension
+						switch filepath.Ext(path) {
+						case ".js":
+							c.Response().Header().Set("Content-Type", "application/javascript")
+						case ".css":
+							c.Response().Header().Set("Content-Type", "text/css")
+						case ".html":
+							c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
+						case ".json":
+							c.Response().Header().Set("Content-Type", "application/json")
+						case ".png":
+							c.Response().Header().Set("Content-Type", "image/png")
+						case ".jpg", ".jpeg":
+							c.Response().Header().Set("Content-Type", "image/jpeg")
+						case ".svg":
+							c.Response().Header().Set("Content-Type", "image/svg+xml")
+						case ".woff", ".woff2":
+							c.Response().Header().Set("Content-Type", "font/woff2")
+						case ".ico":
+							c.Response().Header().Set("Content-Type", "image/x-icon")
+						}
+						return c.File(filePath)
+					}
+
+					// If file not found, serve index.html for SPA routing
+					c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
+					return c.File(filepath.Join(frontendBuildPath, "index.html"))
+				})
 			}
 
 			// Start server
