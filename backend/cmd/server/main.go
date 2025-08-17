@@ -290,46 +290,23 @@ func SetupRoutes(
 			} else {
 				fmt.Printf("Serving frontend static files from: %s\n", frontendBuildPath)
 				
-				// Serve static files with custom SPA routing and proper MIME types
-				e.GET("/*", func(c echo.Context) error {
-					path := c.Request().URL.Path
+				// Serve static files for the frontend
+				staticServer := http.FileServer(http.Dir(frontendBuildPath))
+				e.GET("/*", echo.WrapHandler(http.StripPrefix("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// Let the static file server attempt to serve the file.
+					// If the file doesn't exist, it will write a 404, which we can intercept.
+					filePath := filepath.Join(frontendBuildPath, r.URL.Path)
+					_, err := os.Stat(filePath)
 
-					// Clean the path and build file path
-					if path == "/" {
-						path = "/index.html"
-					}
-					filePath := filepath.Join(frontendBuildPath, path)
-
-					// Check if file exists
-					if _, err := os.Stat(filePath); err == nil {
-						// Set appropriate MIME type based on file extension
-						switch filepath.Ext(path) {
-						case ".js":
-							c.Response().Header().Set("Content-Type", "application/javascript")
-						case ".css":
-							c.Response().Header().Set("Content-Type", "text/css")
-						case ".html":
-							c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
-						case ".json":
-							c.Response().Header().Set("Content-Type", "application/json")
-						case ".png":
-							c.Response().Header().Set("Content-Type", "image/png")
-						case ".jpg", ".jpeg":
-							c.Response().Header().Set("Content-Type", "image/jpeg")
-						case ".svg":
-							c.Response().Header().Set("Content-Type", "image/svg+xml")
-						case ".woff", ".woff2":
-							c.Response().Header().Set("Content-Type", "font/woff2")
-						case ".ico":
-							c.Response().Header().Set("Content-Type", "image/x-icon")
-						}
-						return c.File(filePath)
+					// For any path that is not a file, serve index.html for SPA routing.
+					if os.IsNotExist(err) {
+						http.ServeFile(w, r, filepath.Join(frontendBuildPath, "index.html"))
+						return
 					}
 
-					// If file not found, serve index.html for SPA routing
-					c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
-					return c.File(filepath.Join(frontendBuildPath, "index.html"))
-				})
+					// Otherwise, serve the existing file.
+					staticServer.ServeHTTP(w, r)
+				}))))
 			}
 
 			// Start server
