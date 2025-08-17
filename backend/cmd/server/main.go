@@ -26,6 +26,36 @@ import (
 	"go.uber.org/fx"
 )
 
+// getFrontendBuildPath returns the correct path to frontend build directory
+// It handles different working directories for local development and Railway deployment
+func getFrontendBuildPath() (string, error) {
+	// First, try to get the current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	// Check if frontend build directory exists relative to current directory (local development)
+	frontendBuildPath := filepath.Join(cwd, "..", "frontend", "build")
+	if _, err := os.Stat(frontendBuildPath); err == nil {
+		return frontendBuildPath, nil
+	}
+
+	// Check if frontend build directory exists in frontend subdirectory (Railway case)
+	railwayBuildPath := filepath.Join(cwd, "frontend", "build")
+	if _, err := os.Stat(railwayBuildPath); err == nil {
+		return railwayBuildPath, nil
+	}
+
+	// Check if frontend build directory exists in parent/frontend directory
+	parentFrontendPath := filepath.Join(filepath.Dir(cwd), "frontend", "build")
+	if _, err := os.Stat(parentFrontendPath); err == nil {
+		return parentFrontendPath, nil
+	}
+
+	return "", fmt.Errorf("frontend build directory not found in any expected location")
+}
+
 // getMigrationsPath returns the correct path to migrations directory
 // It handles different working directories for local development and Railway deployment
 func getMigrationsPath() (string, error) {
@@ -252,13 +282,22 @@ func SetupRoutes(
 			admin.Use(auth.RequireRole("admin"))
 			admin.POST("/jobs", jobHandler.CreateJob)
 
-			// Serve static frontend files at root path (must be after API routes)
-			e.Static("/", "../frontend/build")
-			
-			// Catch-all route for SPA routing (must be last)
-			e.GET("/*", func(c echo.Context) error {
-				return c.File("../frontend/build/index.html")
-			})
+			// Get frontend build path dynamically
+			frontendBuildPath, err := getFrontendBuildPath()
+			if err != nil {
+				fmt.Printf("Warning: Frontend build directory not found: %v\n", err)
+				fmt.Printf("Frontend static files will not be served\n")
+			} else {
+				fmt.Printf("Serving frontend static files from: %s\n", frontendBuildPath)
+				
+				// Serve static frontend files at root path (must be after API routes)
+				e.Static("/", frontendBuildPath)
+				
+				// Catch-all route for SPA routing (must be last)
+				e.GET("/*", func(c echo.Context) error {
+					return c.File(filepath.Join(frontendBuildPath, "index.html"))
+				})
+			}
 
 			// Start server
 			port := os.Getenv("PORT")
