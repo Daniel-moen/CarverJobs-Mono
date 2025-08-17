@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -24,6 +25,36 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"go.uber.org/fx"
 )
+
+// getMigrationsPath returns the correct path to migrations directory
+// It handles different working directories for local development and Railway deployment
+func getMigrationsPath() (string, error) {
+	// First, try to get the current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	// Check if migrations directory exists in current directory
+	migrationsPath := filepath.Join(cwd, "migrations")
+	if _, err := os.Stat(migrationsPath); err == nil {
+		return fmt.Sprintf("file://%s", migrationsPath), nil
+	}
+
+	// Check if migrations directory exists in backend subdirectory (Railway case)
+	backendMigrationsPath := filepath.Join(cwd, "backend", "migrations")
+	if _, err := os.Stat(backendMigrationsPath); err == nil {
+		return fmt.Sprintf("file://%s", backendMigrationsPath), nil
+	}
+
+	// Check if migrations directory exists in parent/backend directory
+	parentBackendPath := filepath.Join(filepath.Dir(cwd), "backend", "migrations")
+	if _, err := os.Stat(parentBackendPath); err == nil {
+		return fmt.Sprintf("file://%s", parentBackendPath), nil
+	}
+
+	return "", fmt.Errorf("migrations directory not found in any expected location")
+}
 
 func main() {
 	// Parse command line flags
@@ -82,8 +113,16 @@ func runMigrationOnly() {
 		os.Exit(1)
 	}
 
+	migrationsPath, err := getMigrationsPath()
+	if err != nil {
+		fmt.Printf("Failed to find migrations directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Using migrations path: %s\n", migrationsPath)
+
 	m, err := migrate.NewWithDatabaseInstance(
-		"file://migrations",
+		migrationsPath,
 		driverName,
 		driver,
 	)
@@ -136,8 +175,15 @@ func RunMigrations(lc fx.Lifecycle, db *database.DB, config database.Config) {
 				return fmt.Errorf("failed to create migration driver: %w", err)
 			}
 
+			migrationsPath, err := getMigrationsPath()
+			if err != nil {
+				return fmt.Errorf("failed to find migrations directory: %w", err)
+			}
+
+			fmt.Printf("Using migrations path: %s\n", migrationsPath)
+
 			m, err := migrate.NewWithDatabaseInstance(
-				"file://migrations",
+				migrationsPath,
 				driverName,
 				driver,
 			)
