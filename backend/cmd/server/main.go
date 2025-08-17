@@ -291,25 +291,30 @@ func SetupRoutes(
 			} else {
 				fmt.Printf("Serving frontend static files from: %s\n", frontendBuildPath)
 				
-				// Serve static assets (JS, CSS, images, etc.) - must be before catch-all
-				e.Static("/_app", filepath.Join(frontendBuildPath, "_app"))
-				e.Static("/favicon.png", filepath.Join(frontendBuildPath, "favicon.png"))
-				e.Static("/favicon.ico", filepath.Join(frontendBuildPath, "favicon.ico"))
-				
-				// Serve index.html for root path
-				e.GET("/", func(c echo.Context) error {
-					return c.File(filepath.Join(frontendBuildPath, "index.html"))
-				})
-				
-				// Catch-all route for SPA routing (must be last) - only for non-asset paths
-				e.GET("/*", func(c echo.Context) error {
-					path := c.Request().URL.Path
-					// Don't intercept requests for assets or API calls
-					if strings.HasPrefix(path, "/_app/") || strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") {
-						return echo.NewHTTPError(http.StatusNotFound)
+				// Serve static files with a custom middleware to handle SPA routing
+				fs := echo.MustSubFS(os.DirFS(frontendBuildPath), ".")
+				e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+					return func(c echo.Context) error {
+						path := c.Request().URL.Path
+
+						// Skip middleware for API and health check routes
+						if strings.HasPrefix(path, "/api/") || path == "/health" {
+							return next(c)
+						}
+
+						// Attempt to serve a static file
+						_, err := fs.Open(path[1:]) // path[1:] to remove leading '/'
+						if err == nil {
+							return next(c) // Let the default static handler do its job
+						}
+
+						// If the file is not found, serve index.html for SPA routing
+						return c.File(filepath.Join(frontendBuildPath, "index.html"))
 					}
-					return c.File(filepath.Join(frontendBuildPath, "index.html"))
 				})
+
+				// The static middleware MUST be defined after the custom middleware
+				e.Static("/", frontendBuildPath)
 			}
 
 			// Start server
