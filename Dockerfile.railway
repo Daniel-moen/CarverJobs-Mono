@@ -1,4 +1,4 @@
-# Railway deployment - Frontend served by Vite on port 5173
+# Railway deployment - Go server serves built frontend at root, API at /api
 FROM node:18-alpine
 
 # Install Go and build dependencies
@@ -35,5 +35,5 @@ ENV PORT=8080
 # Expose port 8080 (Railway will map this)
 EXPOSE 8080
 
-# Start the backend server (which serves frontend at / and API at /api)
-CMD ["./backend/main"] 
+# Start the Go server (serves frontend at / and API at /api)
+CMD ["./backend/main"]
