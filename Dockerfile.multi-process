@@ -2,23 +2,30 @@
 FROM node:18-alpine AS frontend-builder
 WORKDIR /app/frontend
 
-COPY frontend/ ./ 
-RUN npm install -g pnpm && pnpm install --no-cache
+# Copy package files first for better caching
+COPY frontend/package.json frontend/package-lock.json ./
 
-# No build step needed for dev server
+# Install dependencies using npm with existing lock file
+RUN npm ci --silent
+
+# Copy frontend source code
+COPY frontend/ ./
 
 # Stage 2: Build Backend
-FROM golang:1.24-alpine AS backend-builder
+FROM golang:1.23-alpine AS backend-builder
 WORKDIR /app/backend
 
 # Install build dependencies
 RUN apk add --no-cache gcc musl-dev git
 
+# Copy go mod files first for better caching
+COPY backend/go.mod backend/go.sum ./
+
+# Download dependencies in a separate layer
+RUN go mod download
+
 # Copy all backend source code
 COPY backend/ ./
-
-# Clean up and download dependencies
-RUN go mod tidy && go mod download
 
 # Build the Go binary
 RUN CGO_ENABLED=1 GOOS=linux go build -v -a -installsuffix cgo -o /main ./cmd/server
@@ -32,12 +39,11 @@ RUN apk add --no-cache nginx supervisor
 # Copy built Go binary
 COPY --from=backend-builder /main /usr/local/bin/go-api
 
-# Copy frontend code for the dev server
+# Copy frontend code and node_modules from frontend-builder
 COPY --from=frontend-builder /app/frontend /app/frontend
 
-# Install frontend dependencies
+# Set working directory
 WORKDIR /app/frontend
-RUN npm install -g pnpm && pnpm install
 
 # Copy Nginx and Supervisord configurations
 COPY nginx.conf /etc/nginx/nginx.conf
