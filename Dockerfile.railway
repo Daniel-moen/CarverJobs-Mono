@@ -32,8 +32,12 @@ RUN npm ci --silent
 # Copy frontend source code
 COPY frontend/ ./
 
-# Production stage
-FROM node:18-alpine
+# Build static site (SvelteKit adapter-static already configured)
+ENV NODE_ENV=production
+RUN npm run build
+
+# Production stage (no Node app needed at runtime, only nginx + go api)
+FROM alpine:3.20
 
 # Install runtime dependencies
 RUN apk --no-cache add ca-certificates tzdata wget supervisor nginx
@@ -44,18 +48,16 @@ COPY --from=backend-builder /main /usr/local/bin/go-api
 # Copy backend migrations (path inside backend-builder is /app/backend/migrations)
 COPY --from=backend-builder /app/backend/migrations /app/migrations
 
-# Copy frontend app
-COPY --from=frontend-builder /app/frontend /app/frontend
-
-# Set working directory for frontend
-WORKDIR /app/frontend
+# Copy frontend build to nginx web root
+RUN mkdir -p /usr/share/nginx/html
+COPY --from=frontend-builder /app/frontend/build/ /usr/share/nginx/html/
 
 # Create data directory for SQLite
 RUN mkdir -p /app/data
 
-# Copy configurations (Railway uses localhost targets inside single container)
-COPY nginx.railway.conf /etc/nginx/nginx.conf
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+# Copy production configurations
+COPY nginx.railway.prod.conf /etc/nginx/nginx.conf
+COPY supervisord.railway.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Expose port
 EXPOSE 8080
