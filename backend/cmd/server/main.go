@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -184,10 +185,30 @@ func NewEcho() *echo.Echo {
 	return e
 }
 
-// RunMigrations runs database migrations
+// waitForDB pings the DB until it's reachable or timeout elapses
+func waitForDB(db *database.DB, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := db.Ping(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("database not ready after %s: %w", timeout, lastErr)
+}
+
+// RunMigrations runs database migrations with retries for DB readiness
 func RunMigrations(lc fx.Lifecycle, db *database.DB, config database.Config) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
+			// Ensure DB is ready (helpful on cold starts)
+			if err := waitForDB(db, 60*time.Second); err != nil {
+				return err
+			}
+
 			var driver migrateDatabase.Driver
 			var err error
 			var driverName string
@@ -212,13 +233,21 @@ func RunMigrations(lc fx.Lifecycle, db *database.DB, config database.Config) {
 
 			fmt.Printf("Using migrations path: %s\n", migrationsPath)
 
-			m, err := migrate.NewWithDatabaseInstance(
-				migrationsPath,
-				driverName,
-				driver,
-			)
+			// Create migration instance with retry (handles transient errors)
+			var m *migrate.Migrate
+			for i := 0; i < 5; i++ {
+				m, err = migrate.NewWithDatabaseInstance(
+					migrationsPath,
+					driverName,
+					driver,
+				)
+				if err == nil {
+					break
+				}
+				time.Sleep(time.Duration(1+i) * time.Second)
+			}
 			if err != nil {
-				return fmt.Errorf("failed to create migration instance: %w", err)
+				return fmt.Errorf("failed to create migration instance after retries: %w", err)
 			}
 
 			if err := m.Up(); err != nil && err != migrate.ErrNoChange {
