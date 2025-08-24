@@ -16,8 +16,8 @@
 </header>
 
 <nav class="max-w-6xl mx-auto px-6 mb-10" aria-label="Sections">
-  <div class="flex justify-center gap-12 border-b border-gray-900 pb-1">
-    <a href="/" class="py-3 px-2 text-sm font-light nav-link-enhanced hover:text-gray-400 transition-colors border-b-2 border-transparent hover:border-gray-600 {active==='home' ? 'border-gray-600' : ''}">Job Board</a>
-    <a href="/subscription" class="py-3 px-2 text-sm font-light nav-link-enhanced hover:text-gray-400 transition-colors border-b-2 border-transparent hover:border-gray-600 {active==='subscription' ? 'border-gray-600' : ''}">Subscription</a>
+  <div class="flex justify-center gap-12 divider pb-1">
+    <a href="/" class="py-3 px-2 text-sm font-light nav-link-enhanced hover:text-gray-400 transition-colors border-b-2 border-transparent hover:border-gray-500 {active==='home' ? 'border-gray-500' : ''}">Job Board</a>
+    <a href="/subscription" class="py-3 px-2 text-sm font-light nav-link-enhanced hover:text-gray-400 transition-colors border-b-2 border-transparent hover:border-gray-500 {active==='subscription' ? 'border-gray-500' : ''}">Subscription</a>
   </div>
 </nav>

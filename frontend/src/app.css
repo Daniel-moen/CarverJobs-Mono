@@ -12,7 +12,7 @@
 
 @layer components {
   .btn {
-    @apply inline-block px-8 py-3 border border-gray-600 rounded-lg hover:bg-white hover:text-black transition-all duration-300 font-medium text-sm;
+    @apply inline-block px-8 py-3 border-2 border-gray-500 rounded-lg hover:bg-white hover:text-black transition-all duration-300 font-medium text-sm;
     @apply hover:border-white relative overflow-hidden;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
@@ -23,20 +23,20 @@
   }
 
   .input {
-    @apply w-full px-4 py-3 bg-transparent border border-gray-700 rounded-lg text-white placeholder-gray-500;
-    @apply focus:ring-1 focus:ring-white focus:border-white focus:outline-none;
+    @apply w-full px-4 py-3 bg-transparent border-2 border-gray-600 rounded-lg text-white placeholder-gray-500;
+    @apply focus:ring-2 focus:ring-white focus:border-white focus:outline-none;
     @apply transition-all duration-300 text-sm relative;
     background: linear-gradient(145deg, rgba(25, 25, 25, 0.8), rgba(15, 15, 15, 0.9));
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.05);
   }
   
   .input:focus {
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 20px rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(255, 255, 255, 0.2), 0 0 20px rgba(255, 255, 255, 0.1);
     background: linear-gradient(145deg, rgba(30, 30, 30, 0.9), rgba(20, 20, 20, 0.95));
   }
 
   .job-card {
-    @apply p-6 border border-gray-800 rounded-xl hover:border-gray-600 transition-all duration-300;
+    @apply p-6 border-2 border-gray-700 rounded-xl hover:border-gray-500 transition-all duration-300;
     @apply hover:bg-gray-950/50 relative overflow-hidden;
     background: linear-gradient(145deg, rgba(20, 20, 20, 0.8), rgba(10, 10, 10, 0.9));
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -45,6 +45,7 @@
   .job-card:hover {
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.1);
     transform: translateY(-2px);
+    border-width: 2px;
   }
   
   .header-glow {
@@ -76,11 +77,11 @@
   .nav-link-enhanced::after {
     content: '';
     position: absolute;
-    bottom: -2px;
+    bottom: -4px;
     left: 0;
     width: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
     transition: width 0.3s ease;
   }
   
@@ -92,16 +93,38 @@
     background: linear-gradient(145deg, rgba(15, 15, 15, 0.8), rgba(5, 5, 5, 0.9));
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 2px solid rgba(255, 255, 255, 0.1);
   }
   
   .subscription-card {
     background: linear-gradient(145deg, rgba(20, 20, 20, 0.8), rgba(10, 10, 10, 0.9));
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.1);
   }
   
   .feature-dot {
     box-shadow: 0 0 10px rgba(156, 163, 175, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+  
+  /* Skeleton shimmer effect with thicker borders */
+  .skeleton-box {
+    @apply border-2 border-gray-700 rounded-xl p-6;
+    background: linear-gradient(145deg, rgba(20, 20, 20, 0.8), rgba(10, 10, 10, 0.9));
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  }
+  
+  /* Alert boxes with thicker borders */
+  .alert-success {
+    @apply bg-green-500/10 border-2 border-green-500/30 rounded-lg p-4;
+  }
+  
+  .alert-error {
+    @apply bg-red-500/10 border-2 border-red-500/30 rounded-lg p-4;
+  }
+  
+  /* Divider lines */
+  .divider {
+    @apply border-t-2 border-gray-800;
   }
 } 
