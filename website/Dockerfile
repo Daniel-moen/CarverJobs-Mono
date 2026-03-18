@@ -8,9 +8,11 @@ COPY . .
 RUN npm run build
 
 FROM nginx:1.27-alpine AS runtime
-RUN addgroup -S web && adduser -S web -G web
-COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf
+RUN apk add --no-cache gettext \
+    && addgroup -S web && adduser -S web -G web
+ENV PORT=8080
+COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 RUN chown -R web:web /usr/share/nginx/html /var/cache/nginx /var/run /var/log/nginx
 EXPOSE 8080
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["/bin/sh", "-c", "envsubst '$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"]
