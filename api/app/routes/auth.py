@@ -1,0 +1,155 @@
+import hmac
+
+from google.auth.transport.requests import Request as GoogleRequest
+from google.oauth2 import id_token
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+from app import metrics
+from app.error_codes import CRV_2002, CRV_2007, CRV_2008
+from app.logger import get_logger
+from app.schemas import GoogleLoginRequest, LoginRequest
+from app.security import issue_session_token, require_session
+from app.settings import settings
+
+log = get_logger("carver.auth")
+router = APIRouter(prefix="/auth", tags=["auth"])
+_limiter = Limiter(key_func=get_remote_address)
+
+
+def _google_auth_enabled() -> bool:
+  if not settings.GOOGLE_OAUTH_CLIENT_ID:
+    return False
+  return bool(settings.GOOGLE_ALLOWED_EMAILS or settings.GOOGLE_ALLOWED_DOMAIN)
+
+
+def _google_email_allowed(email: str, verified: bool) -> bool:
+  if settings.GOOGLE_REQUIRE_VERIFIED_EMAIL and not verified:
+    log.warning("Google login rejected: email not verified | email=%s", email)
+    return False
+  email_lc = email.lower().strip()
+  if not email_lc:
+    return False
+  if email_lc in settings.GOOGLE_ALLOWED_EMAILS:
+    return True
+  if settings.GOOGLE_ALLOWED_DOMAIN and email_lc.endswith(f"@{settings.GOOGLE_ALLOWED_DOMAIN}"):
+    return True
+  return False
+
+
+@router.get("/providers")
+def auth_providers():
+  enabled = _google_auth_enabled()
+  log.debug("Providers queried | google_enabled=%s", enabled)
+  return {
+    "ok": True,
+    "google": {
+      "enabled": enabled,
+      "client_id": settings.GOOGLE_OAUTH_CLIENT_ID if enabled else None,
+    },
+  }
+
+
+@router.post("/login")
+@_limiter.limit("10/minute")
+def login(request: Request, payload: LoginRequest, response: Response):
+  username = payload.username.strip()
+  log.info("Login attempt | username=%s", username)
+  # Use constant-time comparison for both fields to prevent timing attacks.
+  username_ok = hmac.compare_digest(username, settings.ADMIN_USERNAME)
+  password_ok = hmac.compare_digest(payload.password, settings.ADMIN_PASSWORD)
+  if not username_ok or not password_ok:
+    log.warning("Login failed | username=%s", username)
+    metrics.increment("logins_failed")
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="Invalid credentials",
+      headers={"X-Error-Code": CRV_2002},
+    )
+
+  token = issue_session_token({"sub": username, "role": "admin"})
+  response.set_cookie(
+    key=settings.SESSION_COOKIE_NAME,
+    value=token,
+    httponly=True,
+    secure=settings.SESSION_SECURE_COOKIE,
+    samesite="lax",
+    max_age=settings.SESSION_TTL_SECONDS,
+    path="/",
+  )
+  metrics.increment("logins_success")
+  log.info("Login success | username=%s", username)
+  return {"ok": True, "user": {"username": username, "role": "admin"}}
+
+
+@router.post("/google")
+@_limiter.limit("10/minute")
+def login_google(request: Request, payload: GoogleLoginRequest, response: Response):
+  if not _google_auth_enabled():
+    log.warning("Google login attempt but not configured")
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="Google login is not enabled",
+      headers={"X-Error-Code": CRV_2007},
+    )
+  log.info("Google login attempt")
+  try:
+    token_info = id_token.verify_oauth2_token(
+      payload.id_token,
+      GoogleRequest(),
+      settings.GOOGLE_OAUTH_CLIENT_ID,
+      clock_skew_in_seconds=30,
+    )
+  except ValueError as exc:
+    log.warning("Google token invalid: %s", exc)
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="Invalid Google token",
+      headers={"X-Error-Code": CRV_2007},
+    ) from exc
+
+  email = str(token_info.get("email") or "").lower().strip()
+  email_verified = bool(token_info.get("email_verified"))
+  if not _google_email_allowed(email, email_verified):
+    log.warning("Google login rejected: not in allowlist | email=%s", email)
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Google account not allowed",
+      headers={"X-Error-Code": CRV_2008},
+    )
+
+  token = issue_session_token({"sub": email, "role": "admin", "provider": "google"})
+  response.set_cookie(
+    key=settings.SESSION_COOKIE_NAME,
+    value=token,
+    httponly=True,
+    secure=settings.SESSION_SECURE_COOKIE,
+    samesite="lax",
+    max_age=settings.SESSION_TTL_SECONDS,
+    path="/",
+  )
+  metrics.increment("logins_success")
+  log.info("Google login success | email=%s", email)
+  return {"ok": True, "user": {"username": email, "role": "admin", "provider": "google"}}
+
+
+@router.post("/logout")
+def logout(response: Response):
+  log.info("Logout")
+  response.delete_cookie(
+    key=settings.SESSION_COOKIE_NAME,
+    path="/",
+    secure=settings.SESSION_SECURE_COOKIE,
+    httponly=True,
+    samesite="lax",
+  )
+  return {"ok": True}
+
+
+@router.get("/session")
+def get_session(session: dict = Depends(require_session)):
+  log.debug("Session check | sub=%s", session.get("sub"))
+  # Admin users always have full access; crew users require a subscription.
+  is_subscribed = session.get("role") == "admin"
+  return {"ok": True, "session": {**session, "is_subscribed": is_subscribed}}

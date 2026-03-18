@@ -1,0 +1,77 @@
+services:
+  website:
+    build:
+      context: ./website
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:3001
+    image: carver-v3-website:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: carver-v3-api:latest
+    ports:
+      - "3001:3000"
+    environment:
+      APP_ENV: production
+      PORT: 3000
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      AUTO_LOGIN_AS_ADMIN: ${AUTO_LOGIN_AS_ADMIN:-false}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-this-password}
+      SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-false}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_ALLOWED_EMAILS: ${GOOGLE_ALLOWED_EMAILS:-}
+      GOOGLE_ALLOWED_DOMAIN: ${GOOGLE_ALLOWED_DOMAIN:-}
+      GOOGLE_REQUIRE_VERIFIED_EMAIL: ${GOOGLE_REQUIRE_VERIFIED_EMAIL:-true}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      APIFY_API_KEY: ${APIFY_API_KEY:-}
+      APIFY_ACTOR_IDS: ${APIFY_ACTOR_IDS:-apify/facebook-groups-scraper}
+      APIFY_START_URLS: ${APIFY_START_URLS:-}
+      APIFY_MAX_ITEMS: ${APIFY_MAX_ITEMS:-20}
+      APIFY_SCRAPE_ON_STARTUP: ${APIFY_SCRAPE_ON_STARTUP:-false}
+      DOCKWALK_ENABLED: ${DOCKWALK_ENABLED:-false}
+      WORKONAYACHT_ENABLED: ${WORKONAYACHT_ENABLED:-true}
+      CREWFINDERS_ENABLED: ${CREWFINDERS_ENABLED:-false}
+      VIKINGCREW_ENABLED: ${VIKINGCREW_ENABLED:-true}
+      FASTSTREAM_ENABLED: ${FASTSTREAM_ENABLED:-true}
+      SUPERYACHTTIMES_ENABLED: ${SUPERYACHTTIMES_ENABLED:-false}
+      SCRAPE_DO_TOKEN: ${SCRAPE_DO_TOKEN:-}
+      META_APP_ID: ${META_APP_ID:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_BUSINESS_ACCOUNT_ID: ${WHATSAPP_BUSINESS_ACCOUNT_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-carver-whatsapp-verify}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8080}
+      WA_MAGIC_TOKEN_TTL_SECONDS: ${WA_MAGIC_TOKEN_TTL_SECONDS:-1800}
+    volumes:
+      - ./api/data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+volumes: {}
