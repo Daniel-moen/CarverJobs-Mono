@@ -198,8 +198,11 @@
       <div
         class="mb-8 inline-flex items-center gap-2.5 rounded-full border border-cyan-400/20 bg-cyan-400/5 px-4 py-1.5"
       >
-        <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400"></span>
-        <span class="text-xs tracking-widest text-cyan-300/80">AUTOMATED SUPERYACHT CREW RECRUITMENT</span>
+        <span class="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-cyan-400"></span>
+        <span class="text-[10px] tracking-[0.18em] text-cyan-300/80 sm:text-xs sm:tracking-widest">
+          <span class="sm:hidden">SUPERYACHT CREW</span>
+          <span class="hidden sm:inline">AUTOMATED SUPERYACHT CREW RECRUITMENT</span>
+        </span>
       </div>
 
       <!-- Headline -->
@@ -253,24 +256,24 @@
 
   <!-- ── STATS ──────────────────────────────────────────────────────── -->
   <div class="border-y border-white/5 bg-zinc-950/60" data-animate data-counters>
-    <div class="mx-auto grid max-w-4xl grid-cols-3 divide-x divide-white/5 px-6 py-14 text-center">
-      <div class="px-4">
-        <p class="text-4xl font-black tabular-nums text-white sm:text-5xl">
+    <div class="mx-auto grid max-w-4xl grid-cols-3 divide-x divide-white/5 px-4 py-10 text-center sm:px-6 sm:py-14">
+      <div class="px-2 sm:px-4">
+        <p class="text-3xl font-black tabular-nums text-white sm:text-4xl lg:text-5xl">
           {count1.toLocaleString()}<span class="text-cyan-400">+</span>
         </p>
-        <p class="mt-2 text-xs uppercase tracking-widest text-slate-500">Job listings tracked</p>
+        <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 sm:text-xs sm:tracking-widest">Job listings tracked</p>
       </div>
-      <div class="px-4">
-        <p class="text-4xl font-black tabular-nums text-white sm:text-5xl">
+      <div class="px-2 sm:px-4">
+        <p class="text-3xl font-black tabular-nums text-white sm:text-4xl lg:text-5xl">
           {count2}<span class="text-cyan-400">%</span>
         </p>
-        <p class="mt-2 text-xs uppercase tracking-widest text-slate-500">Match accuracy</p>
+        <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 sm:text-xs sm:tracking-widest">Match accuracy</p>
       </div>
-      <div class="px-4">
-        <p class="text-4xl font-black tabular-nums text-white sm:text-5xl">
+      <div class="px-2 sm:px-4">
+        <p class="text-3xl font-black tabular-nums text-white sm:text-4xl lg:text-5xl">
           {count3}<span class="text-cyan-400">+</span>
         </p>
-        <p class="mt-2 text-xs uppercase tracking-widest text-slate-500">Applications sent</p>
+        <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 sm:text-xs sm:tracking-widest">Applications sent</p>
       </div>
     </div>
   </div>
@@ -453,7 +456,7 @@
 
   <!-- ── FOOTER ─────────────────────────────────────────────────────── -->
   <footer class="border-t border-white/5 px-6 py-8">
-    <div class="mx-auto flex max-w-7xl items-center justify-between text-xs text-slate-600">
+    <div class="mx-auto flex max-w-7xl flex-col items-center gap-2 text-xs text-slate-600 sm:flex-row sm:justify-between">
       <span class="font-black tracking-[0.35em] text-slate-500">CARVER</span>
       <span>© {new Date().getFullYear()} — Automated superyacht job applications</span>
     </div>

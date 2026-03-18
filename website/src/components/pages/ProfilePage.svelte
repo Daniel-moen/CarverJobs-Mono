@@ -398,7 +398,7 @@
     <div class="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-cyan-400/10 blur-3xl header-orb"></div>
     <div class="pointer-events-none absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-sky-400/7 blur-2xl header-orb" style="animation-delay:-2s;"></div>
     <div class="header-scan-line"></div>
-    <div class="relative flex items-start justify-between gap-4">
+    <div class="relative flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div>
         <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Profile</p>
         <h1 class="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">Crew Profile Vault</h1>
@@ -406,7 +406,7 @@
           Your details, preferences, and documents for better job matching.
         </p>
       </div>
-      <div class="flex flex-none items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         {#if shareUrl}
           <button
             type="button"

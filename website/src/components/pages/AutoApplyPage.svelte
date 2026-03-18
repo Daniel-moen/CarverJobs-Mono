@@ -329,13 +329,13 @@
           {/if}
 
           <!-- Actions -->
-          <div class="mt-4 flex items-center justify-between gap-3">
-            <div class="flex items-center gap-3">
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-3">
               {#if matchedJob.contact_email}
                 <button
                   type="button"
                   onclick={startDraft}
-                  class="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-5 py-2.5 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-300/20 hover:text-white"
+                  class="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-5 py-2.5 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-300/20 hover:text-white active:scale-95"
                 >
                   Apply Now
                 </button>
@@ -345,7 +345,7 @@
               <button
                 type="button"
                 onclick={skipMatch}
-                class="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-200"
+                class="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-200 active:scale-95"
               >
                 Skip →
               </button>
@@ -396,7 +396,7 @@
               </div>
 
               <div class="mt-3 rounded-lg border border-white/6 bg-white/3 p-3">
-                <pre class="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-300">{draftBody}</pre>
+                <pre class="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-300">{draftBody}</pre>
               </div>
             </div>
 

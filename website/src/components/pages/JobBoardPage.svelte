@@ -222,8 +222,8 @@
               </div>
             {/if}
 
-            <!-- Quick actions — appear on hover -->
-            <div class="mt-4 flex items-center gap-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+            <!-- Quick actions — visible on mobile, appear on hover on desktop -->
+            <div class="mt-4 flex items-center gap-2 transition-opacity duration-200 sm:opacity-0 sm:group-hover:opacity-100">
               <button
                 type="button"
                 class="rounded-lg border border-cyan-400/30 bg-cyan-400/8 px-4 py-1.5 text-xs font-semibold text-cyan-300 transition-all hover:bg-cyan-400/18 hover:text-white active:scale-95"

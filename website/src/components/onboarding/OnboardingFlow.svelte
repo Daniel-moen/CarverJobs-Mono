@@ -161,7 +161,7 @@
   onMount(() => {})
 </script>
 
-<div class="fixed inset-0 z-50 flex flex-col bg-black">
+<div class="fixed inset-0 z-50 flex flex-col bg-black" style="height: 100dvh">
 
   <!-- Progress bar -->
   <div class="h-0.5 w-full bg-white/10">
@@ -184,7 +184,7 @@
     {/each}
   </div>
 
-  <div class="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
+  <div class="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-6 sm:py-8">
 
     <!-- ── STEP 0: Welcome ── -->
     {#if step === 0}
@@ -220,7 +220,7 @@
     {:else if step === 1}
       <div
         class="flex w-full max-w-lg flex-col"
-        style="height: min(600px, calc(100vh - 120px))"
+        style="height: min(600px, calc(100dvh - 120px))"
       >
         <!-- Header -->
         <div class="mb-3 flex-none">

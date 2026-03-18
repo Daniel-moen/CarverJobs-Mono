@@ -55,7 +55,7 @@
     <div class="flex items-center justify-between sm:hidden">
       <button
         type="button"
-        class="rounded-md p-1.5 text-slate-400 hover:text-white"
+        class="rounded-md p-2.5 text-slate-400 hover:text-white active:text-white"
         onclick={() => (mobileOpen = !mobileOpen)}
         aria-label="Toggle menu"
       >
@@ -86,11 +86,11 @@
 
   <!-- Mobile dropdown -->
   {#if mobileOpen}
-    <nav class="border-t border-white/10 bg-black/95 px-4 pb-3 pt-2 sm:hidden">
+    <nav class="mobile-menu border-t border-white/10 bg-black/95 px-4 pb-4 pt-2 sm:hidden">
       {#each visibleNav as item}
         <button
           type="button"
-          class={`block w-full rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+          class={`block w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors active:bg-white/10 ${
             currentPage === item.key
               ? 'bg-white/10 text-white'
               : 'text-slate-400 hover:bg-white/5 hover:text-white'
@@ -103,3 +103,13 @@
     </nav>
   {/if}
 </header>
+
+<style>
+  .mobile-menu {
+    animation: slideDown 0.18s ease-out;
+  }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>

@@ -350,7 +350,7 @@
       <PublicProfilePage slug={publicSlug} />
     </main>
   {:else if isCheckingSession}
-    <main class="mx-auto flex min-h-screen w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+    <main class="mx-auto flex min-h-[100dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
       <p class="text-sm text-slate-400">Checking session...</p>
     </main>
   {:else if !isAuthenticated && !showLogin}
@@ -359,7 +359,7 @@
       onStartMatch={() => { autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
     />
   {:else if !isAuthenticated && showLogin}
-    <main class="mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-10 sm:px-6">
+    <main class="mx-auto flex min-h-[100dvh] w-full max-w-3xl items-center px-4 py-10 sm:px-6">
       <section class="w-full rounded-2xl border border-white/10 bg-zinc-950 p-6 sm:p-8">
         <button
           type="button"
@@ -444,12 +444,12 @@
 
     {#if showDocsReminder}
       <div class="border-b border-amber-400/20 bg-amber-400/10 px-4 py-2.5 sm:px-6">
-        <div class="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
-          <div class="flex items-center gap-2.5 text-sm text-amber-200">
-            <span class="text-base">📋</span>
+        <div class="mx-auto flex w-full max-w-7xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div class="flex items-start gap-2.5 text-sm text-amber-200">
+            <span class="shrink-0 text-base">📋</span>
             <span>Your qualifications haven't been uploaded yet — add them to your profile to improve your match rate.</span>
           </div>
-          <div class="flex flex-none items-center gap-3">
+          <div class="flex items-center gap-3 self-end sm:flex-none sm:self-auto">
             <button
               onclick={() => (currentPage = 'profile')}
               class="rounded-lg border border-amber-300/40 bg-amber-300/15 px-3 py-1 text-xs font-medium text-amber-100 transition hover:bg-amber-300/25"
