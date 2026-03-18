@@ -48,9 +48,12 @@ class Settings:
     "CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080",
   )
+  # localhost, *.railway.internal AND *.up.railway.app are all required so
+  # Railway's health checker can reach /health — it sends requests with the
+  # public domain as the Host header, not the internal one.
   ALLOWED_HOSTS = _csv_env(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,0.0.0.0" if APP_ENV == "production" else "*",
+    "localhost,127.0.0.1,0.0.0.0,*.railway.internal,*.up.railway.app" if APP_ENV == "production" else "*",
   )
   # Uploads stored outside webroot, not served statically.
   UPLOAD_DIR: Path = Path(os.getenv("UPLOAD_DIR", str(Path(__file__).parent.parent / "data" / "uploads")))
