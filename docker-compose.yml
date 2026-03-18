@@ -27,6 +27,8 @@ services:
     image: carver-v3-api:latest
     ports:
       - "3001:3000"
+    env_file:
+      - .env
     environment:
       APP_ENV: production
       PORT: 3000
