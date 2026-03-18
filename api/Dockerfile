@@ -15,13 +15,8 @@ COPY ["Matching Engine", "Matching Engine"]
 COPY tests ./tests
 COPY entrypoint.sh ./entrypoint.sh
 
-RUN chmod +x entrypoint.sh \
-    && mkdir -p /app/data \
-    && groupadd -r api \
-    && useradd -r -g api api \
-    && chown -R api:api /app
+RUN chmod +x entrypoint.sh && mkdir -p /app/data
 
-USER api
 ENV PYTHONUNBUFFERED=1
 ENV PORT=3000
 # Run tests at build time — fails the build fast if anything is broken,

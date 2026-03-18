@@ -5,3 +5,11 @@ yarn-error.log*
 .env
 .env.*
 .DS_Store
+venv/
+__pycache__/
+*.pyc
+*.pyo
+data/
+.git/
+src/
+scripts/
