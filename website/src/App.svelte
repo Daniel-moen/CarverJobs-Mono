@@ -76,7 +76,7 @@
   let isGoogleLoading = false
   const browserWindow = /** @type {any} */ (window)
 
-  const appParticles = Array.from({ length: 22 }, () => ({
+  const appParticles = Array.from({ length: 8 }, () => ({
     x: Math.random() * 100,
     startY: 70 + Math.random() * 30,
     size: Math.random() * 1.8 + 0.6,
@@ -485,7 +485,7 @@
     z-index: 0;
   }
 
-  /* Pulsing line grid */
+  /* Pulsing line grid — reduced on mobile for performance */
   .app-grid-bg {
     position: absolute;
     inset: 0;
@@ -495,18 +495,23 @@
     background-size: 60px 60px;
     animation: app-grid-pulse 6s ease-in-out infinite;
   }
+  @media (max-width: 768px) {
+    .app-grid-bg { animation: none; opacity: 0.6; }
+  }
   @keyframes app-grid-pulse {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
 
-  /* Floating particles */
+  /* Floating particles — fewer on mobile */
   .app-particle {
     position: absolute;
     border-radius: 50%;
     background: rgba(34, 211, 238, var(--op, 0.15));
     animation: app-float-up linear infinite;
-    will-change: transform, opacity;
+  }
+  @media (max-width: 768px) {
+    .app-particle { display: none; }
   }
   @keyframes app-float-up {
     0%   { transform: translateY(0);      opacity: 0; }
@@ -515,7 +520,7 @@
     100% { transform: translateY(-110vh); opacity: 0; }
   }
 
-  /* Orbs */
+  /* Orbs — static/low blur on mobile (blur is very expensive) */
   .app-orb {
     position: absolute;
     border-radius: 50%;
@@ -543,13 +548,16 @@
     filter: blur(70px);
     animation-delay: -9s;
   }
+  @media (max-width: 768px) {
+    .app-orb { animation: none; filter: blur(40px); }
+  }
   @keyframes app-float {
     0%, 100% { transform: translate(0, 0) scale(1); }
     33%       { transform: translate(35px, -25px) scale(1.05); }
     66%       { transform: translate(-20px, 18px) scale(0.95); }
   }
 
-  /* Horizontal scan line */
+  /* Horizontal scan line — disabled on mobile */
   .app-scan {
     position: absolute;
     top: -2px;
@@ -558,6 +566,9 @@
     height: 1px;
     background: linear-gradient(90deg, transparent 0%, rgba(34, 211, 238, 0.2) 30%, rgba(34, 211, 238, 0.2) 70%, transparent 100%);
     animation: app-scan 18s linear infinite;
+  }
+  @media (max-width: 768px) {
+    .app-scan { display: none; }
   }
   @keyframes app-scan {
     0%   { top: -2px;  opacity: 0; }

@@ -42,3 +42,23 @@ html {
     font-size: 16px;
   }
 }
+
+/* Mobile performance: reduce motion, improve scroll */
+@media screen and (max-width: 768px) {
+  * {
+    scroll-behavior: auto;
+  }
+  main {
+    contain: layout style;
+  }
+}
+
+/* Respect prefers-reduced-motion for users who need it */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

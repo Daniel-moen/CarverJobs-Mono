@@ -17,7 +17,7 @@
   }
 </script>
 
-<header class="sticky top-0 z-10 border-b border-white/10 bg-black/90 backdrop-blur">
+<header class="sticky top-0 z-10 border-b border-white/10 bg-black sm:bg-black/90 sm:backdrop-blur">
   <div class="mx-auto w-full max-w-7xl px-4 py-3 sm:px-6 md:px-8">
 
     <!-- Desktop nav -->

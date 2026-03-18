@@ -64,12 +64,12 @@
 
 <section class="grid gap-4">
   <!-- Header -->
-  <header class="relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 px-6 py-5">
+  <header class="relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 px-4 py-4 sm:px-6 sm:py-5">
     <div class="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-sky-400/10 blur-3xl header-orb"></div>
     <div class="pointer-events-none absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-cyan-400/7 blur-2xl header-orb" style="animation-delay:-2.5s;"></div>
     <div class="header-scan-line"></div>
-    <div class="relative flex items-start justify-between gap-4">
-      <div>
+    <div class="relative flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <div class="min-w-0">
         <div class="flex items-center gap-2">
           <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400"></span>
           <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Job Board</p>
@@ -80,7 +80,7 @@
         </p>
       </div>
       {#if !isLoading && !error}
-        <div class="flex-none rounded-xl border border-sky-400/15 bg-sky-400/5 px-3 py-2 text-center">
+        <div class="flex-shrink-0 self-start rounded-xl border border-sky-400/15 bg-sky-400/5 px-3 py-2 text-center">
           <p class="text-[9px] font-bold uppercase tracking-widest text-sky-500">Found</p>
           <p class="mt-0.5 text-lg font-black text-white">{jobs.length}</p>
         </div>
@@ -245,9 +245,13 @@
 </section>
 
 <style>
-  /* Header orb pulse + scan */
+  /* Header orb pulse + scan — reduced on mobile */
   .header-orb {
     animation: headerOrbPulse 4.5s ease-in-out infinite;
+  }
+  @media (max-width: 768px) {
+    .header-orb { filter: blur(16px) !important; animation: none; }
+    .header-scan-line { display: none; }
   }
   .header-scan-line {
     position: absolute;

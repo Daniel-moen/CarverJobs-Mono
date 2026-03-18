@@ -4,7 +4,7 @@
 
   let { onSignIn = () => {}, onStartMatch = () => {} } = $props()
 
-  // Hero mouse tracking
+  // Hero mouse tracking — mousemove only (touch devices stay centered, no lag)
   let heroEl = $state(null)
   let mx = $state(50)
   let my = $state(50)
@@ -132,7 +132,7 @@
     'ETO',
   ]
 
-  const particles = Array.from({ length: 28 }, () => ({
+  const particles = Array.from({ length: 10 }, () => ({
     x: Math.random() * 100,
     startY: 75 + Math.random() * 25,
     size: Math.random() * 2 + 0.8,
@@ -144,8 +144,8 @@
 
 <div class="min-h-screen bg-black text-slate-100">
   <!-- ── NAV ─────────────────────────────────────────────────────────── -->
-  <nav class="fixed top-0 z-50 w-full border-b border-white/5 bg-black/80 backdrop-blur-xl">
-    <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+  <nav class="fixed top-0 z-50 w-full border-b border-white/5 bg-black sm:bg-black/80 sm:backdrop-blur-xl">
+    <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
       <span class="text-sm font-black tracking-[0.35em] text-white">CARVER</span>
       <button
         onclick={() => onSignIn('nav')}
@@ -159,7 +159,7 @@
   <!-- ── HERO ───────────────────────────────────────────────────────── -->
   <section
     bind:this={heroEl}
-    class="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 pt-20"
+    class="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 pt-16 sm:px-6 sm:pt-20"
     onmousemove={handleHeroMouseMove}
     role="banner"
   >
@@ -256,7 +256,7 @@
 
   <!-- ── STATS ──────────────────────────────────────────────────────── -->
   <div class="border-y border-white/5 bg-zinc-950/60" data-animate data-counters>
-    <div class="mx-auto grid max-w-4xl grid-cols-3 divide-x divide-white/5 px-4 py-10 text-center sm:px-6 sm:py-14">
+    <div class="mx-auto grid max-w-4xl grid-cols-3 divide-x divide-white/5 px-4 py-8 text-center sm:px-6 sm:py-14">
       <div class="px-2 sm:px-4">
         <p class="text-3xl font-black tabular-nums text-white sm:text-4xl lg:text-5xl">
           {count1.toLocaleString()}<span class="text-cyan-400">+</span>
@@ -279,7 +279,7 @@
   </div>
 
   <!-- ── FEATURES ───────────────────────────────────────────────────── -->
-  <section id="features" class="px-6 py-28">
+  <section id="features" class="px-4 py-16 sm:px-6 sm:py-28">
     <div class="mx-auto max-w-7xl">
       <div class="mb-16 text-center" data-animate>
         <p class="text-xs uppercase tracking-[0.3em] text-cyan-400/70">Features</p>
@@ -326,10 +326,8 @@
   </section>
 
   <!-- ── MATCHING ENGINE ─────────────────────────────────────────────── -->
-  <section id="matching" class="relative overflow-hidden px-6 py-28">
-    <div class="pointer-events-none absolute inset-0" aria-hidden="true">
-      <div class="absolute left-1/2 top-1/2 h-[600px] w-[800px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-400/5 blur-[100px]"></div>
-    </div>
+  <section id="matching" class="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-28">
+    <div class="pointer-events-none absolute inset-0 matching-bg-glow" aria-hidden="true"></div>
 
     <div class="relative z-10 mx-auto max-w-5xl">
       <div class="mb-14 text-center" data-animate>
@@ -341,9 +339,9 @@
       </div>
 
       <div class="mx-auto max-w-2xl" data-animate>
-        <div class="match-demo group relative overflow-hidden rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-sky-950/60 via-indigo-950/50 to-cyan-950/40 p-8">
-          <div class="pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-cyan-400/12 blur-3xl" style="animation: match-orb-pulse 4s ease-in-out infinite;" aria-hidden="true"></div>
-          <div class="pointer-events-none absolute -bottom-12 -left-12 h-36 w-36 rounded-full bg-indigo-400/8 blur-2xl" style="animation: match-orb-pulse 4s ease-in-out infinite; animation-delay:-2s;" aria-hidden="true"></div>
+        <div class="match-demo group relative overflow-hidden rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-sky-950/60 via-indigo-950/50 to-cyan-950/40 p-4 sm:p-8">
+          <div class="match-demo-orb match-demo-orb-1 pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-cyan-400/12 blur-3xl" style="animation: match-orb-pulse 4s ease-in-out infinite;" aria-hidden="true"></div>
+          <div class="match-demo-orb match-demo-orb-2 pointer-events-none absolute -bottom-12 -left-12 h-36 w-36 rounded-full bg-indigo-400/8 blur-2xl" style="animation: match-orb-pulse 4s ease-in-out infinite; animation-delay:-2s;" aria-hidden="true"></div>
 
           <div class="relative z-10">
             <div class="flex items-center gap-2">
@@ -405,7 +403,7 @@
   </section>
 
   <!-- ── HOW IT WORKS ───────────────────────────────────────────────── -->
-  <section id="how-it-works" class="bg-zinc-950 px-6 py-28">
+  <section id="how-it-works" class="bg-zinc-950 px-4 py-16 sm:px-6 sm:py-28">
     <div class="mx-auto max-w-5xl">
       <div class="mb-16 text-center" data-animate>
         <p class="text-xs uppercase tracking-[0.3em] text-cyan-400/70">Process</p>
@@ -431,7 +429,7 @@
   </section>
 
   <!-- ── CTA BANNER ─────────────────────────────────────────────────── -->
-  <section class="relative overflow-hidden px-6 py-32">
+  <section class="relative overflow-hidden px-4 py-20 sm:px-6 sm:py-32">
     <div class="pointer-events-none absolute inset-0" aria-hidden="true">
       <div class="orb-cta"></div>
       <div
@@ -455,7 +453,7 @@
   </section>
 
   <!-- ── FOOTER ─────────────────────────────────────────────────────── -->
-  <footer class="border-t border-white/5 px-6 py-8">
+  <footer class="border-t border-white/5 px-4 py-6 sm:px-6 sm:py-8">
     <div class="mx-auto flex max-w-7xl flex-col items-center gap-2 text-xs text-slate-600 sm:flex-row sm:justify-between">
       <span class="font-black tracking-[0.35em] text-slate-500">CARVER</span>
       <span>© {new Date().getFullYear()} — Automated superyacht job applications</span>
@@ -482,7 +480,7 @@
     transform: translateY(-1px);
   }
 
-  /* ── Pulsing line grid ── */
+  /* ── Pulsing line grid — static on mobile for performance ── */
   .grid-bg {
     background-image:
       linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
@@ -490,18 +488,23 @@
     background-size: 60px 60px;
     animation: grid-pulse 5s ease-in-out infinite;
   }
+  @media (max-width: 768px) {
+    .grid-bg { animation: none; opacity: 0.6; }
+  }
   @keyframes grid-pulse {
     0%, 100% { opacity: 0.5; }
     50% { opacity: 1; }
   }
 
-  /* ── Floating particles ── */
+  /* ── Floating particles — hidden on mobile ── */
   .particle {
     position: absolute;
     border-radius: 50%;
     background: rgba(34, 211, 238, var(--op, 0.2));
     animation: float-up linear infinite;
-    will-change: transform, opacity;
+  }
+  @media (max-width: 768px) {
+    .particle { display: none; }
   }
   @keyframes float-up {
     0% {
@@ -520,7 +523,7 @@
     }
   }
 
-  /* ── Horizontal scan line ── */
+  /* ── Horizontal scan line — off on mobile ── */
   .scan-line {
     position: absolute;
     top: -2px;
@@ -531,6 +534,9 @@
     animation: scan 14s linear infinite;
     pointer-events: none;
   }
+  @media (max-width: 768px) {
+    .scan-line { display: none; }
+  }
   @keyframes scan {
     0% { top: -2px; opacity: 0; }
     5% { opacity: 1; }
@@ -538,12 +544,15 @@
     100% { top: 100%; opacity: 0; }
   }
 
-  /* ── Animated background orbs ── */
+  /* ── Animated background orbs — lighter blur on mobile ── */
   .orb {
     position: absolute;
     border-radius: 50%;
     filter: blur(100px);
     animation: float 10s ease-in-out infinite;
+  }
+  @media (max-width: 768px) {
+    .orb { filter: blur(40px); animation: none; }
   }
   .orb-1 {
     width: 700px;
@@ -600,6 +609,9 @@
     transform: translate(-50%, -50%);
     filter: blur(60px);
   }
+  @media (max-width: 768px) {
+    .orb-cta { filter: blur(30px); }
+  }
   @keyframes float {
     0%,
     100% {
@@ -644,6 +656,21 @@
     }
   }
 
+  /* Matching section glow — reduced blur on mobile */
+  .matching-bg-glow {
+    left: 50%;
+    top: 50%;
+    height: 600px;
+    width: 800px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: rgba(34, 211, 238, 0.05);
+    filter: blur(100px);
+  }
+  @media (max-width: 768px) {
+    .matching-bg-glow { filter: blur(30px); height: 300px; width: 300px; }
+  }
+
   /* ── Match demo orb pulse ── */
   @keyframes match-orb-pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
@@ -652,6 +679,9 @@
 
   .match-demo {
     transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  @media (max-width: 768px) {
+    .match-demo-orb { filter: blur(16px) !important; animation: none !important; }
   }
   .match-demo:hover {
     border-color: rgba(34, 211, 238, 0.35);

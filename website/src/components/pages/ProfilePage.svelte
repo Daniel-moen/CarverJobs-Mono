@@ -394,7 +394,7 @@
 
 <section class="grid gap-4">
   <!-- Header -->
-  <header class="page-header relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 px-6 py-5" class:visible={mounted}>
+  <header class="page-header relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 px-4 py-4 sm:px-6 sm:py-5" class:visible={mounted}>
     <div class="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-cyan-400/10 blur-3xl header-orb"></div>
     <div class="pointer-events-none absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-sky-400/7 blur-2xl header-orb" style="animation-delay:-2s;"></div>
     <div class="header-scan-line"></div>
@@ -836,9 +836,13 @@
 {/if}
 
 <style>
-  /* Header orb pulse + scan */
+  /* Header orb pulse + scan — reduced on mobile */
   .header-orb {
     animation: headerOrbPulse 4.5s ease-in-out infinite;
+  }
+  @media (max-width: 768px) {
+    .header-orb { filter: blur(16px) !important; animation: none; }
+    .header-scan-line { display: none; }
   }
   .header-scan-line {
     position: absolute;

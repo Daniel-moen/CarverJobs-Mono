@@ -139,7 +139,7 @@
 
 <section class="grid gap-4">
   <!-- Header -->
-  <header class="relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 px-6 py-5">
+  <header class="relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 px-4 py-4 sm:px-6 sm:py-5">
     <div class="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-cyan-400/10 blur-3xl" style="animation: pulseOrb 4.5s ease-in-out infinite;"></div>
     <div class="pointer-events-none absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-emerald-400/7 blur-2xl" style="animation: pulseOrb 4.5s ease-in-out infinite; animation-delay:-2.3s;"></div>
     <div class="header-scan-line"></div>
@@ -506,6 +506,9 @@
 </section>
 
 <style>
+  @media (max-width: 768px) {
+    .header-scan-line { display: none; }
+  }
   .header-scan-line {
     position: absolute;
     top: -1px;
