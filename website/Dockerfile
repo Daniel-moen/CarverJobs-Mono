@@ -15,4 +15,4 @@ COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 RUN chown -R web:web /usr/share/nginx/html /var/cache/nginx /var/run /var/log/nginx
 EXPOSE 8080
-CMD ["/bin/sh", "-c", "envsubst '$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "envsubst '$PORT $API_URL' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"]
