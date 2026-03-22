@@ -53,6 +53,33 @@ html {
   }
 }
 
+/* Mobile/touch performance pass: keep UI responsive over flashy effects */
+@media (max-width: 768px), (pointer: coarse) {
+  .app-bg,
+  .app-grid-bg,
+  .app-particle,
+  .app-scan,
+  .header-scan-line,
+  .scan-line,
+  .header-orb,
+  .orb,
+  .orb-cta,
+  .matching-bg-glow {
+    animation: none !important;
+    filter: none !important;
+  }
+
+  .job-card,
+  .feature-card,
+  .match-card,
+  .sub-card,
+  .service-card,
+  .dash-card,
+  .page-header {
+    transition: none !important;
+  }
+}
+
 /* Respect prefers-reduced-motion for users who need it */
 @media (prefers-reduced-motion: reduce) {
   *,

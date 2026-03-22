@@ -5,17 +5,24 @@ from google.oauth2 import id_token
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from app import metrics
+from app import metrics, models
 from app.error_codes import CRV_2002, CRV_2007, CRV_2008
+from app.database import get_db
 from app.logger import get_logger
-from app.schemas import GoogleLoginRequest, LoginRequest
+from app.schemas import GoogleLoginRequest, LoginRequest, WaitlistSignupRequest
 from app.security import issue_session_token, require_session
 from app.settings import settings
 
 log = get_logger("carver.auth")
 router = APIRouter(prefix="/auth", tags=["auth"])
 _limiter = Limiter(key_func=get_remote_address)
+
+# Safari/iOS can be strict about cross-site cookies; SameSite=None must
+# be paired with Secure=true or browsers will ignore the cookie.
+SESSION_SAMESITE = "none" if settings.SESSION_SECURE_COOKIE else "lax"
 
 
 def _google_auth_enabled() -> bool:
@@ -51,6 +58,27 @@ def auth_providers():
   }
 
 
+@router.post("/waitlist", status_code=status.HTTP_201_CREATED)
+@_limiter.limit("5/minute")
+def signup_waitlist(request: Request, payload: WaitlistSignupRequest, db: Session = Depends(get_db)):
+  email = payload.email.strip().lower()
+  if not email:
+    raise HTTPException(
+      status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+      detail="Email is required.",
+    )
+
+  try:
+    db.add(models.WaitlistSignup(email=email, source="website"))
+    db.commit()
+  except IntegrityError:
+    db.rollback()
+    # Keep response neutral to avoid leaking membership details.
+    return {"ok": True}
+
+  return {"ok": True}
+
+
 @router.post("/login")
 @_limiter.limit("10/minute")
 def login(request: Request, payload: LoginRequest, response: Response):
@@ -74,7 +102,7 @@ def login(request: Request, payload: LoginRequest, response: Response):
     value=token,
     httponly=True,
     secure=settings.SESSION_SECURE_COOKIE,
-    samesite="lax",
+    samesite=SESSION_SAMESITE,
     max_age=settings.SESSION_TTL_SECONDS,
     path="/",
   )
@@ -125,7 +153,7 @@ def login_google(request: Request, payload: GoogleLoginRequest, response: Respon
     value=token,
     httponly=True,
     secure=settings.SESSION_SECURE_COOKIE,
-    samesite="lax",
+    samesite=SESSION_SAMESITE,
     max_age=settings.SESSION_TTL_SECONDS,
     path="/",
   )
@@ -142,7 +170,7 @@ def logout(response: Response):
     path="/",
     secure=settings.SESSION_SECURE_COOKIE,
     httponly=True,
-    samesite="lax",
+    samesite=SESSION_SAMESITE,
   )
   return {"ok": True}
 

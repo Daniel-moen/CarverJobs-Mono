@@ -19,6 +19,7 @@ Modern, minimal, and modular frontend starter for CARVER v3.
 - UI now enforces login before dashboard access
 - API session cookie is HTTP-only and sent using `credentials: include`
 - Set `VITE_API_BASE_URL` if API is not at `http://localhost:3001`
+- Set `VITE_SITE_LAUNCHED=false` to show launch waitlist page only
 - Google sign-in button appears automatically when API `/auth/providers` returns Google as enabled
 ## Folder layout
 - `src/components/layout/` — persistent shell components

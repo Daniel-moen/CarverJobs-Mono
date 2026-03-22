@@ -723,9 +723,9 @@ async def _handle_job_info_command(number: int, wa_session: WhatsAppSession, db:
         lines.append(f"\n📧 *Contact:* {job.contact_email}")
 
     await _send_whatsapp(phone, "\n".join(lines))
-        await _send_whatsapp_buttons(
-            phone,
-            "Ready to apply for this yacht role?",
+    await _send_whatsapp_buttons(
+        phone,
+        "Ready to apply for this yacht role?",
         [
             (f"btn_apply_{number}", "Draft Application"),
             ("btn_find_matches", "Find More Jobs"),
@@ -1177,7 +1177,7 @@ async def whatsapp_magic_auth(token: str, response: Response, db: Session = Depe
         value=session_token,
         httponly=True,
         secure=settings.SESSION_SECURE_COOKIE,
-        samesite="lax",
+        samesite="none" if settings.SESSION_SECURE_COOKIE else "lax",
         max_age=settings.SESSION_TTL_SECONDS,
         path="/",
     )

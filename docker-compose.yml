@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: http://localhost:3001
+        VITE_SITE_LAUNCHED: ${VITE_SITE_LAUNCHED:-true}
     image: carver-v3-website:latest
     ports:
       - "8080:8080"

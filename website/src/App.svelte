@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from 'svelte'
+  import { onMount, tick, onDestroy } from 'svelte'
   import SiteHeader from './components/layout/SiteHeader.svelte'
   import SiteFooter from './components/layout/SiteFooter.svelte'
   import AutoApplyPage from './components/pages/AutoApplyPage.svelte'
@@ -10,8 +10,10 @@
   import SubscriptionPage from './components/pages/SubscriptionPage.svelte'
   import OnboardingFlow from './components/onboarding/OnboardingFlow.svelte'
   import LandingPage from './components/pages/LandingPage.svelte'
+  import MobileMarketingPage from './components/pages/MobileMarketingPage.svelte'
   import PublicProfilePage from './components/pages/PublicProfilePage.svelte'
   import WhatsAppAuthPage from './components/pages/WhatsAppAuthPage.svelte'
+  import LaunchSignupPage from './components/pages/LaunchSignupPage.svelte'
   import { API_BASE_URL, apiFetch } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
 
@@ -19,6 +21,7 @@
   // Map URL pathnames → page keys and back.  No router library needed —
   // nginx already falls back to index.html for every path.
   const PATH_TO_PAGE = {
+    '/launch':       'launch-signup',
     '/':             'auto-apply',
     '/jobs':         'job-board',
     '/profile':      'profile',
@@ -41,12 +44,14 @@
   }
 
   function pageFromPath(pathname) {
+    if (!SITE_LAUNCHED) return 'launch-signup'
     if (pathname.startsWith('/crew/')) return 'public-profile'
     if (pathname.startsWith('/wa/')) return 'whatsapp-auth'
     return PATH_TO_PAGE[pathname] ?? 'auto-apply'
   }
 
   function navigate(pageKey) {
+    if (!SITE_LAUNCHED) return
     if (currentPage === pageKey) return
     currentPage = pageKey
     publicSlug = ''
@@ -55,11 +60,14 @@
     trackPageView(pageKey)
   }
 
-  let publicSlug = extractCrewSlug(window.location.pathname)
-  let waToken = extractWaToken(window.location.pathname)
+  const SITE_LAUNCHED = String(import.meta.env.VITE_SITE_LAUNCHED ?? 'true').toLowerCase() === 'true'
+
+  let publicSlug = SITE_LAUNCHED ? extractCrewSlug(window.location.pathname) : ''
+  let waToken = SITE_LAUNCHED ? extractWaToken(window.location.pathname) : ''
   let currentPage = pageFromPath(window.location.pathname)
   let isCheckingSession = true
   let isAuthenticated = false
+  let hasActiveSession = false
   let userRole = ''
   let isSubscribed = false
   let showOnboarding = false
@@ -75,6 +83,41 @@
   let googleRenderError = ''
   let isGoogleLoading = false
   const browserWindow = /** @type {any} */ (window)
+  const mobileMediaQuery = browserWindow.matchMedia('(max-width: 768px)')
+  let isMobileViewport = mobileMediaQuery.matches
+
+  function debugLog(payload) {
+    if (typeof window === 'undefined') return
+    const host = window.location.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1') return
+    fetch('http://127.0.0.1:7242/ingest/6976b566-a777-43de-856a-ff88f09927de', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {})
+  }
+
+  function handleMobileViewportChange(e) {
+    isMobileViewport = e.matches
+  }
+
+  function handleUnauthorizedEvent() {
+    // Ignore 401s on public pages before any successful login/session.
+    if (!isAuthenticated || !hasActiveSession) return
+    isAuthenticated = false
+    hasActiveSession = false
+    userRole = ''
+    isSubscribed = false
+    showOnboarding = false
+    showDocsReminder = false
+    showLogin = true
+    authError = 'Your session expired. Please sign in again.'
+  }
+
+  onDestroy(() => {
+    try { mobileMediaQuery.removeEventListener('change', handleMobileViewportChange) } catch { /* ignore */ }
+    window.removeEventListener('carver:unauthorized', handleUnauthorizedEvent)
+  })
 
   const appParticles = Array.from({ length: 8 }, () => ({
     x: Math.random() * 100,
@@ -131,8 +174,14 @@
     let delay = initialDelayMs
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+        // #region agent log
+        debugLog({ runId: 'initial', hypothesisId: 'H1', location: 'website/src/App.svelte:176', message: 'fetchWithRetry attempt start', data: { url, attempt, maxAttempts }, timestamp: Date.now() })
+        // #endregion
         return await apiFetch(url, options)
       } catch (err) {
+        // #region agent log
+        debugLog({ runId: 'initial', hypothesisId: 'H2', location: 'website/src/App.svelte:181', message: 'fetchWithRetry attempt failed', data: { url, attempt, maxAttempts, error: err instanceof Error ? err.message : String(err) }, timestamp: Date.now() })
+        // #endregion
         if (attempt === maxAttempts) throw err
         await new Promise(r => setTimeout(r, delay))
         delay = Math.min(delay * 2, 10000)
@@ -142,13 +191,22 @@
 
   async function checkSession() {
     isCheckingSession = true
+    // #region agent log
+    debugLog({ runId: 'initial', hypothesisId: 'H4', location: 'website/src/App.svelte:187', message: 'checkSession start', data: { apiBaseUrl: API_BASE_URL, path: window.location.pathname }, timestamp: Date.now() })
+    // #endregion
     try {
       const response = await fetchWithRetry(`${API_BASE_URL}/auth/session`, {
         method: 'GET',
         credentials: 'include',
-      })
+        skipAuthHandling: true,
+        timeoutMs: 4000,
+      }, { maxAttempts: 2, initialDelayMs: 1000 })
+      // #region agent log
+      debugLog({ runId: 'initial', hypothesisId: 'H3', location: 'website/src/App.svelte:195', message: 'checkSession response received', data: { status: response.status, ok: response.ok }, timestamp: Date.now() })
+      // #endregion
       isAuthenticated = response.ok
       if (isAuthenticated) {
+        hasActiveSession = true
         try {
           const data = await response.json()
           userRole = data?.session?.role ?? ''
@@ -159,11 +217,17 @@
         showOnboarding = checkOnboardingNeeded()
         if (!showOnboarding) showDocsReminder = checkDocsReminder()
       }
-    } catch {
+    } catch (error) {
+      // #region agent log
+      debugLog({ runId: 'initial', hypothesisId: 'H2', location: 'website/src/App.svelte:209', message: 'checkSession threw', data: { error: error instanceof Error ? error.message : String(error) }, timestamp: Date.now() })
+      // #endregion
       isAuthenticated = false
       userRole = ''
     } finally {
       isCheckingSession = false
+      // #region agent log
+      debugLog({ runId: 'initial', hypothesisId: 'H5', location: 'website/src/App.svelte:214', message: 'checkSession finished', data: { isAuthenticated, hasActiveSession, isCheckingSession: false }, timestamp: Date.now() })
+      // #endregion
     }
   }
 
@@ -172,7 +236,9 @@
       const response = await fetchWithRetry(`${API_BASE_URL}/auth/providers`, {
         method: 'GET',
         credentials: 'include',
-      })
+        skipAuthHandling: true,
+        timeoutMs: 4000,
+      }, { maxAttempts: 2, initialDelayMs: 1000 })
       if (!response.ok) return
       const payload = await response.json()
       googleEnabled = Boolean(payload?.google?.enabled)
@@ -193,6 +259,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        skipAuthHandling: true,
         body: JSON.stringify({
           username: loginUsername,
           password: loginPassword,
@@ -205,6 +272,7 @@
       }
       loginPassword = ''
       isAuthenticated = true
+      hasActiveSession = true
       trackFunnel('login_success', { label: 'password' })
       showOnboarding = checkOnboardingNeeded()
       if (!showOnboarding) showDocsReminder = checkDocsReminder()
@@ -223,6 +291,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        skipAuthHandling: true,
         body: JSON.stringify({ id_token: token }),
       })
       if (!response.ok) {
@@ -230,6 +299,7 @@
         return
       }
       isAuthenticated = true
+      hasActiveSession = true
       trackFunnel('login_success', { label: 'google' })
       showOnboarding = checkOnboardingNeeded()
       if (!showOnboarding) showDocsReminder = checkDocsReminder()
@@ -299,11 +369,37 @@
       /* Network failure is fine — clear local state regardless. */
     }
     isAuthenticated = false
+    hasActiveSession = false
     userRole = ''
     authError = ''
   }
 
+  function enforceLaunchGate() {
+    currentPage = 'launch-signup'
+    publicSlug = ''
+    waToken = ''
+    if (window.location.pathname !== '/launch') {
+      history.replaceState({ page: 'launch-signup' }, '', '/launch')
+    }
+  }
+
   onMount(async () => {
+    // #region agent log
+    debugLog({ runId: 'initial', hypothesisId: 'H4', location: 'website/src/App.svelte:370', message: 'App onMount start', data: { siteLaunched: SITE_LAUNCHED, currentPage, pathname: window.location.pathname }, timestamp: Date.now() })
+    // #endregion
+    try {
+      mobileMediaQuery.addEventListener('change', handleMobileViewportChange)
+    } catch {
+      // Older browsers may use addListener/removeListener
+      try { mobileMediaQuery.addListener(handleMobileViewportChange) } catch { /* ignore */ }
+    }
+
+    if (!SITE_LAUNCHED) {
+      enforceLaunchGate()
+      trackPageView('launch-signup')
+      return
+    }
+
     history.replaceState({ page: currentPage }, '', window.location.pathname)
     startAutoFlush()
     trackSessionStart()
@@ -317,12 +413,18 @@
     }
 
     window.addEventListener('popstate', (e) => {
+      if (!SITE_LAUNCHED) {
+        enforceLaunchGate()
+        trackPageView('launch-signup')
+        return
+      }
       publicSlug = extractCrewSlug(window.location.pathname)
       waToken = extractWaToken(window.location.pathname)
       currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
       trackPageView(currentPage)
     })
     window.addEventListener('beforeunload', () => { flush(); stopAutoFlush() })
+    window.addEventListener('carver:unauthorized', handleUnauthorizedEvent)
 
     await Promise.all([checkSession(), loadAuthProviders()])
     await initGoogleButton()
@@ -334,12 +436,15 @@
 </script>
 
 <div class="min-h-screen bg-black text-slate-100 relative">
-  {#if waToken}
+  {#if currentPage === 'launch-signup'}
+    <LaunchSignupPage />
+  {:else if waToken}
     <WhatsAppAuthPage
       token={waToken}
       onAuthenticated={() => {
         waToken = ''
         isAuthenticated = true
+        hasActiveSession = true
         currentPage = 'profile'
         history.replaceState({ page: 'profile' }, '', '/profile')
         trackPageView('profile')
@@ -354,10 +459,17 @@
       <p class="text-sm text-slate-400">Checking session...</p>
     </main>
   {:else if !isAuthenticated && !showLogin}
-    <LandingPage
-      onSignIn={(source) => { showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
-      onStartMatch={() => { autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
-    />
+    {#if isMobileViewport}
+      <MobileMarketingPage
+        onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
+        onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
+      />
+    {:else}
+      <LandingPage
+        onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
+        onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
+      />
+    {/if}
   {:else if !isAuthenticated && showLogin}
     <main class="mx-auto flex min-h-[100dvh] w-full max-w-3xl items-center px-4 py-10 sm:px-6">
       <section class="w-full rounded-2xl border border-white/10 bg-zinc-950 p-6 sm:p-8">

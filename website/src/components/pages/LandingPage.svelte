@@ -3,6 +3,8 @@
   import { trackEvent } from '../../config/analytics'
 
   let { onSignIn = () => {}, onStartMatch = () => {} } = $props()
+  const isFinePointer = window.matchMedia('(pointer:fine)').matches
+  const isMobileViewport = window.matchMedia('(max-width: 768px)').matches
 
   // Hero mouse tracking — mousemove only (touch devices stay centered, no lag)
   let heroEl = $state(null)
@@ -10,6 +12,7 @@
   let my = $state(50)
 
   function handleHeroMouseMove(e) {
+    if (!isFinePointer || isMobileViewport) return
     if (!heroEl) return
     const rect = heroEl.getBoundingClientRect()
     mx = ((e.clientX - rect.left) / rect.width) * 100
@@ -37,9 +40,10 @@
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
+          const target = /** @type {HTMLElement} */ (entry.target)
           if (entry.isIntersecting) {
-            entry.target.dataset.visible = 'true'
-            if (entry.target.dataset.counters && !countersStarted) {
+            target.dataset.visible = 'true'
+            if (target.dataset.counters && !countersStarted) {
               countersStarted = true
               animateCounter((v) => (count1 = v), 2400)
               animateCounter((v) => (count2 = v), 98, 1200)
@@ -54,6 +58,9 @@
     document.querySelectorAll('[data-animate]').forEach((el) => observer.observe(el))
 
     const depths = new Set()
+    if (isMobileViewport) {
+      return () => observer.disconnect()
+    }
     function onScroll() {
       const pct = Math.round((window.scrollY + window.innerHeight) / document.body.scrollHeight * 100)
       for (const threshold of [25, 50, 75, 100]) {
@@ -159,7 +166,7 @@
   <!-- ── HERO ───────────────────────────────────────────────────────── -->
   <section
     bind:this={heroEl}
-    class="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 pt-16 sm:px-6 sm:pt-20"
+    class="relative flex min-h-[100svh] flex-col items-center justify-start overflow-hidden px-4 pb-10 pt-24 sm:min-h-screen sm:justify-center sm:px-6 sm:pb-0 sm:pt-20"
     onmousemove={handleHeroMouseMove}
     role="banner"
   >
@@ -206,7 +213,7 @@
       </div>
 
       <!-- Headline -->
-      <h1 class="text-[clamp(3rem,10vw,7rem)] font-black leading-[0.95] tracking-tight text-white">
+      <h1 class="text-[clamp(2.1rem,12vw,7rem)] font-black leading-[0.98] tracking-tight text-white">
         Your next<br />
         <span class="gradient-text">superyacht</span><br />
         job, automated.
@@ -247,7 +254,7 @@
     </div>
 
     <!-- Scroll arrow -->
-    <div class="absolute bottom-10 left-1/2 -translate-x-1/2 animate-bounce" aria-hidden="true">
+    <div class="absolute bottom-10 left-1/2 hidden -translate-x-1/2 animate-bounce sm:block" aria-hidden="true">
       <svg class="h-5 w-5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 9l-7 7-7-7" />
       </svg>
@@ -296,11 +303,13 @@
             style="--mx:50%; --my:50%; transition-delay: {i * 80}ms"
             data-animate
             onmousemove={(e) => {
+              if (!isFinePointer || isMobileViewport) return
               const r = e.currentTarget.getBoundingClientRect()
               e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`)
               e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`)
             }}
             onmouseleave={(e) => {
+              if (!isFinePointer || isMobileViewport) return
               e.currentTarget.style.setProperty('--mx', '50%')
               e.currentTarget.style.setProperty('--my', '50%')
             }}
@@ -552,7 +561,9 @@
     animation: float 10s ease-in-out infinite;
   }
   @media (max-width: 768px) {
-    .orb { filter: blur(40px); animation: none; }
+    .orb { filter: blur(36px); animation: none; }
+    .orb-4,
+    .orb-5 { display: none; }
   }
   .orb-1 {
     width: 700px;
@@ -635,6 +646,9 @@
     display: flex;
     width: max-content;
     animation: ticker 22s linear infinite;
+  }
+  @media (max-width: 768px) {
+    .ticker { animation: none; }
   }
   .ticker-item {
     padding: 0.3rem 1.25rem;
@@ -720,6 +734,17 @@
     border-color: rgba(34, 211, 238, 0.25);
     box-shadow: 0 24px 60px -20px rgba(34, 211, 238, 0.25);
     translate: 0 -3px;
+  }
+  @media (max-width: 768px), (pointer: coarse) {
+    .feature-card:hover {
+      border-color: rgba(255, 255, 255, 0.08);
+      box-shadow: none;
+      translate: 0;
+    }
+    .match-demo:hover {
+      border-color: rgba(34, 211, 238, 0.2);
+      box-shadow: none;
+    }
   }
 
   /* SVG icons in feature cards */

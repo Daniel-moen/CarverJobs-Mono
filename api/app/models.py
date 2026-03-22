@@ -206,3 +206,12 @@ class ErrorLog(Base):
   request_id = Column(String(20), nullable=True)
   client_ip = Column(String(60), nullable=True)
   ai_analysis = Column(Text, nullable=True)
+
+
+class WaitlistSignup(Base):
+  __tablename__ = "waitlist_signups"
+
+  id = Column(Integer, primary_key=True, index=True)
+  email = Column(String(160), unique=True, nullable=False, index=True)
+  source = Column(String(40), nullable=False, default="website")
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)

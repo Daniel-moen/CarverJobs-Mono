@@ -32,6 +32,18 @@ class GoogleLoginRequest(BaseModel):
     id_token: Annotated[str, Field(min_length=1, max_length=4096)]
 
 
+class WaitlistSignupRequest(BaseModel):
+    email: Annotated[str, Field(min_length=5, max_length=160)]
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not _EMAIL_RE.match(v):
+            raise ValueError("Invalid email address")
+        return v
+
+
 # ── Interview schemas ─────────────────────────────────────────────────────────
 
 class InterviewMessage(BaseModel):
