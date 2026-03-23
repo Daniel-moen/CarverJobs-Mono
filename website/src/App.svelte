@@ -14,6 +14,7 @@
   import PublicProfilePage from './components/pages/PublicProfilePage.svelte'
   import WhatsAppAuthPage from './components/pages/WhatsAppAuthPage.svelte'
   import LaunchSignupPage from './components/pages/LaunchSignupPage.svelte'
+  import SignUpPage from './components/pages/SignUpPage.svelte'
   import { API_BASE_URL, apiFetch } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
 
@@ -22,6 +23,7 @@
   // nginx already falls back to index.html for every path.
   const PATH_TO_PAGE = {
     '/launch':       'launch-signup',
+    '/signup':       'signup',
     '/':             'auto-apply',
     '/jobs':         'job-board',
     '/profile':      'profile',
@@ -47,6 +49,7 @@
     if (!SITE_LAUNCHED) return 'launch-signup'
     if (pathname.startsWith('/crew/')) return 'public-profile'
     if (pathname.startsWith('/wa/')) return 'whatsapp-auth'
+    if (pathname === '/signup') return 'signup'
     return PATH_TO_PAGE[pathname] ?? 'auto-apply'
   }
 
@@ -73,6 +76,7 @@
   let showOnboarding = false
   let showDocsReminder = false
   let showLogin = false
+  let showSignup = false
   let autoStartMatch = false
   let authError = ''
   let loginUsername = ''
@@ -85,17 +89,6 @@
   const browserWindow = /** @type {any} */ (window)
   const mobileMediaQuery = browserWindow.matchMedia('(max-width: 768px)')
   let isMobileViewport = mobileMediaQuery.matches
-
-  function debugLog(payload) {
-    if (typeof window === 'undefined') return
-    const host = window.location.hostname
-    if (host !== 'localhost' && host !== '127.0.0.1') return
-    fetch('http://127.0.0.1:7242/ingest/6976b566-a777-43de-856a-ff88f09927de', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch(() => {})
-  }
 
   function handleMobileViewportChange(e) {
     isMobileViewport = e.matches
@@ -174,14 +167,8 @@
     let delay = initialDelayMs
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        // #region agent log
-        debugLog({ runId: 'initial', hypothesisId: 'H1', location: 'website/src/App.svelte:176', message: 'fetchWithRetry attempt start', data: { url, attempt, maxAttempts }, timestamp: Date.now() })
-        // #endregion
         return await apiFetch(url, options)
       } catch (err) {
-        // #region agent log
-        debugLog({ runId: 'initial', hypothesisId: 'H2', location: 'website/src/App.svelte:181', message: 'fetchWithRetry attempt failed', data: { url, attempt, maxAttempts, error: err instanceof Error ? err.message : String(err) }, timestamp: Date.now() })
-        // #endregion
         if (attempt === maxAttempts) throw err
         await new Promise(r => setTimeout(r, delay))
         delay = Math.min(delay * 2, 10000)
@@ -191,9 +178,6 @@
 
   async function checkSession() {
     isCheckingSession = true
-    // #region agent log
-    debugLog({ runId: 'initial', hypothesisId: 'H4', location: 'website/src/App.svelte:187', message: 'checkSession start', data: { apiBaseUrl: API_BASE_URL, path: window.location.pathname }, timestamp: Date.now() })
-    // #endregion
     try {
       const response = await fetchWithRetry(`${API_BASE_URL}/auth/session`, {
         method: 'GET',
@@ -201,9 +185,6 @@
         skipAuthHandling: true,
         timeoutMs: 4000,
       }, { maxAttempts: 2, initialDelayMs: 1000 })
-      // #region agent log
-      debugLog({ runId: 'initial', hypothesisId: 'H3', location: 'website/src/App.svelte:195', message: 'checkSession response received', data: { status: response.status, ok: response.ok }, timestamp: Date.now() })
-      // #endregion
       isAuthenticated = response.ok
       if (isAuthenticated) {
         hasActiveSession = true
@@ -218,16 +199,10 @@
         if (!showOnboarding) showDocsReminder = checkDocsReminder()
       }
     } catch (error) {
-      // #region agent log
-      debugLog({ runId: 'initial', hypothesisId: 'H2', location: 'website/src/App.svelte:209', message: 'checkSession threw', data: { error: error instanceof Error ? error.message : String(error) }, timestamp: Date.now() })
-      // #endregion
       isAuthenticated = false
       userRole = ''
     } finally {
       isCheckingSession = false
-      // #region agent log
-      debugLog({ runId: 'initial', hypothesisId: 'H5', location: 'website/src/App.svelte:214', message: 'checkSession finished', data: { isAuthenticated, hasActiveSession, isCheckingSession: false }, timestamp: Date.now() })
-      // #endregion
     }
   }
 
@@ -384,9 +359,6 @@
   }
 
   onMount(async () => {
-    // #region agent log
-    debugLog({ runId: 'initial', hypothesisId: 'H4', location: 'website/src/App.svelte:370', message: 'App onMount start', data: { siteLaunched: SITE_LAUNCHED, currentPage, pathname: window.location.pathname }, timestamp: Date.now() })
-    // #endregion
     try {
       mobileMediaQuery.addEventListener('change', handleMobileViewportChange)
     } catch {
@@ -421,12 +393,15 @@
       publicSlug = extractCrewSlug(window.location.pathname)
       waToken = extractWaToken(window.location.pathname)
       currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
+      showSignup = currentPage === 'signup'
+      showLogin = false
       trackPageView(currentPage)
     })
     window.addEventListener('beforeunload', () => { flush(); stopAutoFlush() })
     window.addEventListener('carver:unauthorized', handleUnauthorizedEvent)
 
     await Promise.all([checkSession(), loadAuthProviders()])
+    if (currentPage === 'signup' && !isAuthenticated) showSignup = true
     await initGoogleButton()
   })
 
@@ -458,6 +433,24 @@
     <main class="mx-auto flex min-h-[100dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
       <p class="text-sm text-slate-400">Checking session...</p>
     </main>
+  {:else if !isAuthenticated && showSignup}
+    <SignUpPage
+      onSignUpSuccess={() => {
+        showSignup = false
+        isAuthenticated = true
+        hasActiveSession = true
+        trackFunnel('signup_complete', { label: 'email' })
+        showOnboarding = checkOnboardingNeeded()
+        if (!showOnboarding) showDocsReminder = checkDocsReminder()
+        currentPage = 'auto-apply'
+        history.replaceState({ page: 'auto-apply' }, '', '/')
+      }}
+      onGoToLogin={() => {
+        showSignup = false
+        showLogin = true
+        history.pushState({ page: 'login' }, '', '/')
+      }}
+    />
   {:else if !isAuthenticated && !showLogin}
     {#if isMobileViewport}
       <MobileMarketingPage
@@ -532,6 +525,19 @@
         {#if authError}
           <p class="mt-4 text-sm text-rose-300">{authError}</p>
         {/if}
+
+        <div class="mt-6 border-t border-white/10 pt-5">
+          <p class="text-center text-sm text-slate-500">
+            Don't have an account?
+            <button
+              type="button"
+              onclick={() => { showLogin = false; showSignup = true; authError = ''; history.pushState({ page: 'signup' }, '', '/signup'); trackClick('goto_signup') }}
+              class="font-medium text-cyan-400 transition hover:text-cyan-300"
+            >
+              Sign up
+            </button>
+          </p>
+        </div>
       </section>
     </main>
   {:else if showOnboarding}

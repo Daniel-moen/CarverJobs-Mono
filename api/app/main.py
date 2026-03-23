@@ -12,7 +12,6 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.csrf import check_csrf, generate_csrf_token, CSRF_HEADER_NAME
 from app.database import Base, engine, run_migrations, SessionLocal
@@ -28,13 +27,23 @@ from app.settings import settings, validate_production_settings
 setup_logging()
 log = get_logger("carver.api")
 
-validate_production_settings()
-
 limiter = Limiter(key_func=get_remote_address)
 
-Base.metadata.create_all(bind=engine)
-run_migrations()
-ensure_default_user()
+
+def _init_database() -> None:
+    """Create tables, run migrations, seed users. Never crashes the process."""
+    try:
+        validate_production_settings()
+    except RuntimeError:
+        log.exception("Production settings validation failed — refusing to start")
+        raise
+    try:
+        Base.metadata.create_all(bind=engine)
+        run_migrations()
+        ensure_default_user()
+        log.info("Database initialised successfully")
+    except Exception:
+        log.exception("Database initialisation failed — app will start but DB may be unavailable")
 
 
 async def metrics_loop() -> None:
@@ -45,6 +54,7 @@ async def metrics_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _init_database()
     log.info("Starting background health checker (interval=5m)")
     health_task = asyncio.create_task(health_check_loop())
     log.info("Starting background metrics recorder (interval=1m)")
@@ -95,7 +105,6 @@ def _log_error_to_db(
                 client_ip=client_ip,
             ))
             db.commit()
-            # Keep only the 200 most recent entries
             total = db.query(models.ErrorLog).count()
             if total > 200:
                 cutoff_id = (
@@ -113,12 +122,10 @@ def _log_error_to_db(
         finally:
             db.close()
     except Exception:
-        pass  # Never let error logging break the response
+        pass
 
 
 # ── Global exception handlers ───────────────────────────────────────────────
-# Every error response MUST carry a CRV code so the client never sees raw
-# library/framework error details.
 
 def _crv_response(status_code: int, detail: str, code: str) -> JSONResponse:
     return JSONResponse(
@@ -128,7 +135,6 @@ def _crv_response(status_code: int, detail: str, code: str) -> JSONResponse:
 
 
 def _extract_crv_code(exc: HTTPException) -> str | None:
-    """Pull an explicit CRV code from the X-Error-Code header, if set."""
     headers = getattr(exc, "headers", None) or {}
     code = headers.get("X-Error-Code", "")
     return code if code.startswith("CRV-") else None
@@ -184,11 +190,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
     return _crv_response(500, "Internal server error.", CRV_1006)
 
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=settings.ALLOWED_HOSTS,
-)
-
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
@@ -207,7 +208,6 @@ _MODULE_PREFIXES = [
 
 
 def _route_module(path: str) -> str:
-    """Derive the module name from a request path (e.g. '/auth/login' -> 'auth')."""
     for prefix in _MODULE_PREFIXES:
         if path.startswith(prefix):
             return prefix.lstrip("/").split("/")[0]
@@ -296,17 +296,12 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-# CORSMiddleware is registered last so it becomes the outermost layer in the
-# middleware stack.  This guarantees that Access-Control-Allow-Origin is present
-# on *every* response — including the 403 returned by csrf_middleware when the
-# CSRF cookie is missing — so browsers never misread a CSRF rejection as a CORS
-# failure.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-CSRF-Token"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
     expose_headers=["X-CSRF-Token"],
 )
 

@@ -8,6 +8,12 @@ log = get_logger("carver.health")
 router = APIRouter(tags=["health"])
 
 
+@router.get("/")
+def root_health():
+    # Fallback health route for platforms that probe "/" by default.
+    return {"ok": True, "service": "api"}
+
+
 @router.get("/health")
 def health():
     log.debug("Health check")

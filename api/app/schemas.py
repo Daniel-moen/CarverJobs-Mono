@@ -44,6 +44,28 @@ class WaitlistSignupRequest(BaseModel):
         return v
 
 
+class SignupRequest(BaseModel):
+    email: Annotated[str, Field(min_length=5, max_length=160)]
+    full_name: Annotated[str, Field(min_length=1, max_length=120)]
+    password: Annotated[str, Field(min_length=8, max_length=256)]
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not _EMAIL_RE.match(v):
+            raise ValueError("Invalid email address")
+        return v
+
+    @field_validator("full_name")
+    @classmethod
+    def _validate_full_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Full name is required")
+        return v
+
+
 # ── Interview schemas ─────────────────────────────────────────────────────────
 
 class InterviewMessage(BaseModel):

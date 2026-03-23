@@ -8,11 +8,11 @@ from slowapi.util import get_remote_address
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import metrics, models
-from app.error_codes import CRV_2002, CRV_2007, CRV_2008
+from app import crud, flags, metrics, models
+from app.error_codes import CRV_2002, CRV_2007, CRV_2008, CRV_2009
 from app.database import get_db
 from app.logger import get_logger
-from app.schemas import GoogleLoginRequest, LoginRequest, WaitlistSignupRequest
+from app.schemas import GoogleLoginRequest, LoginRequest, SignupRequest, UserCreate, WaitlistSignupRequest
 from app.security import issue_session_token, require_session
 from app.settings import settings
 
@@ -77,6 +77,48 @@ def signup_waitlist(request: Request, payload: WaitlistSignupRequest, db: Sessio
     return {"ok": True}
 
   return {"ok": True}
+
+
+@router.post("/signup", status_code=status.HTTP_201_CREATED)
+@_limiter.limit("5/minute")
+def signup(request: Request, payload: SignupRequest, response: Response, db: Session = Depends(get_db)):
+  if not flags.is_enabled("user_registration"):
+    metrics.increment("feature_blocked")
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="Registration is temporarily disabled.",
+    )
+
+  email = payload.email.strip().lower()
+  existing = crud.get_user_by_email(db, email)
+  if existing:
+    log.warning("Signup failed: email exists | email=%s", email)
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT,
+      detail="An account with this email already exists.",
+      headers={"X-Error-Code": CRV_2009},
+    )
+
+  user = crud.create_user(db, UserCreate(
+    email=email,
+    full_name=payload.full_name.strip(),
+    password=payload.password,
+    role="crew",
+  ))
+
+  token = issue_session_token({"sub": email, "role": "crew", "user_id": user.id})
+  response.set_cookie(
+    key=settings.SESSION_COOKIE_NAME,
+    value=token,
+    httponly=True,
+    secure=settings.SESSION_SECURE_COOKIE,
+    samesite=SESSION_SAMESITE,
+    max_age=settings.SESSION_TTL_SECONDS,
+    path="/",
+  )
+  metrics.increment("signups_success")
+  log.info("Signup success | id=%d | email=%s", user.id, email)
+  return {"ok": True, "user": {"id": user.id, "email": email, "role": "crew"}}
 
 
 @router.post("/login")

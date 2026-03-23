@@ -35,6 +35,7 @@ CRV_2005 = "CRV-2005"  # Admin access required
 CRV_2006 = "CRV-2006"  # CSRF validation failed
 CRV_2007 = "CRV-2007"  # Google login not enabled / token invalid
 CRV_2008 = "CRV-2008"  # Google account not in allowlist
+CRV_2009 = "CRV-2009"  # Email already registered (signup)
 
 # ── External AI / OpenAI ─────────────────────────────────────────────────────
 CRV_3001 = "CRV-3001"  # OpenAI API key is missing or not configured
@@ -79,6 +80,7 @@ DESCRIPTIONS: dict[str, str] = {
     CRV_2006: "CSRF validation failed",
     CRV_2007: "Google login unavailable",
     CRV_2008: "Google account not allowed",
+    CRV_2009: "Email already registered",
     CRV_3001: "OpenAI API key not configured",
     CRV_3002: "OpenAI request timed out",
     CRV_3003: "OpenAI returned an error",

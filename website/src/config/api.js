@@ -7,17 +7,6 @@ let _csrfToken = ''
 let _seedingPromise = null
 let _lastUnauthorizedEventMs = 0
 
-function debugLog(payload) {
-  if (typeof window === 'undefined') return
-  const host = window.location.hostname
-  if (host !== 'localhost' && host !== '127.0.0.1') return
-  fetch('http://127.0.0.1:7242/ingest/6976b566-a777-43de-856a-ff88f09927de', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }).catch(() => {})
-}
-
 /**
  * Seed the CSRF token by making a lightweight GET request.
  * Deduplicates concurrent calls so only one request is in-flight at a time.
@@ -63,22 +52,12 @@ export async function apiFetch(url, options = {}) {
       : (signal ?? timeoutSignal)
   }
 
-  // #region agent log
-  debugLog({ runId: 'initial', hypothesisId: 'H1', location: 'website/src/config/api.js:64', message: 'apiFetch request start', data: { url, method, skipAuthHandling, hasCsrfToken: Boolean(_csrfToken), timeoutMs }, timestamp: Date.now() })
-  // #endregion
   let response
   try {
     response = await fetch(url, { credentials: 'include', ...fetchOptions, headers, signal })
   } catch (error) {
-    // #region agent log
-    debugLog({ runId: 'initial', hypothesisId: 'H2', location: 'website/src/config/api.js:71', message: 'apiFetch request threw', data: { url, method, timeoutMs, error: error instanceof Error ? error.message : String(error) }, timestamp: Date.now() })
-    // #endregion
     throw error
   }
-
-  // #region agent log
-  debugLog({ runId: 'initial', hypothesisId: 'H3', location: 'website/src/config/api.js:77', message: 'apiFetch response received', data: { url, method, status: response.status, ok: response.ok, timeoutMs }, timestamp: Date.now() })
-  // #endregion
 
   const freshToken = response.headers.get(CSRF_HEADER)
   if (freshToken) _csrfToken = freshToken

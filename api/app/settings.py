@@ -26,6 +26,21 @@ def _csv_env(name: str, default: str) -> list[str]:
   raw = os.getenv(name, default)
   return [item.strip() for item in raw.split(",") if item.strip()]
 
+def _default_cors_origins() -> str:
+  # Keep defaults explicit so production works even if CORS_ORIGINS is unset.
+  defaults = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "https://jobcarver.co",
+    "https://www.jobcarver.co",
+  ]
+  frontend_base = os.getenv("FRONTEND_BASE_URL", "").strip()
+  if frontend_base:
+    defaults.append(frontend_base)
+  # Preserve order while removing duplicates.
+  return ",".join(dict.fromkeys(defaults))
+
 
 class Settings:
   APP_ENV = os.getenv("APP_ENV", "development")
@@ -46,7 +61,7 @@ class Settings:
 
   CORS_ORIGINS = _csv_env(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080",
+    _default_cors_origins(),
   )
   # Default to * so Railway's health checker always reaches /health regardless
   # of whether it uses the public domain, internal hostname, or an IP.
