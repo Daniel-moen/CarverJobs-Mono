@@ -18,7 +18,7 @@ from typing import Any
 log = logging.getLogger("carver.matching_v2")
 
 BATCH_SIZE = 10
-MATCH_THRESHOLD = 50
+MATCH_THRESHOLD = 35
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
 _RETRYABLE_CODES = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 3
@@ -190,16 +190,18 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
             ],
             "matched_threshold": MATCH_THRESHOLD,
             "instructions": [
-                "ROLE is the most important factor. The job role must be in the same department as the candidate's desired_role.",
-                "Cross-department mismatches (e.g. desired=Deckhand, job=Stewardess) must get compatibility <= 15.",
-                "Same-department but different seniority (e.g. desired=Deckhand, job=Bosun) can score 25-50 depending on experience.",
+                "ROLE DEPARTMENT is the primary filter. The job must be in the same department or a closely related one.",
                 "Departments: Deck, Interior/Stew, Engine, Galley, Bridge, Medical, Pursers.",
-                f"Set matched=true ONLY if compatibility >= {MATCH_THRESHOLD}.",
-                "Be realistic — assess true hirability based on the candidate's bio and job_history as primary evidence.",
-                "Senior roles (Chief, Captain, HOD) without matching history: penalise heavily.",
-                "Missing required certifications for officer/senior roles: reduce by at least 15 points.",
-                "Job pay >30% below candidate's salary_min: reduce by 10 points.",
-                "No location overlap: reduce by 5 points.",
+                "Cross-department mismatches (e.g. desired=Deckhand, job=Stewardess) must get compatibility <= 15.",
+                "Same-department roles at different seniority levels ARE valid matches — score them 30-65 depending on experience gap.",
+                "Dual roles like Deck/Stew should match BOTH Deck and Interior departments.",
+                f"Set matched=true if compatibility >= {MATCH_THRESHOLD}. Be GENEROUS — if the candidate could reasonably apply and have a shot, mark it matched.",
+                "Use the candidate's bio and job_history as the primary evidence of capability. If their history shows they can do the job, score high.",
+                "Do NOT over-penalise for missing certifications unless the job explicitly requires them for safety-critical roles (Captain, Engineer, Officer).",
+                "Location flexibility: yachting is a global industry — location mismatches should only reduce by 3-5 points, not disqualify.",
+                "Pay mismatches: only reduce if the job pay is drastically (>50%) below the candidate's minimum.",
+                "If the candidate has relevant experience for the role, that should outweigh minor gaps in listed requirements.",
+                "AIM to find at least 5+ matches if the candidate has any relevant experience. Be helpful, not punitive.",
                 "Output ONLY raw JSON. No markdown fences, no extra text.",
                 f"You MUST return exactly one entry for every job_id: {json.dumps(job_ids)}. Copy each job_id verbatim.",
                 "Each entry: job_id (integer, verbatim), matched (boolean), compatibility (integer 0-100), reason (1-2 sentences), strengths (list), gaps (list), factor_scores (object).",
@@ -226,8 +228,9 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
     }
 
     return (
-        "You are a strict superyacht crew job matching engine. "
-        "Only surface genuinely strong fits — protect candidates from wasted applications.\n"
+        "You are a superyacht crew job matching engine. "
+        "Your goal is to help candidates find every job they could realistically apply for. "
+        "Be thorough and generous — if there is a reasonable fit, surface it.\n"
         "CRITICAL: Output ONLY raw JSON matching the schema. No markdown code fences.\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
