@@ -217,7 +217,7 @@ async def find_match(
     all_jobs = db.query(Job).filter(Job.status.in_(["open", "priority"])).order_by(Job.created_at.desc()).limit(60).all()
 
     if not all_jobs:
-        return CrewMatchResponse(matched=False, job=None)
+        return CrewMatchResponse(matched=False)
 
     jobs = _role_prefilter(all_jobs, profile.desired_role or "", limit=20)
     jobs_by_id = {str(j.id): j for j in jobs}

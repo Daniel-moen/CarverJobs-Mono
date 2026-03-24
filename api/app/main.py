@@ -272,8 +272,7 @@ async def csrf_middleware(request: Request, call_next):
             return error_resp
         raise
     response = await call_next(request)
-    if request.method in ("GET", "HEAD"):
-        response.headers[CSRF_HEADER_NAME] = generate_csrf_token()
+    response.headers[CSRF_HEADER_NAME] = generate_csrf_token()
     return response
 
 

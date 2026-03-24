@@ -48,7 +48,10 @@ class Settings:
   SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
   SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "carver_session")
   SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "3600"))
-  SESSION_SECURE_COOKIE = os.getenv("SESSION_SECURE_COOKIE", "false").lower() == "true"
+  SESSION_SECURE_COOKIE = os.getenv(
+      "SESSION_SECURE_COOKIE",
+      "true" if os.getenv("APP_ENV") == "production" else "false",
+  ).lower() == "true"
 
   ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
   ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-this-password")
