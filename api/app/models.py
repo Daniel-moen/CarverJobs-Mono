@@ -110,6 +110,7 @@ class CrewProfile(Base):
   profile_slug = Column(String(16), unique=True, nullable=False, index=True)
   first_name = Column(String(120), nullable=True)
   last_name = Column(String(120), nullable=True)
+  sex = Column(String(20), nullable=True)
   phone = Column(String(40), nullable=True)
   nationality = Column(String(80), nullable=True)
   current_location = Column(String(120), nullable=True)
@@ -215,3 +216,29 @@ class WaitlistSignup(Base):
   email = Column(String(160), unique=True, nullable=False, index=True)
   source = Column(String(40), nullable=False, default="website")
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class MatchSession(Base):
+  __tablename__ = "match_sessions"
+
+  id = Column(Integer, primary_key=True, index=True)
+  user_key = Column(String(160), nullable=False, index=True)
+  status = Column(String(20), nullable=False, default="running")
+  total_jobs_scanned = Column(Integer, nullable=False, default=0)
+  total_matched = Column(Integer, nullable=False, default=0)
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+  completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class MatchSessionResult(Base):
+  __tablename__ = "match_session_results"
+
+  id = Column(Integer, primary_key=True, index=True)
+  session_id = Column(Integer, nullable=False, index=True)
+  job_id = Column(Integer, nullable=False)
+  matched = Column(Boolean, nullable=False, default=False)
+  compatibility = Column(Float, nullable=False, default=0.0)
+  reason = Column(Text, nullable=True)
+  strengths = Column(Text, nullable=True)
+  gaps = Column(Text, nullable=True)
+  factor_scores = Column(Text, nullable=True)

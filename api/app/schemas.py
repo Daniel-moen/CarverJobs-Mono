@@ -274,9 +274,13 @@ class JobRead(JobBase):
 
 # ── Crew profile schemas ─────────────────────────────────────────────────────
 
+_VALID_SEX_VALUES = {"male", "female", "other", "prefer_not_to_say"}
+
+
 class CrewProfileSave(BaseModel):
     first_name: OptShort = None
     last_name: OptShort = None
+    sex: Annotated[Optional[str], Field(default=None, max_length=20)] = None
     phone: Annotated[Optional[str], Field(default=None, max_length=40)] = None
     nationality: OptShort = None
     current_location: OptShort = None
@@ -291,6 +295,15 @@ class CrewProfileSave(BaseModel):
     certifications: OptLong = None
     languages: OptMed = None
     bio: OptLong = None
+
+    @field_validator("sex")
+    @classmethod
+    def _validate_sex(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip().lower()
+            if v and v not in _VALID_SEX_VALUES:
+                raise ValueError(f"sex must be one of: {', '.join(sorted(_VALID_SEX_VALUES))}")
+        return v or None
 
 
 class CrewProfileRead(CrewProfileSave):
@@ -443,3 +456,48 @@ class DraftEmailResponse(BaseModel):
     to: str
     subject: str
     body: str
+
+
+# ── Match session schemas ────────────────────────────────────────────────────
+
+class MatchSessionResultItem(BaseModel):
+    job: CrewMatchJob
+    matched: bool
+    compatibility: float
+    reason: str = ""
+    strengths: list[str] = []
+    gaps: list[str] = []
+    factor_scores: dict[str, float] = {}
+
+
+class MatchSessionSummary(BaseModel):
+    id: int
+    status: str
+    total_jobs_scanned: int
+    total_matched: int
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MatchSessionDetail(BaseModel):
+    id: int
+    status: str
+    total_jobs_scanned: int
+    total_matched: int
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    results: list[MatchSessionResultItem] = []
+
+
+class MatchSessionListResponse(BaseModel):
+    sessions: list[MatchSessionSummary] = []
+
+
+class CrewMatchV2Response(BaseModel):
+    session_id: int
+    matched: bool
+    total_jobs_scanned: int
+    total_matched: int
+    matches: list[MatchSessionResultItem] = []

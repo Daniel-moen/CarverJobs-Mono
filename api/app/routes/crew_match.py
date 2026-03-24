@@ -1,9 +1,7 @@
 import asyncio
 import json
 import time
-from pathlib import Path
-import sys
-from typing import Optional
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from slowapi import Limiter
@@ -13,10 +11,24 @@ from sqlalchemy.orm import Session
 from app import metrics
 from app.database import get_db
 from app.logger import get_logger
-from app.models import CrewProfile, Job, JobHistoryEntry
-from app.schemas import CrewMatchAI, CrewMatchItem, CrewMatchJob, CrewMatchResponse, DraftEmailRequest, DraftEmailResponse
+from app.models import CrewProfile, Job, JobHistoryEntry, MatchSession, MatchSessionResult
+from app.schemas import (
+    CrewMatchJob,
+    CrewMatchV2Response,
+    DraftEmailRequest,
+    DraftEmailResponse,
+    MatchSessionDetail,
+    MatchSessionListResponse,
+    MatchSessionResultItem,
+    MatchSessionSummary,
+)
 from app.security import require_session
 from app.services.ai_client import AIClientError, call_openai
+from app.services.matching_v2 import (
+    CandidateProfile,
+    JobSummary,
+    match_candidate_to_jobs,
+)
 from app.settings import settings
 
 log = get_logger("carver.crew_match")
@@ -24,181 +36,108 @@ _limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/matching", tags=["crew-matching"])
 
-# ── Import the real Matching Engine ──────────────────────────────────────────
-ENGINE_DIR = Path(__file__).resolve().parents[2] / "Matching Engine"
-_ENGINE_OK = False
-
-if ENGINE_DIR.exists() and ENGINE_DIR.is_dir():
-    if str(ENGINE_DIR) not in sys.path:
-        sys.path.insert(0, str(ENGINE_DIR))
-    try:
-        from models.job import JobPosting
-        from models.user import UserProfile
-        from services.matching_service import MatchingService
-        from services.openai_client import OpenAIClient
-        from services.prompt_builder import PromptBuilder
-        from utils.batching import FixedSizeBatchStrategy
-
-        _ENGINE_OK = True
-        log.info("Matching Engine loaded from %s", ENGINE_DIR)
-    except Exception as exc:
-        log.warning("Could not import Matching Engine: %s", exc)
-
-
-def _build_matching_service() -> Optional[MatchingService]:
-    if not _ENGINE_OK or not settings.OPENAI_API_KEY:
-        return None
-    return MatchingService(
-        llm_client=OpenAIClient(api_key=settings.OPENAI_API_KEY, model=settings.OPENAI_MODEL),
-        batch_strategy=FixedSizeBatchStrategy(batch_size=10),
-        prompt_builder=PromptBuilder(),
-        verbose=False,
-    )
-
-
-_service_instance: Optional[MatchingService] = None
-
-
-def _get_service() -> Optional[MatchingService]:
-    global _service_instance
-    if _service_instance is None:
-        _service_instance = _build_matching_service()
-    return _service_instance
-
 
 # ── Mapping helpers ──────────────────────────────────────────────────────────
 
-def _crew_to_user_profile(p: CrewProfile, job_history: list[JobHistoryEntry] | None = None) -> UserProfile:
-    """Map a CrewProfile DB row to the Matching Engine's UserProfile."""
-    pay_min = 0.0
-    if p.salary_min:
-        try:
-            pay_min = float(p.salary_min)
-        except (ValueError, TypeError):
-            pass
-
-    pay_max = 0.0
-    if p.salary_max:
-        try:
-            pay_max = float(p.salary_max)
-        except (ValueError, TypeError):
-            pass
-
-    yrs = 0.0
-    if p.years_experience:
-        try:
-            yrs = float(p.years_experience)
-        except (ValueError, TypeError):
-            pass
-
-    certs = []
+def _profile_to_candidate(
+    p: CrewProfile,
+    job_history: list[JobHistoryEntry] | None = None,
+) -> CandidateProfile:
+    certs: list[str] = []
     if p.certifications:
         certs = [c.strip() for c in p.certifications.replace("\n", ",").split(",") if c.strip()]
 
-    languages = []
+    langs: list[str] = []
     if p.languages:
-        languages = [l.strip() for l in p.languages.split(",") if l.strip()]
+        langs = [lang.strip() for lang in p.languages.split(",") if lang.strip()]
 
-    history = []
+    history: list[dict[str, str]] = []
     if job_history:
-        for entry in job_history:
+        for e in job_history:
             history.append({
-                "role": entry.role,
-                "yacht": entry.yacht_name,
-                "yacht_type": entry.yacht_type or "",
-                "start_date": entry.start_date or "",
-                "end_date": entry.end_date or "",
-                "description": (entry.description or "")[:200],
+                "role": e.role,
+                "yacht": e.yacht_name,
+                "yacht_type": e.yacht_type or "",
+                "start_date": e.start_date or "",
+                "end_date": e.end_date or "",
+                "description": (e.description or "")[:200],
             })
 
-    return UserProfile(
-        user_id=p.user_key,
+    return CandidateProfile(
+        user_key=p.user_key,
+        first_name=p.first_name or "",
+        last_name=p.last_name or "",
+        sex=p.sex or "",
         desired_role=p.desired_role or "",
-        location=p.preferred_locations or p.current_location or "Unknown",
-        desired_pay_min=pay_min,
-        desired_length=p.contract_type or "Any",
-        skills=[],
-        certifications=certs,
-        years_experience=yrs,
-        languages=languages,
+        location=p.current_location or "",
+        preferred_locations=p.preferred_locations or "",
         nationality=p.nationality or "",
+        years_experience=p.years_experience or "",
+        salary_min=p.salary_min or "",
+        salary_max=p.salary_max or "",
+        contract_type=p.contract_type or "",
         rotation_preference=p.rotation_preference or "",
         available_from=p.available_from or "",
-        salary_max=pay_max,
-        bio=(p.bio or "")[:400],
+        certifications=certs,
+        languages=langs,
+        bio=p.bio or "",
         job_history=history,
     )
 
 
-def _job_to_posting(j: Job) -> JobPosting:
-    """Map a Job DB row to the Matching Engine's JobPosting."""
-    pay = float(j.salary_max or j.salary_min or 0.0)
-    skills = []
-    if j.requirements:
-        skills = [s.strip() for s in j.requirements[:300].replace("\n", ",").split(",") if s.strip()]
-    certs = []
-    if j.certifications_required:
-        certs = [c.strip() for c in j.certifications_required.replace("\n", ",").split(",") if c.strip()]
-    return JobPosting(
-        job_id=str(j.id),
+def _job_to_summary(j: Job) -> JobSummary:
+    return JobSummary(
+        job_id=j.id,
         title=j.title,
         role=j.role or "",
+        department=j.department or "",
         location=j.location,
-        pay=pay,
-        length=j.contract_type or "Unknown",
+        yacht_type=j.yacht_type or "",
+        yacht_length_m=j.yacht_length_m,
+        start_date=j.start_date or "",
+        contract_type=j.contract_type or "",
+        rotation=j.rotation or "",
+        season=j.season or "",
+        salary_min=j.salary_min,
+        salary_max=j.salary_max,
+        salary_currency=j.salary_currency or "EUR",
+        experience_required_years=j.experience_required_years,
+        certifications_required=j.certifications_required or "",
+        languages_required=j.languages_required or "",
         description=j.description or "",
-        required_skills=skills,
-        preferred_certifications=certs,
     )
 
 
-_DEPT_MAP: dict[str, str] = {}
-for _dept, _roles in {
-    "deck": ["deckhand", "bosun", "lead deckhand", "deck/stew", "mate", "first mate", "officer", "deck officer", "first officer", "second officer"],
-    "interior": ["stewardess", "stew", "chief stew", "chief stewardess", "head of interior", "head stew", "2nd stew", "3rd stew", "junior stew", "service stewardess", "interior", "housekeeper", "laundry"],
-    "bridge": ["captain", "master", "relief captain"],
-    "engine": ["engineer", "eto", "electro-technical officer", "chief engineer", "2nd engineer", "3rd engineer", "lead engineer", "oiler", "wiper"],
-    "galley": ["chef", "head chef", "sous chef", "cook", "galley", "pastry chef", "crew chef"],
-    "medical": ["medic", "nurse", "paramedic"],
-    "pursers": ["purser", "administrator", "admin"],
-}.items():
-    for _r in _roles:
-        _DEPT_MAP[_r] = _dept
-    _DEPT_MAP[_dept] = _dept
-
-
-def _role_department(role_text: str) -> str | None:
-    """Map a role string to a yacht department via keyword lookup."""
-    lower = role_text.lower().strip()
-    if lower in _DEPT_MAP:
-        return _DEPT_MAP[lower]
-    for key, dept in _DEPT_MAP.items():
-        if key in lower:
-            return dept
-    return None
-
-
-def _role_prefilter(jobs: list[Job], desired_role: str, limit: int = 20) -> list[Job]:
-    """Pre-filter jobs by department + keyword relevance before the LLM.
-
-    Prioritises same-department jobs, then ranks by keyword overlap.
-    Falls back to all jobs (sorted by keyword score) if too few match.
-    """
-    if not desired_role:
-        return jobs[:limit]
-
-    desired_dept = _role_department(desired_role)
-    keywords = set(desired_role.lower().split())
-
-    def score(job: Job) -> tuple[int, int]:
-        role_text = (job.role or "").lower()
-        dept_match = 1 if desired_dept and _role_department(role_text) == desired_dept else 0
-        kw_match = len(keywords & set(role_text.split()))
-        return (dept_match, kw_match)
-
-    scored = sorted(jobs, key=score, reverse=True)
-    dept_hits = [j for j in scored if score(j)[0] > 0]
-    return (dept_hits if len(dept_hits) >= 3 else scored)[:limit]
+def _job_to_schema(j: Job) -> CrewMatchJob:
+    return CrewMatchJob(
+        id=j.id,
+        title=j.title,
+        role=j.role,
+        yacht=j.yacht,
+        location=j.location,
+        contract_type=j.contract_type,
+        salary_min=j.salary_min,
+        salary_max=j.salary_max,
+        salary_currency=j.salary_currency,
+        contact_email=j.contact_email,
+        description=j.description,
+        yacht_type=j.yacht_type,
+        yacht_length_m=j.yacht_length_m,
+        start_date=j.start_date,
+        season=j.season,
+        rotation=j.rotation,
+        experience_required_years=j.experience_required_years,
+        certifications_required=j.certifications_required,
+        languages_required=j.languages_required,
+        requirements=j.requirements,
+        responsibilities=j.responsibilities,
+        benefits=j.benefits,
+        recruiter_name=j.recruiter_name,
+        recruiter_agency=j.recruiter_agency,
+        application_url=j.application_url,
+        urgent_hire=j.urgent_hire,
+        source=j.source,
+    )
 
 
 def _profile_summary(p: CrewProfile) -> str:
@@ -228,118 +167,215 @@ def _profile_summary(p: CrewProfile) -> str:
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.post("/find", response_model=CrewMatchResponse)
+@router.post("/find", response_model=CrewMatchV2Response)
 @_limiter.limit("5/minute")
 async def find_match(
     request: Request,
     session: dict = Depends(require_session),
     db: Session = Depends(get_db),
 ):
+    """Run a full match session: score every open job against the candidate's
+    profile, persist the results, and return all matches."""
+
     if not settings.OPENAI_API_KEY:
-        raise HTTPException(status_code=503, detail="Matching is not configured (missing API key).")
+        raise HTTPException(status_code=503, detail="Matching not configured (missing API key).")
 
     user_key = session["sub"]
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == user_key).first()
     if not profile:
         raise HTTPException(status_code=400, detail="Save your profile first before matching.")
 
-    all_jobs = db.query(Job).filter(Job.status.in_(["open", "priority"])).order_by(Job.created_at.desc()).all()
-
+    all_jobs = (
+        db.query(Job)
+        .filter(Job.status.in_(["open", "priority"]))
+        .order_by(Job.created_at.desc())
+        .all()
+    )
     if not all_jobs:
-        return CrewMatchResponse(matched=False)
+        return CrewMatchV2Response(session_id=0, matched=False, total_jobs_scanned=0, total_matched=0)
 
-    jobs = all_jobs
-    jobs_by_id = {str(j.id): j for j in jobs}
+    match_session = MatchSession(user_key=user_key, status="running", total_jobs_scanned=len(all_jobs))
+    db.add(match_session)
+    db.commit()
+    db.refresh(match_session)
+    session_id = match_session.id
 
-    service = _get_service()
-    if service is None:
-        log.warning("Matching Engine unavailable, cannot match for user=%s", user_key)
-        raise HTTPException(status_code=503, detail="Matching engine is not available.")
+    job_history = (
+        db.query(JobHistoryEntry)
+        .filter(JobHistoryEntry.user_key == user_key)
+        .order_by(JobHistoryEntry.start_date.desc())
+        .limit(10)
+        .all()
+    )
 
-    job_history = db.query(JobHistoryEntry).filter(JobHistoryEntry.user_key == user_key).order_by(JobHistoryEntry.start_date.desc()).limit(10).all()
-    user_profile = _crew_to_user_profile(profile, job_history)
-    job_postings = [_job_to_posting(j) for j in jobs]
+    candidate = _profile_to_candidate(profile, job_history)
+    job_summaries = [_job_to_summary(j) for j in all_jobs]
+    jobs_by_id = {j.id: j for j in all_jobs}
+
+    log.info("Match session %d | user=%s | jobs=%d", session_id, user_key, len(all_jobs))
 
     t0 = time.perf_counter()
     try:
-        results = await asyncio.to_thread(service.match_user_to_jobs, user_profile, job_postings)
+        results = await asyncio.to_thread(
+            match_candidate_to_jobs,
+            api_key=settings.OPENAI_API_KEY,
+            model=settings.OPENAI_MODEL,
+            candidate=candidate,
+            jobs=job_summaries,
+        )
     except Exception as exc:
-        log.error("Matching Engine error | user=%s | %s", user_key, exc)
+        match_session.status = "failed"
+        db.commit()
+        log.error("Match session %d failed | user=%s | %s", session_id, user_key, exc)
         raise HTTPException(status_code=502, detail="Matching failed. Please try again.")
     finally:
         metrics.record_ai_response_time(round((time.perf_counter() - t0) * 1000))
 
-    if not results:
-        log.info("Matching Engine returned no results | user=%s", user_key)
-        return CrewMatchResponse(matched=False)
+    matched_results = [r for r in results if r.matched]
 
     for r in results:
-        log.info("Match result | user=%s | job_id=%s | matched=%s | compat=%.0f | reason=%s",
-                 user_key, r.job_id, r.matched, r.compatibility, r.reason[:120])
+        if r.matched:
+            db.add(MatchSessionResult(
+                session_id=session_id,
+                job_id=r.job_id,
+                matched=r.matched,
+                compatibility=r.compatibility,
+                reason=r.reason,
+                strengths=json.dumps(r.strengths),
+                gaps=json.dumps(r.gaps),
+                factor_scores=json.dumps(r.factor_scores),
+            ))
 
-    def _build_item(match, db_job) -> CrewMatchItem:
-        return CrewMatchItem(
-            job=CrewMatchJob(
-                id=db_job.id,
-                title=db_job.title,
-                role=db_job.role,
-                yacht=db_job.yacht,
-                location=db_job.location,
-                contract_type=db_job.contract_type,
-                salary_min=db_job.salary_min,
-                salary_max=db_job.salary_max,
-                salary_currency=db_job.salary_currency,
-                contact_email=db_job.contact_email,
-                description=db_job.description,
-                yacht_type=db_job.yacht_type,
-                yacht_length_m=db_job.yacht_length_m,
-                start_date=db_job.start_date,
-                season=db_job.season,
-                rotation=db_job.rotation,
-                experience_required_years=db_job.experience_required_years,
-                certifications_required=db_job.certifications_required,
-                languages_required=db_job.languages_required,
-                requirements=db_job.requirements,
-                responsibilities=db_job.responsibilities,
-                benefits=db_job.benefits,
-                recruiter_name=db_job.recruiter_name,
-                recruiter_agency=db_job.recruiter_agency,
-                application_url=db_job.application_url,
-                urgent_hire=db_job.urgent_hire,
-                source=db_job.source,
-            ),
-            ai=CrewMatchAI(
-                reason=match.reason,
-                compatibility=match.compatibility,
-                strengths=match.strengths,
-                gaps=match.gaps,
-            ),
-        )
+    match_session.status = "completed"
+    match_session.total_matched = len(matched_results)
+    match_session.completed_at = datetime.now(timezone.utc)
+    db.commit()
 
-    strong_items: list[CrewMatchItem] = []
-    near_items: list[CrewMatchItem] = []
-    for match in results:
-        db_job = jobs_by_id.get(match.job_id)
+    response_matches: list[MatchSessionResultItem] = []
+    for r in matched_results:
+        db_job = jobs_by_id.get(r.job_id)
         if not db_job:
             continue
-        item = _build_item(match, db_job)
-        if match.matched:
-            strong_items.append(item)
-        elif match.compatibility >= 30:
-            near_items.append(item)
-
-    matched_items = strong_items if strong_items else near_items[:5]
-
-    if not matched_items:
-        log.info("No matched jobs from engine | user=%s | results=%d", user_key, len(results))
-        return CrewMatchResponse(matched=False)
+        response_matches.append(MatchSessionResultItem(
+            job=_job_to_schema(db_job),
+            matched=r.matched,
+            compatibility=r.compatibility,
+            reason=r.reason,
+            strengths=r.strengths,
+            gaps=r.gaps,
+            factor_scores=r.factor_scores,
+        ))
 
     metrics.increment("crew_matches")
-    log.info("Crew match complete | user=%s | matches=%d | top_job=%s | top_compat=%.0f",
-             user_key, len(matched_items), matched_items[0].job.id, matched_items[0].ai.compatibility)
+    log.info("Match session %d complete | user=%s | scanned=%d | matched=%d",
+             session_id, user_key, len(all_jobs), len(matched_results))
 
-    return CrewMatchResponse(matched=True, matches=matched_items)
+    return CrewMatchV2Response(
+        session_id=session_id,
+        matched=len(response_matches) > 0,
+        total_jobs_scanned=len(all_jobs),
+        total_matched=len(matched_results),
+        matches=response_matches,
+    )
 
+
+@router.get("/sessions", response_model=MatchSessionListResponse)
+@_limiter.limit("20/minute")
+async def list_sessions(
+    request: Request,
+    session: dict = Depends(require_session),
+    db: Session = Depends(get_db),
+):
+    """List all past match sessions for the current user, newest first."""
+    user_key = session["sub"]
+    sessions = (
+        db.query(MatchSession)
+        .filter(MatchSession.user_key == user_key)
+        .order_by(MatchSession.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return MatchSessionListResponse(
+        sessions=[MatchSessionSummary.model_validate(s) for s in sessions]
+    )
+
+
+@router.get("/sessions/{session_id}", response_model=MatchSessionDetail)
+@_limiter.limit("20/minute")
+async def get_session(
+    session_id: int,
+    request: Request,
+    session: dict = Depends(require_session),
+    db: Session = Depends(get_db),
+):
+    """Get full results for a specific match session. Only the session owner can view it."""
+    user_key = session["sub"]
+    match_session = (
+        db.query(MatchSession)
+        .filter(MatchSession.id == session_id, MatchSession.user_key == user_key)
+        .first()
+    )
+    if not match_session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    stored_results = (
+        db.query(MatchSessionResult)
+        .filter(MatchSessionResult.session_id == session_id)
+        .all()
+    )
+
+    job_ids = [r.job_id for r in stored_results]
+    jobs_map: dict[int, Job] = {}
+    if job_ids:
+        jobs = db.query(Job).filter(Job.id.in_(job_ids)).all()
+        jobs_map = {j.id: j for j in jobs}
+
+    result_items: list[MatchSessionResultItem] = []
+    for r in stored_results:
+        db_job = jobs_map.get(r.job_id)
+        if not db_job:
+            continue
+
+        strengths = []
+        gaps = []
+        factor_scores = {}
+        try:
+            strengths = json.loads(r.strengths) if r.strengths else []
+        except json.JSONDecodeError:
+            pass
+        try:
+            gaps = json.loads(r.gaps) if r.gaps else []
+        except json.JSONDecodeError:
+            pass
+        try:
+            factor_scores = json.loads(r.factor_scores) if r.factor_scores else {}
+        except json.JSONDecodeError:
+            pass
+
+        result_items.append(MatchSessionResultItem(
+            job=_job_to_schema(db_job),
+            matched=r.matched,
+            compatibility=r.compatibility,
+            reason=r.reason or "",
+            strengths=strengths,
+            gaps=gaps,
+            factor_scores=factor_scores,
+        ))
+
+    result_items.sort(key=lambda x: x.compatibility, reverse=True)
+
+    return MatchSessionDetail(
+        id=match_session.id,
+        status=match_session.status,
+        total_jobs_scanned=match_session.total_jobs_scanned,
+        total_matched=match_session.total_matched,
+        created_at=match_session.created_at,
+        completed_at=match_session.completed_at,
+        results=result_items,
+    )
+
+
+# ── Draft email (unchanged) ─────────────────────────────────────────────────
 
 @router.post("/draft-email", response_model=DraftEmailResponse)
 @_limiter.limit("10/minute")

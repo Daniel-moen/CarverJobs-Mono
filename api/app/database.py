@@ -104,4 +104,39 @@ def run_migrations() -> None:
         "CREATE INDEX IF NOT EXISTS ix_error_logs_created_at ON error_logs (created_at)"
     )
 
+    cp_cols = _existing("crew_profiles")
+    _add("crew_profiles", "sex", "VARCHAR(20)", cp_cols)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS match_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_key VARCHAR(160) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'running',
+            total_jobs_scanned INTEGER NOT NULL DEFAULT 0,
+            total_matched INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+            completed_at DATETIME
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_match_sessions_user_key ON match_sessions (user_key)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS match_session_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL,
+            matched BOOLEAN NOT NULL DEFAULT 0,
+            compatibility REAL NOT NULL DEFAULT 0.0,
+            reason TEXT,
+            strengths TEXT,
+            gaps TEXT,
+            factor_scores TEXT
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_match_session_results_session_id ON match_session_results (session_id)"
+    )
+
     conn.commit()
