@@ -250,14 +250,21 @@ async def find_match(
 
         yield f"event: progress\ndata: {json.dumps({'jobs_scanned': 0, 'total_jobs': len(all_jobs), 'matches_so_far': 0, 'batch': 0})}\n\n"
 
+        last_ping = time.perf_counter()
         while not match_task.done():
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
+            sent_something = False
             while not progress_queue.empty():
                 try:
                     evt = progress_queue.get_nowait()
                     yield f"event: progress\ndata: {json.dumps(evt)}\n\n"
+                    sent_something = True
+                    last_ping = time.perf_counter()
                 except queue.Empty:
                     break
+            if not sent_something and (time.perf_counter() - last_ping) > 8:
+                yield ": keepalive\n\n"
+                last_ping = time.perf_counter()
 
         try:
             results = match_task.result()

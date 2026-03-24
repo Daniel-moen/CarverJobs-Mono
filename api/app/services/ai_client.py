@@ -96,12 +96,13 @@ def call_openai(
             crv_code="CRV-3001",
         )
 
+    _gpt5 = "gpt-5" in model
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "max_completion_tokens": max_tokens,
     }
-    if temperature != 1.0:
+    if not _gpt5 and temperature != 1.0:
         payload["temperature"] = temperature
     if response_format is not None:
         payload["response_format"] = response_format
