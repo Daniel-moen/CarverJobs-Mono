@@ -36,12 +36,14 @@
   })
 
   let matchRetries = $state(0)
+  let matchProgress = $state(null)
   const MAX_RETRIES = 2
 
   async function startMatch(isRetry = false) {
     trackClick(isRetry ? 'retry_match' : 'start_match')
     matchState = 'loading'
     matchError = ''
+    matchProgress = null
     if (!isRetry) {
       allMatches = []
       matchIndex = 0
@@ -50,7 +52,7 @@
     try {
       const res = await apiFetch(`${API_BASE_URL}/matching/find`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
         credentials: 'include',
       })
       if (!res.ok) {
@@ -64,12 +66,61 @@
         matchState = 'error'
         return
       }
-      const data = await res.json()
-      if (data.matched && data.matches?.length) {
-        allMatches = data.matches
-        matchIndex = 0
-        matchState = 'matched'
-      } else {
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let currentEvent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split('\n')
+        buffer = lines.pop()
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(line.slice(6))
+              if (currentEvent === 'complete') {
+                if (parsed.matched && parsed.matches?.length) {
+                  allMatches = parsed.matches.map(m => ({
+                    job: m.job,
+                    ai: {
+                      matched: m.matched,
+                      compatibility: m.compatibility,
+                      reason: m.reason,
+                      strengths: m.strengths,
+                      gaps: m.gaps,
+                      factor_scores: m.factor_scores,
+                    },
+                  }))
+                  matchIndex = 0
+                  matchState = 'matched'
+                } else {
+                  matchState = 'no-match'
+                }
+                return
+              } else if (currentEvent === 'error') {
+                matchError = parsed.detail ?? 'Matching failed. Please try again.'
+                matchState = 'error'
+                return
+              } else if (currentEvent === 'progress') {
+                matchProgress = parsed
+              }
+            } catch { /* ignore malformed data lines */ }
+            currentEvent = ''
+          } else if (line.trim() === '' || line.startsWith(':')) {
+            // blank line or comment/keepalive — reset event type
+          }
+        }
+      }
+
+      if (matchState === 'loading') {
         matchState = 'no-match'
       }
     } catch {
@@ -213,11 +264,21 @@
                 <p class="text-sm font-semibold text-white">
                   {matchRetries > 0 ? `Retrying... (attempt ${matchRetries + 1})` : 'Matching in progress...'}
                 </p>
-                <p class="mt-0.5 text-xs text-slate-500">Analysing your profile against open positions. This usually takes 15–30 seconds.</p>
+                <p class="mt-0.5 text-xs text-slate-500">
+                  {#if matchProgress && matchProgress.total_jobs > 0}
+                    Scanned {matchProgress.jobs_scanned} of {matchProgress.total_jobs} jobs — {matchProgress.matches_so_far} matches so far (batch {matchProgress.batch}/{matchProgress.total_batches})
+                  {:else}
+                    Analysing your profile against open positions...
+                  {/if}
+                </p>
               </div>
             </div>
             <div class="mt-3 h-1 overflow-hidden rounded-full bg-white/5">
-              <div class="h-full rounded-full bg-cyan-400/40 match-progress"></div>
+              {#if matchProgress && matchProgress.total_jobs > 0}
+                <div class="h-full rounded-full bg-cyan-400/40 transition-all duration-500" style="width: {Math.round((matchProgress.jobs_scanned / matchProgress.total_jobs) * 100)}%"></div>
+              {:else}
+                <div class="h-full rounded-full bg-cyan-400/40 match-progress"></div>
+              {/if}
             </div>
           </div>
 
