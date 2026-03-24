@@ -295,8 +295,8 @@ def _parse_batch_response(
 
 from typing import Callable
 
-ProgressCallback = Callable[[int, int, int, int], None]
-"""(jobs_scanned, total_jobs, matches_so_far, batch_num)"""
+ProgressCallback = Callable[[int, int, int, int, int], None]
+"""(jobs_scanned, total_jobs, matches_so_far, batch_num, total_batches)"""
 
 
 # ── Main matching function ───────────────────────────────────────────────────
@@ -315,7 +315,7 @@ def match_candidate_to_jobs(
     have compatibility >= MATCH_THRESHOLD.
 
     If on_progress is provided, it is called after each batch with
-    (jobs_scanned, total_jobs, matches_so_far, batch_num).
+    (jobs_scanned, total_jobs, matches_so_far, batch_num, total_batches).
     """
 
     if not jobs:
@@ -323,15 +323,16 @@ def match_candidate_to_jobs(
 
     total_jobs = len(jobs)
     batches = [jobs[i:i + batch_size] for i in range(0, total_jobs, batch_size)]
+    total_batches = len(batches)
     log.info("Matching | candidate=%s | jobs=%d | batches=%d",
-             candidate.user_key, total_jobs, len(batches))
+             candidate.user_key, total_jobs, total_batches)
 
     valid_ids = {j.job_id for j in jobs}
     all_results: list[MatchResult] = []
     jobs_scanned = 0
 
     for batch_idx, batch in enumerate(batches, start=1):
-        log.info("Processing batch %d/%d (%d jobs)", batch_idx, len(batches), len(batch))
+        log.info("Processing batch %d/%d (%d jobs)", batch_idx, total_batches, len(batch))
         prompt = _build_prompt(candidate, batch)
 
         try:
@@ -341,7 +342,7 @@ def match_candidate_to_jobs(
             jobs_scanned += len(batch)
             if on_progress:
                 matches_so_far = sum(1 for r in all_results if r.matched)
-                on_progress(jobs_scanned, total_jobs, matches_so_far, batch_idx)
+                on_progress(jobs_scanned, total_jobs, matches_so_far, batch_idx, total_batches)
             continue
 
         batch_results = _parse_batch_response(response_text, valid_ids)
@@ -353,7 +354,7 @@ def match_candidate_to_jobs(
 
         if on_progress:
             matches_so_far = sum(1 for r in all_results if r.matched)
-            on_progress(jobs_scanned, total_jobs, matches_so_far, batch_idx)
+            on_progress(jobs_scanned, total_jobs, matches_so_far, batch_idx, total_batches)
 
     deduped: dict[int, MatchResult] = {}
     for r in all_results:

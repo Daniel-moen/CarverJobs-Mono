@@ -226,12 +226,13 @@ async def find_match(
 
     progress_queue: queue.Queue[dict] = queue.Queue()
 
-    def on_progress(jobs_scanned: int, total_jobs: int, matches_so_far: int, batch_num: int):
+    def on_progress(jobs_scanned: int, total_jobs: int, matches_so_far: int, batch_num: int, total_batches: int):
         progress_queue.put({
             "jobs_scanned": jobs_scanned,
             "total_jobs": total_jobs,
             "matches_so_far": matches_so_far,
             "batch": batch_num,
+            "total_batches": total_batches,
         })
 
     async def event_stream():
@@ -248,7 +249,9 @@ async def find_match(
             ),
         )
 
-        yield f"event: progress\ndata: {json.dumps({'jobs_scanned': 0, 'total_jobs': len(all_jobs), 'matches_so_far': 0, 'batch': 0})}\n\n"
+        from app.services.matching_v2 import BATCH_SIZE
+        _total_batches = (len(all_jobs) + BATCH_SIZE - 1) // BATCH_SIZE
+        yield f"event: progress\ndata: {json.dumps({'jobs_scanned': 0, 'total_jobs': len(all_jobs), 'matches_so_far': 0, 'batch': 0, 'total_batches': _total_batches})}\n\n"
 
         last_ping = time.perf_counter()
         while not match_task.done():
