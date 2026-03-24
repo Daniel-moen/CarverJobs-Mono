@@ -243,12 +243,12 @@ async def find_match(
     if not profile:
         raise HTTPException(status_code=400, detail="Save your profile first before matching.")
 
-    all_jobs = db.query(Job).filter(Job.status.in_(["open", "priority"])).order_by(Job.created_at.desc()).limit(60).all()
+    all_jobs = db.query(Job).filter(Job.status.in_(["open", "priority"])).order_by(Job.created_at.desc()).limit(100).all()
 
     if not all_jobs:
         return CrewMatchResponse(matched=False)
 
-    jobs = _role_prefilter(all_jobs, profile.desired_role or "", limit=20)
+    jobs = _role_prefilter(all_jobs, profile.desired_role or "", limit=30)
     jobs_by_id = {str(j.id): j for j in jobs}
 
     service = _get_service()
@@ -325,7 +325,7 @@ async def find_match(
         item = _build_item(match, db_job)
         if match.matched:
             strong_items.append(item)
-        elif match.compatibility >= 40:
+        elif match.compatibility >= 30:
             near_items.append(item)
 
     matched_items = strong_items if strong_items else near_items[:5]

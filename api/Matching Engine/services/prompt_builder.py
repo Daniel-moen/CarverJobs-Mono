@@ -12,13 +12,13 @@ class PromptBuilder:
         payload = {
             "rules": {
                 "priority_order": ["role", "location", "pay", "length", "certifications", "experience", "languages"],
-                "matched_threshold": 75,
+                "matched_threshold": 60,
                 "instructions": [
                     "ROLE IS A HARD GATE. The job role must be the same department AND seniority as the user's desired_role.",
                     "If the role does not match, set matched=false and compatibility <= 20 — no exceptions.",
                     "Examples of disqualifying mismatches: desired=Deckhand → job=Stewardess; desired=Chef → job=Engineer; desired=Captain → job=Bosun.",
                     "A role is only acceptable if it is in the exact same department (Deck, Interior/Stew, Engine, Galley, Bridge) AND within one seniority level.",
-                    "Set matched=true ONLY if compatibility >= 75. Below 75 always set matched=false.",
+                    "Set matched=true ONLY if compatibility >= 60. Below 60 always set matched=false.",
                     "Compatibility should reflect true real-world hirability — be honest and conservative.",
                     "Use the user's bio and job_history as primary evidence of real-world experience — weight this at least as heavily as stated years_experience.",
                     "If the job requires senior experience (Chief, Captain, HOD) and the user lacks it in their history, penalise heavily.",
