@@ -273,12 +273,12 @@ async def find_match(
         log.info("Matching Engine returned no results | user=%s", user_key)
         return CrewMatchResponse(matched=False)
 
-    matched_items: list[CrewMatchItem] = []
-    for match in results:
-        db_job = jobs_by_id.get(match.job_id)
-        if not db_job or not match.matched:
-            continue
-        matched_items.append(CrewMatchItem(
+    for r in results:
+        log.info("Match result | user=%s | job_id=%s | matched=%s | compat=%.0f | reason=%s",
+                 user_key, r.job_id, r.matched, r.compatibility, r.reason[:120])
+
+    def _build_item(match, db_job) -> CrewMatchItem:
+        return CrewMatchItem(
             job=CrewMatchJob(
                 id=db_job.id,
                 title=db_job.title,
@@ -314,7 +314,21 @@ async def find_match(
                 strengths=match.strengths,
                 gaps=match.gaps,
             ),
-        ))
+        )
+
+    strong_items: list[CrewMatchItem] = []
+    near_items: list[CrewMatchItem] = []
+    for match in results:
+        db_job = jobs_by_id.get(match.job_id)
+        if not db_job:
+            continue
+        item = _build_item(match, db_job)
+        if match.matched:
+            strong_items.append(item)
+        elif match.compatibility >= 40:
+            near_items.append(item)
+
+    matched_items = strong_items if strong_items else near_items[:5]
 
     if not matched_items:
         log.info("No matched jobs from engine | user=%s | results=%d", user_key, len(results))
