@@ -50,7 +50,7 @@ def _build_matching_service() -> Optional[MatchingService]:
         return None
     return MatchingService(
         llm_client=OpenAIClient(api_key=settings.OPENAI_API_KEY, model=settings.OPENAI_MODEL),
-        batch_strategy=FixedSizeBatchStrategy(batch_size=5),
+        batch_strategy=FixedSizeBatchStrategy(batch_size=10),
         prompt_builder=PromptBuilder(),
         verbose=False,
     )
@@ -243,12 +243,12 @@ async def find_match(
     if not profile:
         raise HTTPException(status_code=400, detail="Save your profile first before matching.")
 
-    all_jobs = db.query(Job).filter(Job.status.in_(["open", "priority"])).order_by(Job.created_at.desc()).limit(100).all()
+    all_jobs = db.query(Job).filter(Job.status.in_(["open", "priority"])).order_by(Job.created_at.desc()).all()
 
     if not all_jobs:
         return CrewMatchResponse(matched=False)
 
-    jobs = _role_prefilter(all_jobs, profile.desired_role or "", limit=30)
+    jobs = all_jobs
     jobs_by_id = {str(j.id): j for j in jobs}
 
     service = _get_service()
