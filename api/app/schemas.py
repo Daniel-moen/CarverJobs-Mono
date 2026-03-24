@@ -367,7 +367,7 @@ class MatchingRequest(BaseModel):
 class MatchResultItem(BaseModel):
     job_id:        str
     matched:       bool
-    compatibility: Annotated[float, Field(ge=0.0, le=1.0)]
+    compatibility: Annotated[float, Field(ge=0.0, le=100.0)]
     reason:        str
     strengths:     list[str] = []
     gaps:          list[str] = []

@@ -152,24 +152,53 @@ def _job_to_posting(j: Job) -> JobPosting:
     )
 
 
-def _role_prefilter(jobs: list[Job], desired_role: str, limit: int = 20) -> list[Job]:
-    """Pre-filter jobs by role relevance before sending to the LLM.
+_DEPT_MAP: dict[str, str] = {}
+for _dept, _roles in {
+    "deck": ["deckhand", "bosun", "lead deckhand", "deck/stew", "mate", "first mate", "officer", "deck officer", "first officer", "second officer"],
+    "interior": ["stewardess", "stew", "chief stew", "chief stewardess", "head of interior", "head stew", "2nd stew", "3rd stew", "junior stew", "service stewardess", "interior", "housekeeper", "laundry"],
+    "bridge": ["captain", "master", "relief captain"],
+    "engine": ["engineer", "eto", "electro-technical officer", "chief engineer", "2nd engineer", "3rd engineer", "lead engineer", "oiler", "wiper"],
+    "galley": ["chef", "head chef", "sous chef", "cook", "galley", "pastry chef", "crew chef"],
+    "medical": ["medic", "nurse", "paramedic"],
+    "pursers": ["purser", "administrator", "admin"],
+}.items():
+    for _r in _roles:
+        _DEPT_MAP[_r] = _dept
+    _DEPT_MAP[_dept] = _dept
 
-    Splits desired_role into keywords and ranks jobs by how many keywords
-    appear in the job role string. Falls back to all jobs if nothing matches.
+
+def _role_department(role_text: str) -> str | None:
+    """Map a role string to a yacht department via keyword lookup."""
+    lower = role_text.lower().strip()
+    if lower in _DEPT_MAP:
+        return _DEPT_MAP[lower]
+    for key, dept in _DEPT_MAP.items():
+        if key in lower:
+            return dept
+    return None
+
+
+def _role_prefilter(jobs: list[Job], desired_role: str, limit: int = 20) -> list[Job]:
+    """Pre-filter jobs by department + keyword relevance before the LLM.
+
+    Prioritises same-department jobs, then ranks by keyword overlap.
+    Falls back to all jobs (sorted by keyword score) if too few match.
     """
     if not desired_role:
         return jobs[:limit]
 
+    desired_dept = _role_department(desired_role)
     keywords = set(desired_role.lower().split())
 
-    def score(job: Job) -> int:
-        return len(keywords & set((job.role or "").lower().split()))
+    def score(job: Job) -> tuple[int, int]:
+        role_text = (job.role or "").lower()
+        dept_match = 1 if desired_dept and _role_department(role_text) == desired_dept else 0
+        kw_match = len(keywords & set(role_text.split()))
+        return (dept_match, kw_match)
 
     scored = sorted(jobs, key=score, reverse=True)
-    # Keep only jobs with at least one keyword match; fall back if too few
-    filtered = [j for j in scored if score(j) > 0]
-    return (filtered if len(filtered) >= 5 else scored)[:limit]
+    dept_hits = [j for j in scored if score(j)[0] > 0]
+    return (dept_hits if len(dept_hits) >= 3 else scored)[:limit]
 
 
 def _profile_summary(p: CrewProfile) -> str:

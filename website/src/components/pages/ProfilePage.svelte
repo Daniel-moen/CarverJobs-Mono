@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { API_BASE_URL, apiFetch } from '../../config/api'
   import { trackClick, trackChat } from '../../config/analytics'
 
@@ -315,9 +315,15 @@
     if (Object.keys(clean).length > 0) profile = { ...profile, ...clean, interviewCompleted: true }
   }
 
+  async function scrollChat() {
+    await tick()
+    if (chatEl) chatEl.scrollTop = chatEl.scrollHeight
+  }
+
   async function requestAITurn(userMessage = '', history = null) {
     interviewLoading = true
     interviewError = ''
+    await scrollChat()
     const historyPayload = history ?? interviewMessages
     try {
       const response = await apiFetch(`${API_BASE_URL}/interview/next`, {
@@ -342,7 +348,10 @@
       }
       mergeSuggestedUpdates(data?.updates)
     } catch { interviewError = 'Could not reach interview service.' }
-    finally { interviewLoading = false }
+    finally {
+      interviewLoading = false
+      await scrollChat()
+    }
   }
 
   async function openInterview() {
@@ -360,6 +369,7 @@
     const historyBeforeSend = [...interviewMessages]
     interviewMessages = [...interviewMessages, { role: 'user', content: message }]
     interviewInput = ''
+    await scrollChat()
     await requestAITurn(message, historyBeforeSend)
   }
 
@@ -378,7 +388,7 @@
 <section class="grid gap-4 sm:gap-5">
   <!-- ── Header ── -->
   <header class="profile-section relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 p-4 sm:p-6" class:visible={mounted}>
-    <div class="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-cyan-400/8 blur-3xl"></div>
+    <div class="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-cyan-400/8 blur-3xl hidden sm:block"></div>
 
     <div class="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div class="flex items-center gap-4">
@@ -421,7 +431,7 @@
         <button type="button" onclick={openInterview}
           class="rounded-lg border border-cyan-300/25 bg-cyan-400/8 px-3 py-1.5 text-[11px] font-bold text-cyan-300 transition hover:border-cyan-300/45 hover:bg-cyan-400/15 hover:text-white">
           <span class="flex items-center gap-1.5">
-            <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400"></span>
+            <span class="h-1.5 w-1.5 rounded-full bg-cyan-400 hidden sm:inline-block sm:animate-pulse"></span>
             AI Interview
           </span>
         </button>
@@ -684,20 +694,20 @@
 
 <!-- ── AI Interview Modal ── -->
 {#if interviewOpen}
-  <div class="fixed inset-0 z-40 flex items-end justify-center sm:items-center sm:p-4" style="background:rgba(0,0,0,0.75);backdrop-filter:blur(6px);">
-    <article class="modal-card flex w-full max-w-xl flex-col overflow-hidden rounded-t-2xl border border-cyan-400/20 bg-zinc-950 shadow-[0_0_60px_rgba(34,211,238,0.15)] sm:rounded-2xl" style="max-height:min(85dvh,600px);">
-      <div class="flex items-center justify-between gap-3 border-b border-white/6 px-4 py-3 sm:px-5 sm:py-4">
+  <div class="interview-overlay fixed inset-0 z-40 flex items-end justify-center sm:items-center sm:p-4">
+    <article class="interview-modal flex w-full flex-col overflow-hidden border-cyan-400/20 bg-zinc-950 sm:max-w-xl sm:rounded-2xl sm:border sm:shadow-[0_0_60px_rgba(34,211,238,0.15)]" style="height:100dvh; max-height:100dvh;" class:sm-modal={true}>
+      <div class="flex flex-none items-center justify-between gap-3 border-b border-white/6 px-4 py-3 sm:px-5 sm:py-4">
         <div class="flex items-center gap-2">
-          <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400"></span>
+          <span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
           <h3 class="text-sm font-bold text-white">AI Interview</h3>
         </div>
         <button type="button" class="rounded-lg border border-white/10 px-3 py-1 text-xs text-slate-400 transition hover:text-white" onclick={() => (interviewOpen = false)}>Close</button>
       </div>
 
-      <div bind:this={chatEl} class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+      <div bind:this={chatEl} class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4">
         {#if interviewMessages.length === 0 && interviewLoading}
           <div class="flex items-center gap-2 text-xs text-slate-500">
-            <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400"></span>
+            <span class="h-1.5 w-1.5 rounded-full bg-cyan-400 interview-pulse"></span>
             Starting interview...
           </div>
         {:else}
@@ -710,7 +720,7 @@
           {/each}
           {#if interviewLoading}
             <div class="flex items-center gap-2 text-xs text-slate-600">
-              <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400/50"></span>
+              <span class="h-1.5 w-1.5 rounded-full bg-cyan-400/50 interview-pulse"></span>
               Thinking...
             </div>
           {/if}
@@ -721,7 +731,7 @@
         <p class="mx-4 mb-2 rounded-lg border border-rose-400/20 bg-rose-400/8 px-3 py-2 text-xs text-rose-300">{interviewError}</p>
       {/if}
 
-      <form class="flex gap-2 border-t border-white/6 p-3 sm:p-4" onsubmit={sendInterviewMessage}>
+      <form class="flex flex-none gap-2 border-t border-white/6 p-3 sm:p-4" onsubmit={sendInterviewMessage}>
         <input
           class="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:border-cyan-400/30"
           placeholder="Type your answer..."
@@ -734,7 +744,7 @@
         </button>
       </form>
 
-      <div class="flex justify-end border-t border-white/4 px-4 py-2">
+      <div class="flex flex-none justify-end border-t border-white/4 px-4 py-2">
         <button type="button" class="text-[10px] text-slate-600 transition hover:text-slate-400"
           onclick={() => { interviewMessages = []; interviewInput = ''; interviewError = '' }}>
           Reset
@@ -755,13 +765,38 @@
     opacity: 1;
     transform: translateY(0);
   }
-
-  .modal-card {
-    animation: modalIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  @media (max-width: 768px) {
+    .profile-section {
+      transition-duration: 0.2s;
+      transition-delay: 0ms !important;
+    }
   }
-  @keyframes modalIn {
-    from { opacity: 0; transform: scale(0.96) translateY(12px); }
-    to   { opacity: 1; transform: scale(1)    translateY(0);     }
+
+  /* Interview overlay */
+  .interview-overlay {
+    background: rgba(0, 0, 0, 0.92);
+  }
+  @media (min-width: 640px) {
+    .interview-overlay {
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(6px);
+    }
+    .interview-modal.sm-modal {
+      height: auto !important;
+      max-height: min(85dvh, 640px) !important;
+      border-radius: 1rem;
+    }
+  }
+
+  .interview-pulse {
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @media (max-width: 768px) {
+    .interview-pulse { animation: none; }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
   .field-group {

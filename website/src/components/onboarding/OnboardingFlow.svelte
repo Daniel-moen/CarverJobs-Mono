@@ -158,7 +158,9 @@
   $: missingFields = REQUIRED_FIELDS.filter(f => !collectedProfile[f]?.trim())
   $: allFieldsFilled = missingFields.length === 0
 
-  onMount(() => {})
+  onMount(() => {
+    // No-op; chat initialisation handled by $: reactive block.
+  })
 </script>
 
 <div class="fixed inset-0 z-50 flex flex-col bg-black" style="height: 100dvh">
@@ -236,7 +238,7 @@
         <!-- Chat messages -->
         <div
           bind:this={chatEl}
-          class="flex-1 overflow-y-auto rounded-xl border border-white/10 bg-zinc-950 p-4 space-y-3"
+          class="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-zinc-950 p-4 space-y-3"
         >
           {#if isLoading && messages.length === 0}
             <div class="flex items-center gap-2 text-sm text-slate-400">
@@ -280,9 +282,16 @@
           {/if}
 
           {#if aiError}
-            <p class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-              {aiError}
-            </p>
+            <div class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+              <p class="text-xs text-rose-300">{aiError}</p>
+              <button
+                type="button"
+                onclick={() => { aiError = ''; callOnboard('', []) }}
+                class="mt-2 text-xs font-medium text-rose-200 underline underline-offset-2 hover:text-white transition"
+              >
+                Try again
+              </button>
+            </div>
           {/if}
         </div>
 

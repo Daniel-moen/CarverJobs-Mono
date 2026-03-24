@@ -35,12 +35,18 @@
     }
   })
 
-  async function startMatch() {
-    trackClick('start_match')
+  let matchRetries = $state(0)
+  const MAX_RETRIES = 2
+
+  async function startMatch(isRetry = false) {
+    trackClick(isRetry ? 'retry_match' : 'start_match')
     matchState = 'loading'
     matchError = ''
-    allMatches = []
-    matchIndex = 0
+    if (!isRetry) {
+      allMatches = []
+      matchIndex = 0
+      matchRetries = 0
+    }
     try {
       const res = await apiFetch(`${API_BASE_URL}/matching/find`, {
         method: 'POST',
@@ -49,7 +55,12 @@
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        matchError = err.detail ?? `Matching failed (${res.status}).`
+        if ((res.status === 502 || res.status === 503) && matchRetries < MAX_RETRIES) {
+          matchRetries += 1
+          await new Promise(r => setTimeout(r, 1500 * matchRetries))
+          return startMatch(true)
+        }
+        matchError = err.detail ?? `Matching failed (${res.status}). Please try again.`
         matchState = 'error'
         return
       }
@@ -62,7 +73,12 @@
         matchState = 'no-match'
       }
     } catch {
-      matchError = 'Could not reach matching service.'
+      if (matchRetries < MAX_RETRIES) {
+        matchRetries += 1
+        await new Promise(r => setTimeout(r, 1500 * matchRetries))
+        return startMatch(true)
+      }
+      matchError = 'Could not reach matching service. Check your connection and try again.'
       matchState = 'error'
     }
   }
@@ -180,7 +196,7 @@
         {#if matchState === 'idle'}
           <button
             type="button"
-            onclick={startMatch}
+            onclick={() => { startMatch() }}
             class="mt-5 relative overflow-hidden rounded-lg border border-cyan-300/35 bg-cyan-300/8 px-6 py-3 text-sm font-semibold text-cyan-100 transition-all duration-200 hover:border-cyan-300/55 hover:bg-cyan-300/18 hover:text-white active:scale-95"
           >
             <span class="flex items-center gap-2">
@@ -194,9 +210,14 @@
             <div class="flex items-center gap-3">
               <div class="match-spinner h-5 w-5 rounded-full border-2 border-cyan-400/30 border-t-cyan-400"></div>
               <div>
-                <p class="text-sm font-semibold text-white">Matching in progress...</p>
-                <p class="mt-0.5 text-xs text-slate-500">Analysing your profile against open positions. This may take a minute.</p>
+                <p class="text-sm font-semibold text-white">
+                  {matchRetries > 0 ? `Retrying... (attempt ${matchRetries + 1})` : 'Matching in progress...'}
+                </p>
+                <p class="mt-0.5 text-xs text-slate-500">Analysing your profile against open positions. This usually takes 15–30 seconds.</p>
               </div>
+            </div>
+            <div class="mt-3 h-1 overflow-hidden rounded-full bg-white/5">
+              <div class="h-full rounded-full bg-cyan-400/40 match-progress"></div>
             </div>
           </div>
 
@@ -460,14 +481,23 @@
 
         {:else if matchState === 'error'}
           <div class="mt-5 rounded-xl border border-rose-400/20 bg-rose-400/8 px-5 py-4">
-            <p class="text-sm text-rose-300">{matchError}</p>
-            <button
-              type="button"
-              onclick={resetMatch}
-              class="mt-3 rounded-lg border border-white/10 px-4 py-2 text-xs text-slate-400 transition hover:border-white/20 hover:text-white"
-            >
-              Try Again
-            </button>
+            <p class="text-sm font-medium text-rose-300">{matchError}</p>
+            <div class="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onclick={() => { startMatch() }}
+                class="rounded-lg border border-cyan-300/30 bg-cyan-300/8 px-5 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-300/18 hover:text-white active:scale-95"
+              >
+                Retry Matching
+              </button>
+              <button
+                type="button"
+                onclick={resetMatch}
+                class="rounded-lg border border-white/10 px-4 py-2 text-xs text-slate-400 transition hover:border-white/20 hover:text-white"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         {/if}
       </div>
@@ -542,6 +572,17 @@
   }
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  .match-progress {
+    animation: progressSlide 25s ease-out forwards;
+  }
+  @keyframes progressSlide {
+    0%   { width: 0%; }
+    30%  { width: 40%; }
+    60%  { width: 65%; }
+    80%  { width: 80%; }
+    100% { width: 92%; }
   }
 
   @keyframes pulseOrb {

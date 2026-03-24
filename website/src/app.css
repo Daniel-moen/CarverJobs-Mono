@@ -75,8 +75,14 @@ html {
   .sub-card,
   .service-card,
   .dash-card,
-  .page-header {
+  .page-header,
+  .profile-section {
     transition: none !important;
+  }
+
+  /* Avoid expensive blur/filter on mobile overlays */
+  .interview-overlay {
+    backdrop-filter: none !important;
   }
 }
 

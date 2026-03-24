@@ -7,32 +7,28 @@ from models.user import UserProfile
 
 class PromptBuilder:
     def build(self, user: UserProfile, jobs: list[JobPosting]) -> str:
+        job_id_list = [j.job_id for j in jobs]
+
         payload = {
             "rules": {
                 "priority_order": ["role", "location", "pay", "length", "certifications", "experience", "languages"],
                 "matched_threshold": 75,
                 "instructions": [
-                    # Role — hard gate
                     "ROLE IS A HARD GATE. The job role must be the same department AND seniority as the user's desired_role.",
                     "If the role does not match, set matched=false and compatibility <= 20 — no exceptions.",
                     "Examples of disqualifying mismatches: desired=Deckhand → job=Stewardess; desired=Chef → job=Engineer; desired=Captain → job=Bosun.",
                     "A role is only acceptable if it is in the exact same department (Deck, Interior/Stew, Engine, Galley, Bridge) AND within one seniority level.",
-                    # Matched threshold
                     "Set matched=true ONLY if compatibility >= 75. Below 75 always set matched=false.",
                     "Compatibility should reflect true real-world hirability — be honest and conservative.",
-                    # Experience
                     "Use the user's bio and job_history as primary evidence of real-world experience — weight this at least as heavily as stated years_experience.",
                     "If the job requires senior experience (Chief, Captain, HOD) and the user lacks it in their history, penalise heavily.",
-                    # Certifications
                     "Required certifications are a near-hard requirement for officer and senior roles. Missing a required cert reduces compatibility by at least 20 points.",
-                    # Pay
                     "If the job pay is more than 30% below the user's desired_pay_min, reduce compatibility by 15 points.",
-                    # Location
                     "Prefer location alignment. If neither preferred_locations nor current_location overlaps with the job location region, reduce compatibility by 10 points.",
-                    # Output format
-                    "Return JSON only. No markdown, no extra text.",
-                    "Every job must have: matched(boolean), compatibility(0-100 integer), reason(1-2 sentences), strengths(list), gaps(list), factor_scores.",
-                    "factor_scores keys: role, location, pay, length, skills, certifications, experience — all 0-100 integers.",
+                    "Return JSON only. No markdown fences, no extra text, no commentary.",
+                    f"You MUST return an entry for EVERY job. The valid job_id values are exactly: {json.dumps(job_id_list)}. Copy each job_id verbatim — do not invent, modify, or omit any.",
+                    "Every entry must have: job_id(string, verbatim from input), matched(boolean), compatibility(integer 0-100), reason(1-2 sentences), strengths(list of strings), gaps(list of strings), factor_scores(object).",
+                    "factor_scores keys: role, location, pay, length, skills, certifications, experience — all integers 0-100.",
                     "reason must explain the single most important factor — be specific, not generic.",
                 ],
             },
@@ -41,28 +37,28 @@ class PromptBuilder:
             "response_schema": {
                 "matched_jobs": [
                     {
-                        "job_id": "string",
+                        "job_id": "string (verbatim from input)",
                         "matched": "boolean",
-                        "compatibility": "number",
+                        "compatibility": "integer 0-100",
                         "reason": "string",
                         "strengths": ["string"],
                         "gaps": ["string"],
                         "factor_scores": {
-                            "role": "number",
-                            "location": "number",
-                            "pay": "number",
-                            "length": "number",
-                            "skills": "number",
-                            "certifications": "number",
-                            "experience": "number",
+                            "role": "integer 0-100",
+                            "location": "integer 0-100",
+                            "pay": "integer 0-100",
+                            "length": "integer 0-100",
+                            "skills": "integer 0-100",
+                            "certifications": "integer 0-100",
+                            "experience": "integer 0-100",
                         },
                     }
                 ]
             },
         }
         return (
-            "You are a strict superyacht crew job matching engine. Your job is to protect candidates from wasted applications — only surface genuinely strong fits.\n"
-            "Output must be strict JSON matching the provided schema. No markdown, no extra text.\n"
+            "You are a strict superyacht crew job matching engine. Protect candidates from wasted applications — only surface genuinely strong fits.\n"
+            "CRITICAL: Output ONLY raw JSON matching the schema below. No markdown code fences. No commentary before or after.\n"
             f"{json.dumps(payload, ensure_ascii=False)}"
         )
 

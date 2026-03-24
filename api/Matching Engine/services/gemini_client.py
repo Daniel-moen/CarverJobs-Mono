@@ -1,8 +1,16 @@
 import json
+import logging
+import time
 import urllib.error
 import urllib.request
 
 from interfaces import LLMClient
+
+log = logging.getLogger("carver.matching_engine.gemini")
+
+_RETRYABLE_CODES = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 3
+_BASE_DELAY = 1.5
 
 
 class GeminiClient(LLMClient):
@@ -21,25 +29,40 @@ class GeminiClient(LLMClient):
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"response_mime_type": "application/json"},
         }
-        request = urllib.request.Request(
-            self._url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        data = json.dumps(body).encode("utf-8")
 
-        try:
-            with urllib.request.urlopen(request, timeout=45) as response:
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            error_detail = exc.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"Gemini API HTTP error: {exc.code} {error_detail}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"Gemini API connection error: {exc.reason}") from exc
+        last_error: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            request = urllib.request.Request(
+                self._url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    raw = response.read().decode("utf-8")
+                parsed = json.loads(raw)
+                return parsed["candidates"][0]["content"]["parts"][0]["text"]
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                error_detail = exc.read().decode("utf-8", errors="ignore")
+                if exc.code in _RETRYABLE_CODES and attempt < _MAX_RETRIES - 1:
+                    delay = _BASE_DELAY * (2 ** attempt)
+                    log.warning("Gemini %d (attempt %d/%d), retrying in %.1fs", exc.code, attempt + 1, _MAX_RETRIES, delay)
+                    time.sleep(delay)
+                    continue
+                raise RuntimeError(f"Gemini API HTTP error: {exc.code} {error_detail}") from exc
+            except urllib.error.URLError as exc:
+                last_error = exc
+                if attempt < _MAX_RETRIES - 1:
+                    delay = _BASE_DELAY * (2 ** attempt)
+                    log.warning("Gemini connection error (attempt %d/%d), retrying in %.1fs: %s", attempt + 1, _MAX_RETRIES, delay, exc.reason)
+                    time.sleep(delay)
+                    continue
+                raise RuntimeError(f"Gemini API connection error: {exc.reason}") from exc
+            except (KeyError, IndexError, TypeError) as exc:
+                raise RuntimeError(f"Unexpected Gemini response structure") from exc
 
-        parsed = json.loads(raw)
-        try:
-            return parsed["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError(f"Unexpected Gemini response: {raw}") from exc
+        raise RuntimeError(f"Gemini API failed after {_MAX_RETRIES} attempts") from last_error
 
