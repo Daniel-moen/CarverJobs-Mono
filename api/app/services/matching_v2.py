@@ -291,6 +291,14 @@ def _parse_batch_response(
     return results
 
 
+# ── Progress callback type ───────────────────────────────────────────────────
+
+from typing import Callable
+
+ProgressCallback = Callable[[int, int, int, int], None]
+"""(jobs_scanned, total_jobs, matches_so_far, batch_num)"""
+
+
 # ── Main matching function ───────────────────────────────────────────────────
 
 def match_candidate_to_jobs(
@@ -300,20 +308,27 @@ def match_candidate_to_jobs(
     candidate: CandidateProfile,
     jobs: list[JobSummary],
     batch_size: int = BATCH_SIZE,
+    on_progress: ProgressCallback | None = None,
 ) -> list[MatchResult]:
     """Score every job against the candidate in batches. Returns all results
     sorted by compatibility (highest first). Only results with matched=True
-    have compatibility >= MATCH_THRESHOLD."""
+    have compatibility >= MATCH_THRESHOLD.
+
+    If on_progress is provided, it is called after each batch with
+    (jobs_scanned, total_jobs, matches_so_far, batch_num).
+    """
 
     if not jobs:
         return []
 
-    batches = [jobs[i:i + batch_size] for i in range(0, len(jobs), batch_size)]
+    total_jobs = len(jobs)
+    batches = [jobs[i:i + batch_size] for i in range(0, total_jobs, batch_size)]
     log.info("Matching | candidate=%s | jobs=%d | batches=%d",
-             candidate.user_key, len(jobs), len(batches))
+             candidate.user_key, total_jobs, len(batches))
 
     valid_ids = {j.job_id for j in jobs}
     all_results: list[MatchResult] = []
+    jobs_scanned = 0
 
     for batch_idx, batch in enumerate(batches, start=1):
         log.info("Processing batch %d/%d (%d jobs)", batch_idx, len(batches), len(batch))
@@ -323,6 +338,10 @@ def match_candidate_to_jobs(
             response_text = _call_openai(api_key, model, prompt)
         except RuntimeError:
             log.exception("Batch %d failed — skipping", batch_idx)
+            jobs_scanned += len(batch)
+            if on_progress:
+                matches_so_far = sum(1 for r in all_results if r.matched)
+                on_progress(jobs_scanned, total_jobs, matches_so_far, batch_idx)
             continue
 
         batch_results = _parse_batch_response(response_text, valid_ids)
@@ -330,6 +349,11 @@ def match_candidate_to_jobs(
                  batch_idx, len(batch_results),
                  sum(1 for r in batch_results if r.matched))
         all_results.extend(batch_results)
+        jobs_scanned += len(batch)
+
+        if on_progress:
+            matches_so_far = sum(1 for r in all_results if r.matched)
+            on_progress(jobs_scanned, total_jobs, matches_so_far, batch_idx)
 
     deduped: dict[int, MatchResult] = {}
     for r in all_results:

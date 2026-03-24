@@ -1,9 +1,11 @@
 import asyncio
 import json
+import queue
 import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
@@ -167,15 +169,20 @@ def _profile_summary(p: CrewProfile) -> str:
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.post("/find", response_model=CrewMatchV2Response)
+@router.post("/find")
 @_limiter.limit("5/minute")
 async def find_match(
     request: Request,
     session: dict = Depends(require_session),
     db: Session = Depends(get_db),
 ):
-    """Run a full match session: score every open job against the candidate's
-    profile, persist the results, and return all matches."""
+    """Run a full match session with live progress via Server-Sent Events.
+
+    Streams events:
+      event: progress  — after each batch: {jobs_scanned, total_jobs, matches_so_far, batch}
+      event: complete   — final result: full CrewMatchV2Response JSON
+      event: error      — on failure: {detail: "..."}
+    """
 
     if not settings.OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="Matching not configured (missing API key).")
@@ -192,7 +199,10 @@ async def find_match(
         .all()
     )
     if not all_jobs:
-        return CrewMatchV2Response(session_id=0, matched=False, total_jobs_scanned=0, total_matched=0)
+        async def empty_stream():
+            data = json.dumps({"session_id": 0, "matched": False, "total_jobs_scanned": 0, "total_matched": 0, "matches": []})
+            yield f"event: complete\ndata: {data}\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
 
     match_session = MatchSession(user_key=user_key, status="running", total_jobs_scanned=len(all_jobs))
     db.add(match_session)
@@ -214,69 +224,108 @@ async def find_match(
 
     log.info("Match session %d | user=%s | jobs=%d", session_id, user_key, len(all_jobs))
 
-    t0 = time.perf_counter()
-    try:
-        results = await asyncio.to_thread(
-            match_candidate_to_jobs,
-            api_key=settings.OPENAI_API_KEY,
-            model=settings.OPENAI_MODEL,
-            candidate=candidate,
-            jobs=job_summaries,
+    progress_queue: queue.Queue[dict] = queue.Queue()
+
+    def on_progress(jobs_scanned: int, total_jobs: int, matches_so_far: int, batch_num: int):
+        progress_queue.put({
+            "jobs_scanned": jobs_scanned,
+            "total_jobs": total_jobs,
+            "matches_so_far": matches_so_far,
+            "batch": batch_num,
+        })
+
+    async def event_stream():
+        t0 = time.perf_counter()
+
+        match_task = asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: match_candidate_to_jobs(
+                api_key=settings.OPENAI_API_KEY,
+                model=settings.OPENAI_MODEL,
+                candidate=candidate,
+                jobs=job_summaries,
+                on_progress=on_progress,
+            ),
         )
-    except Exception as exc:
-        match_session.status = "failed"
+
+        yield f"event: progress\ndata: {json.dumps({'jobs_scanned': 0, 'total_jobs': len(all_jobs), 'matches_so_far': 0, 'batch': 0})}\n\n"
+
+        while not match_task.done():
+            await asyncio.sleep(0.3)
+            while not progress_queue.empty():
+                try:
+                    evt = progress_queue.get_nowait()
+                    yield f"event: progress\ndata: {json.dumps(evt)}\n\n"
+                except queue.Empty:
+                    break
+
+        try:
+            results = match_task.result()
+        except Exception as exc:
+            match_session.status = "failed"
+            db.commit()
+            log.error("Match session %d failed | user=%s | %s", session_id, user_key, exc)
+            yield f"event: error\ndata: {json.dumps({'detail': 'Matching failed. Please try again.'})}\n\n"
+            return
+        finally:
+            metrics.record_ai_response_time(round((time.perf_counter() - t0) * 1000))
+
+        while not progress_queue.empty():
+            try:
+                evt = progress_queue.get_nowait()
+                yield f"event: progress\ndata: {json.dumps(evt)}\n\n"
+            except queue.Empty:
+                break
+
+        matched_results = [r for r in results if r.matched]
+
+        for r in results:
+            if r.matched:
+                db.add(MatchSessionResult(
+                    session_id=session_id,
+                    job_id=r.job_id,
+                    matched=r.matched,
+                    compatibility=r.compatibility,
+                    reason=r.reason,
+                    strengths=json.dumps(r.strengths),
+                    gaps=json.dumps(r.gaps),
+                    factor_scores=json.dumps(r.factor_scores),
+                ))
+
+        match_session.status = "completed"
+        match_session.total_matched = len(matched_results)
+        match_session.completed_at = datetime.now(timezone.utc)
         db.commit()
-        log.error("Match session %d failed | user=%s | %s", session_id, user_key, exc)
-        raise HTTPException(status_code=502, detail="Matching failed. Please try again.")
-    finally:
-        metrics.record_ai_response_time(round((time.perf_counter() - t0) * 1000))
 
-    matched_results = [r for r in results if r.matched]
-
-    for r in results:
-        if r.matched:
-            db.add(MatchSessionResult(
-                session_id=session_id,
-                job_id=r.job_id,
+        response_matches = []
+        for r in matched_results:
+            db_job = jobs_by_id.get(r.job_id)
+            if not db_job:
+                continue
+            response_matches.append(MatchSessionResultItem(
+                job=_job_to_schema(db_job),
                 matched=r.matched,
                 compatibility=r.compatibility,
                 reason=r.reason,
-                strengths=json.dumps(r.strengths),
-                gaps=json.dumps(r.gaps),
-                factor_scores=json.dumps(r.factor_scores),
+                strengths=r.strengths,
+                gaps=r.gaps,
+                factor_scores=r.factor_scores,
             ))
 
-    match_session.status = "completed"
-    match_session.total_matched = len(matched_results)
-    match_session.completed_at = datetime.now(timezone.utc)
-    db.commit()
+        metrics.increment("crew_matches")
+        log.info("Match session %d complete | user=%s | scanned=%d | matched=%d",
+                 session_id, user_key, len(all_jobs), len(matched_results))
 
-    response_matches: list[MatchSessionResultItem] = []
-    for r in matched_results:
-        db_job = jobs_by_id.get(r.job_id)
-        if not db_job:
-            continue
-        response_matches.append(MatchSessionResultItem(
-            job=_job_to_schema(db_job),
-            matched=r.matched,
-            compatibility=r.compatibility,
-            reason=r.reason,
-            strengths=r.strengths,
-            gaps=r.gaps,
-            factor_scores=r.factor_scores,
-        ))
+        final = CrewMatchV2Response(
+            session_id=session_id,
+            matched=len(response_matches) > 0,
+            total_jobs_scanned=len(all_jobs),
+            total_matched=len(matched_results),
+            matches=response_matches,
+        )
+        yield f"event: complete\ndata: {final.model_dump_json()}\n\n"
 
-    metrics.increment("crew_matches")
-    log.info("Match session %d complete | user=%s | scanned=%d | matched=%d",
-             session_id, user_key, len(all_jobs), len(matched_results))
-
-    return CrewMatchV2Response(
-        session_id=session_id,
-        matched=len(response_matches) > 0,
-        total_jobs_scanned=len(all_jobs),
-        total_matched=len(matched_results),
-        matches=response_matches,
-    )
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/sessions", response_model=MatchSessionListResponse)
