@@ -179,7 +179,7 @@ async def find_match(
     """Run a full match session with live progress via Server-Sent Events.
 
     Streams events:
-      event: progress  — after each batch: {jobs_scanned, total_jobs, matches_so_far, batch}
+      event: progress  — after each batch: {jobs_scanned, total_jobs, matches_so_far, batch, total_batches}
       event: complete   — final result: full CrewMatchV2Response JSON
       event: error      — on failure: {detail: "..."}
     """
@@ -221,8 +221,9 @@ async def find_match(
     candidate = _profile_to_candidate(profile, job_history)
     job_summaries = [_job_to_summary(j) for j in all_jobs]
     jobs_by_id = {j.id: j for j in all_jobs}
+    total_job_count = len(all_jobs)
 
-    log.info("Match session %d | user=%s | jobs=%d", session_id, user_key, len(all_jobs))
+    log.info("Match session %d | user=%s | jobs=%d", session_id, user_key, total_job_count)
 
     progress_queue: queue.Queue[dict] = queue.Queue()
 
@@ -236,6 +237,9 @@ async def find_match(
         })
 
     async def event_stream():
+        from app.database import SessionLocal
+        from app.services.matching_v2 import BATCH_SIZE
+
         t0 = time.perf_counter()
 
         match_task = asyncio.get_event_loop().run_in_executor(
@@ -249,9 +253,8 @@ async def find_match(
             ),
         )
 
-        from app.services.matching_v2 import BATCH_SIZE
-        _total_batches = (len(all_jobs) + BATCH_SIZE - 1) // BATCH_SIZE
-        yield f"event: progress\ndata: {json.dumps({'jobs_scanned': 0, 'total_jobs': len(all_jobs), 'matches_so_far': 0, 'batch': 0, 'total_batches': _total_batches})}\n\n"
+        _total_batches = (total_job_count + BATCH_SIZE - 1) // BATCH_SIZE
+        yield f"event: progress\ndata: {json.dumps({'jobs_scanned': 0, 'total_jobs': total_job_count, 'matches_so_far': 0, 'batch': 0, 'total_batches': _total_batches})}\n\n"
 
         last_ping = time.perf_counter()
         while not match_task.done():
@@ -272,8 +275,14 @@ async def find_match(
         try:
             results = match_task.result()
         except Exception as exc:
-            match_session.status = "failed"
-            db.commit()
+            stream_db = SessionLocal()
+            try:
+                s = stream_db.query(MatchSession).get(session_id)
+                if s:
+                    s.status = "failed"
+                    stream_db.commit()
+            finally:
+                stream_db.close()
             log.error("Match session %d failed | user=%s | %s", session_id, user_key, exc)
             yield f"event: error\ndata: {json.dumps({'detail': 'Matching failed. Please try again.'})}\n\n"
             return
@@ -289,9 +298,10 @@ async def find_match(
 
         matched_results = [r for r in results if r.matched]
 
-        for r in results:
-            if r.matched:
-                db.add(MatchSessionResult(
+        stream_db = SessionLocal()
+        try:
+            for r in matched_results:
+                stream_db.add(MatchSessionResult(
                     session_id=session_id,
                     job_id=r.job_id,
                     matched=r.matched,
@@ -302,10 +312,17 @@ async def find_match(
                     factor_scores=json.dumps(r.factor_scores),
                 ))
 
-        match_session.status = "completed"
-        match_session.total_matched = len(matched_results)
-        match_session.completed_at = datetime.now(timezone.utc)
-        db.commit()
+            s = stream_db.query(MatchSession).get(session_id)
+            if s:
+                s.status = "completed"
+                s.total_matched = len(matched_results)
+                s.completed_at = datetime.now(timezone.utc)
+            stream_db.commit()
+        except Exception:
+            log.exception("Failed to persist match session %d results", session_id)
+            stream_db.rollback()
+        finally:
+            stream_db.close()
 
         response_matches = []
         for r in matched_results:
@@ -324,12 +341,12 @@ async def find_match(
 
         metrics.increment("crew_matches")
         log.info("Match session %d complete | user=%s | scanned=%d | matched=%d",
-                 session_id, user_key, len(all_jobs), len(matched_results))
+                 session_id, user_key, total_job_count, len(matched_results))
 
         final = CrewMatchV2Response(
             session_id=session_id,
             matched=len(response_matches) > 0,
-            total_jobs_scanned=len(all_jobs),
+            total_jobs_scanned=total_job_count,
             total_matched=len(matched_results),
             matches=response_matches,
         )
