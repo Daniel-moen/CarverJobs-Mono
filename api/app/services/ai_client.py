@@ -99,9 +99,10 @@ def call_openai(
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
+        "max_completion_tokens": max_tokens,
     }
+    if temperature != 1.0:
+        payload["temperature"] = temperature
     if response_format is not None:
         payload["response_format"] = response_format
 

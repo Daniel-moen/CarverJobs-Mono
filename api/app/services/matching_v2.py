@@ -89,7 +89,6 @@ def _call_openai(api_key: str, model: str, prompt: str) -> str:
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "response_format": {"type": "json_object"},
-        "temperature": 0.3,
     }
     data = json.dumps(body).encode("utf-8")
     url = "https://api.openai.com/v1/chat/completions"
