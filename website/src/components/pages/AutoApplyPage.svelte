@@ -71,6 +71,46 @@
       const decoder = new TextDecoder()
       let buffer = ''
       let currentEvent = ''
+      let gotComplete = false
+
+      function handleSSELine(line) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim()
+        } else if (line.startsWith('data: ')) {
+          const raw = line.slice(6)
+          try {
+            const parsed = JSON.parse(raw)
+            if (currentEvent === 'complete') {
+              gotComplete = true
+              if (parsed.matched && parsed.matches?.length) {
+                allMatches = parsed.matches.map(m => ({
+                  job: m.job,
+                  ai: {
+                    matched: m.matched,
+                    compatibility: m.compatibility,
+                    reason: m.reason,
+                    strengths: m.strengths,
+                    gaps: m.gaps,
+                    factor_scores: m.factor_scores,
+                  },
+                }))
+                matchIndex = 0
+                matchState = 'matched'
+              } else {
+                matchState = 'no-match'
+              }
+            } else if (currentEvent === 'error') {
+              matchError = parsed.detail ?? 'Matching failed. Please try again.'
+              matchState = 'error'
+            } else if (currentEvent === 'progress') {
+              matchProgress = parsed
+            }
+          } catch (e) {
+            console.warn('[carver] SSE JSON parse failed for event:', currentEvent, 'length:', raw.length, e)
+          }
+          currentEvent = ''
+        }
+      }
 
       while (true) {
         const { done, value } = await reader.read()
@@ -79,49 +119,17 @@
 
         const lines = buffer.split('\n')
         buffer = lines.pop()
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim()
-          } else if (line.startsWith('data: ')) {
-            try {
-              const parsed = JSON.parse(line.slice(6))
-              if (currentEvent === 'complete') {
-                if (parsed.matched && parsed.matches?.length) {
-                  allMatches = parsed.matches.map(m => ({
-                    job: m.job,
-                    ai: {
-                      matched: m.matched,
-                      compatibility: m.compatibility,
-                      reason: m.reason,
-                      strengths: m.strengths,
-                      gaps: m.gaps,
-                      factor_scores: m.factor_scores,
-                    },
-                  }))
-                  matchIndex = 0
-                  matchState = 'matched'
-                } else {
-                  matchState = 'no-match'
-                }
-                return
-              } else if (currentEvent === 'error') {
-                matchError = parsed.detail ?? 'Matching failed. Please try again.'
-                matchState = 'error'
-                return
-              } else if (currentEvent === 'progress') {
-                matchProgress = parsed
-              }
-            } catch { /* ignore malformed data lines */ }
-            currentEvent = ''
-          } else if (line.trim() === '' || line.startsWith(':')) {
-            // blank line or comment/keepalive — reset event type
-          }
-        }
+        for (const line of lines) handleSSELine(line)
       }
 
-      if (matchState === 'loading') {
-        matchState = 'no-match'
+      buffer += decoder.decode()
+      if (buffer.trim()) {
+        for (const line of buffer.split('\n')) handleSSELine(line)
+      }
+
+      if (!gotComplete && matchState === 'loading') {
+        matchError = 'Connection lost before matching finished. Please try again.'
+        matchState = 'error'
       }
     } catch {
       if (matchRetries < MAX_RETRIES) {
