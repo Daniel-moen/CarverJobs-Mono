@@ -163,7 +163,7 @@
 
   // Retry a fetch on network failure (e.g. API still booting). Gives up after
   // maxAttempts, doubling the delay each time starting from initialDelayMs.
-  async function fetchWithRetry(url, options, { maxAttempts = 5, initialDelayMs = 1500 } = {}) {
+  async function fetchWithRetry(url, options, { maxAttempts = 3, initialDelayMs = 800 } = {}) {
     let delay = initialDelayMs
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -171,7 +171,7 @@
       } catch (err) {
         if (attempt === maxAttempts) throw err
         await new Promise(r => setTimeout(r, delay))
-        delay = Math.min(delay * 2, 10000)
+        delay = Math.min(delay * 2, 5000)
       }
     }
   }
