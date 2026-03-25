@@ -13,7 +13,7 @@ from app.error_codes import CRV_2002, CRV_2007, CRV_2008, CRV_2009
 from app.database import get_db
 from app.logger import get_logger
 from app.schemas import GoogleLoginRequest, LoginRequest, SignupRequest, UserCreate, WaitlistSignupRequest
-from app.security import issue_session_token, require_session
+from app.security import issue_session_token, optional_session, require_session
 from app.settings import settings
 
 log = get_logger("carver.auth")
@@ -218,8 +218,9 @@ def logout(response: Response):
 
 
 @router.get("/session")
-def get_session(session: dict = Depends(require_session)):
+def get_session(session: dict | None = Depends(optional_session)):
+  if session is None:
+    return {"ok": True, "authenticated": False}
   log.debug("Session check | sub=%s", session.get("sub"))
-  # Admin users always have full access; crew users require a subscription.
   is_subscribed = session.get("role") == "admin"
-  return {"ok": True, "session": {**session, "is_subscribed": is_subscribed}}
+  return {"ok": True, "authenticated": True, "session": {**session, "is_subscribed": is_subscribed}}

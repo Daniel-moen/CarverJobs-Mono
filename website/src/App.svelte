@@ -185,14 +185,13 @@
         skipAuthHandling: true,
         timeoutMs: 4000,
       }, { maxAttempts: 2, initialDelayMs: 1000 })
-      isAuthenticated = response.ok
+      let data = null
+      try { data = response.ok ? await response.json() : null } catch { data = null }
+      isAuthenticated = Boolean(data?.authenticated)
       if (isAuthenticated) {
         hasActiveSession = true
-        try {
-          const data = await response.json()
-          userRole = data?.session?.role ?? ''
-          isSubscribed = Boolean(data?.session?.is_subscribed)
-        } catch { userRole = ''; isSubscribed = false }
+        userRole = data?.session?.role ?? ''
+        isSubscribed = Boolean(data?.session?.is_subscribed)
         // Keep the page that matches the current URL; don't override with a default.
         currentPage = pageFromPath(window.location.pathname)
         showOnboarding = checkOnboardingNeeded()

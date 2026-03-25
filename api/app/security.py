@@ -48,19 +48,30 @@ def parse_session_token(token: str) -> dict[str, Any]:
     ) from exc
 
 
-def require_session(request: Request) -> dict[str, Any]:
+def optional_session(request: Request) -> dict[str, Any] | None:
+  """Return session payload if a valid cookie exists, else None (no exception)."""
   if settings.AUTO_LOGIN_AS_ADMIN:
     log.debug("Auto-login as admin active")
     return {"sub": settings.ADMIN_USERNAME, "role": "admin"}
   token = request.cookies.get(settings.SESSION_COOKIE_NAME)
   if not token:
+    return None
+  try:
+    return parse_session_token(token)
+  except HTTPException:
+    return None
+
+
+def require_session(request: Request) -> dict[str, Any]:
+  session = optional_session(request)
+  if session is None:
     log.debug("No session cookie on request | path=%s", request.url.path)
     raise HTTPException(
       status_code=status.HTTP_401_UNAUTHORIZED,
       detail="Authentication required",
       headers={"X-Error-Code": CRV_2004},
     )
-  return parse_session_token(token)
+  return session
 
 
 def require_admin_session(session: dict[str, Any] = Depends(require_session)) -> dict[str, Any]:
