@@ -352,7 +352,14 @@ async def find_match(
         )
         yield f"event: complete\ndata: {final.model_dump_json()}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/sessions", response_model=MatchSessionListResponse)
