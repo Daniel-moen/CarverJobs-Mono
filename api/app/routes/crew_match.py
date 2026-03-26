@@ -26,7 +26,7 @@ from app.schemas import (
 )
 from app.security import require_session
 from app.services.ai_client import AIClientError, call_openai
-from app.services.matching_v2 import (
+from app.services.matching_engine import (
     CandidateProfile,
     JobSummary,
     match_candidate_to_jobs,
@@ -238,7 +238,7 @@ async def find_match(
 
     async def event_stream():
         from app.database import SessionLocal
-        from app.services.matching_v2 import BATCH_SIZE
+        from app.services.matching_engine import BATCH_SIZE
 
         t0 = time.perf_counter()
 
