@@ -7,6 +7,14 @@
   let error = $state('')
   let mounted = $state(false)
 
+  let draftingJob = $state(null)
+  let profileSlug = $state('')
+  let profileUrl = $derived(profileSlug ? `${window.location.origin}/crew/${profileSlug}` : '')
+  let emailTo = $state('')
+  let emailSubject = $state('')
+  let emailBody = $state('')
+  let emailCopied = $state(false)
+
   function contractLabel(job) {
     return job.contract_type ?? (job.rotation ? `Rotational (${job.rotation})` : 'Unspecified')
   }
@@ -22,6 +30,49 @@
       return `${job.salary_currency ?? 'EUR'} ${Math.round(job.salary_min)}–${Math.round(job.salary_max)}`
     }
     return 'TBC'
+  }
+
+  function buildEmailDraft(job) {
+    const role = job.title ?? job.role
+    const yacht = job.yacht ?? 'the vessel'
+    emailTo = job.contact_email ?? ''
+    emailSubject = `Application – ${role} on ${yacht}`
+    emailBody = `Dear Hiring Manager,
+
+I am writing to express my interest in the ${role} position on ${yacht}${job.location ? ` (${job.location})` : ''}.
+
+Please find my full crew profile and qualifications here:
+${profileUrl || '[Complete your profile to generate your link]'}
+
+I would welcome the opportunity to discuss how my experience aligns with this role. Please don't hesitate to reach out with any questions.
+
+Kind regards`
+  }
+
+  function openDraft(job) {
+    buildEmailDraft(job)
+    draftingJob = job
+  }
+
+  function closeDraft() {
+    draftingJob = null
+    emailCopied = false
+  }
+
+  function openInMailClient() {
+    const subject = encodeURIComponent(emailSubject)
+    const body = encodeURIComponent(emailBody)
+    const mailto = `mailto:${encodeURIComponent(emailTo)}?subject=${subject}&body=${body}`
+    window.open(mailto, '_self')
+  }
+
+  async function copyDraftToClipboard() {
+    const text = `To: ${emailTo}\nSubject: ${emailSubject}\n\n${emailBody}`
+    try {
+      await navigator.clipboard.writeText(text)
+      emailCopied = true
+      setTimeout(() => (emailCopied = false), 2000)
+    } catch { /* clipboard unavailable */ }
   }
 
   async function loadJobs() {
@@ -48,6 +99,22 @@
     }
   }
 
+  async function loadProfileSlug() {
+    try {
+      const saved = localStorage.getItem('carver_profile')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.profileSlug) { profileSlug = parsed.profileSlug; return }
+      }
+    } catch { /* ignore */ }
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/profile/me`, { credentials: 'include' })
+      if (!res.ok) return
+      const data = await res.json()
+      profileSlug = data.profile?.profile_slug ?? ''
+    } catch { /* ignore */ }
+  }
+
   function handlePointerMove(e) {
     const r = e.currentTarget.getBoundingClientRect()
     e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`)
@@ -59,7 +126,10 @@
     e.currentTarget.style.setProperty('--my', '50%')
   }
 
-  onMount(() => loadJobs())
+  onMount(() => {
+    loadJobs()
+    loadProfileSlug()
+  })
 </script>
 
 <section class="grid gap-4">
@@ -222,13 +292,14 @@
               </div>
             {/if}
 
-            <!-- Quick actions — visible on mobile, appear on hover on desktop -->
+            <!-- Actions — visible on mobile, appear on hover on desktop -->
             <div class="mt-4 flex items-center gap-2 transition-opacity duration-200 sm:opacity-0 sm:group-hover:opacity-100">
               <button
                 type="button"
+                onclick={() => openDraft(job)}
                 class="rounded-lg border border-cyan-400/30 bg-cyan-400/8 px-4 py-1.5 text-xs font-semibold text-cyan-300 transition-all hover:bg-cyan-400/18 hover:text-white active:scale-95"
               >
-                Quick Apply
+                Draft Email
               </button>
               <button
                 type="button"
@@ -243,6 +314,109 @@
     </div>
   {/if}
 </section>
+
+<!-- Email draft overlay -->
+{#if draftingJob}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+    onclick={(e) => { if (e.target === e.currentTarget) closeDraft() }}
+    onkeydown={(e) => { if (e.key === 'Escape') closeDraft() }}
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+  >
+    <div class="draft-panel relative w-full max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl">
+      <!-- Header -->
+      <div class="flex items-center justify-between border-b border-white/8 px-5 py-4 sm:px-6">
+        <div class="min-w-0">
+          <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Draft Email</p>
+          <h2 class="mt-1 truncate text-base font-bold text-white">
+            {draftingJob.title ?? draftingJob.role} — {draftingJob.yacht}
+          </h2>
+        </div>
+        <button
+          type="button"
+          onclick={closeDraft}
+          class="ml-4 flex-none rounded-lg border border-white/10 p-1.5 text-slate-500 transition hover:border-white/20 hover:text-white"
+          aria-label="Close"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Form -->
+      <div class="grid gap-4 px-5 py-5 sm:px-6">
+        <label class="grid gap-1.5">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</span>
+          <input
+            type="email"
+            bind:value={emailTo}
+            placeholder="recruiter@example.com"
+            class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30"
+          />
+        </label>
+
+        <label class="grid gap-1.5">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Subject</span>
+          <input
+            type="text"
+            bind:value={emailSubject}
+            class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30"
+          />
+        </label>
+
+        <label class="grid gap-1.5">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Message</span>
+          <textarea
+            bind:value={emailBody}
+            rows="10"
+            class="rounded-lg border border-white/10 bg-black/40 px-3 py-3 text-sm leading-relaxed text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30 resize-y"
+          ></textarea>
+        </label>
+
+        {#if profileUrl}
+          <div class="flex items-center gap-2 rounded-lg border border-sky-400/15 bg-sky-400/5 px-3 py-2">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-sky-500">Profile Link</span>
+            <a href={profileUrl} target="_blank" rel="noopener" class="truncate text-xs text-sky-300 underline decoration-sky-400/30 hover:text-white">
+              {profileUrl}
+            </a>
+          </div>
+        {:else}
+          <div class="flex items-center gap-2 rounded-lg border border-amber-400/15 bg-amber-400/5 px-3 py-2">
+            <span class="text-xs text-amber-300">Complete your profile to attach your crew link.</span>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Actions -->
+      <div class="flex flex-wrap items-center gap-2 border-t border-white/8 px-5 py-4 sm:px-6">
+        <button
+          type="button"
+          onclick={openInMailClient}
+          class="rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-400/20 hover:text-white active:scale-95"
+        >
+          Open in Mail App
+        </button>
+        <button
+          type="button"
+          onclick={copyDraftToClipboard}
+          class="rounded-lg border border-white/12 bg-white/5 px-5 py-2 text-sm font-medium text-slate-300 transition-all hover:border-white/25 hover:text-white active:scale-95"
+        >
+          {emailCopied ? 'Copied!' : 'Copy to Clipboard'}
+        </button>
+        <button
+          type="button"
+          onclick={closeDraft}
+          class="ml-auto rounded-lg px-4 py-2 text-sm text-slate-500 transition hover:text-white"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   /* Header orb pulse + scan — reduced on mobile */
@@ -300,5 +474,13 @@
   .job-card.visible {
     opacity: 1;
     transform: translateY(0);
+  }
+
+  .draft-panel {
+    animation: draftSlideIn 0.25s ease-out;
+  }
+  @keyframes draftSlideIn {
+    from { opacity: 0; transform: translateY(24px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
   }
 </style>
