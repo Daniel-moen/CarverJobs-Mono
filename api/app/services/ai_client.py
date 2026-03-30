@@ -97,10 +97,11 @@ def call_openai(
         )
 
     _gpt5 = "gpt-5" in model
+    effective_max = max(max_tokens * 4, 4096) if _gpt5 else max_tokens
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "max_completion_tokens": max_tokens,
+        "max_completion_tokens": effective_max,
     }
     if not _gpt5 and temperature != 1.0:
         payload["temperature"] = temperature
@@ -128,12 +129,19 @@ def call_openai(
             try:
                 content = body["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError) as exc:
+                log.error("OpenAI unexpected shape | body=%s", json.dumps(body)[:600])
                 raise AIResponseError(
                     f"OpenAI returned an unexpected response shape: {exc}",
                     crv_code="CRV-3006",
                 ) from exc
 
             if not content or not content.strip():
+                usage = body.get("usage", {})
+                finish = body.get("choices", [{}])[0].get("finish_reason", "?")
+                log.error(
+                    "OpenAI empty content | finish_reason=%s | usage=%s | model=%s",
+                    finish, json.dumps(usage), model,
+                )
                 raise AIResponseError(
                     "OpenAI returned an empty content string.",
                     crv_code="CRV-3006",
