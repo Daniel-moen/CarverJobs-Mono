@@ -452,10 +452,18 @@ async def _handle_jobs_command() -> str:
 
 
 async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, db: Session) -> None:
-    """Run the AI matching engine, sending results + apply buttons directly."""
+    """Run the AI matching engine and send results with apply buttons.
+
+    Uses the same matching_engine as the website — one engine, consistent results.
+    """
     import asyncio
-    from pathlib import Path
-    import sys as _sys
+    import math as _math
+
+    from app.services.matching_engine import (
+        CandidateProfile,
+        JobSummary,
+        match_candidate_to_jobs,
+    )
 
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone_number).first()
     if not profile:
@@ -474,84 +482,35 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         await _send_whatsapp(phone_number, "⚠️ Matching engine is in dry dock. Please try again soon.")
         return
 
-    # Lazy import matching engine
-    ENGINE_DIR = Path(__file__).resolve().parents[2] / "Matching Engine"
-    if not ENGINE_DIR.exists():
-        await _send_whatsapp(phone_number, "⚠️ Matching engine unavailable. We'll be back shortly — try again soon.")
-        return
-    if str(ENGINE_DIR) not in _sys.path:
-        _sys.path.insert(0, str(ENGINE_DIR))
-    try:
-        from models.job import JobPosting
-        from models.user import UserProfile
-        from services.matching_service import MatchingService
-        from services.openai_client import OpenAIClient
-        from services.prompt_builder import PromptBuilder
-        from utils.batching import FixedSizeBatchStrategy
-    except Exception as exc:
-        log.warning("WhatsApp match: engine import failed | %s", exc)
-        await _send_whatsapp(phone_number, "⚠️ Matching engine unavailable. We'll be back shortly — try again soon.")
-        return
-
     all_jobs = (
         db.query(Job)
-        .filter(
-            Job.status.in_(["open", "priority"]),
-            Job.contact_email.isnot(None),
-            Job.contact_email != "",
-        )
+        .filter(Job.status.in_(["open", "priority"]))
         .order_by(Job.created_at.desc())
-        .limit(60)
         .all()
     )
     if not all_jobs:
         await _send_whatsapp(
             phone_number,
-            "📭 *No Open Yacht Roles Right Now*\n\nNo positions with contact details at the moment. New crew roles drop regularly — check back soon!",
+            "📭 *No Open Yacht Roles Right Now*\n\nNo positions at the moment. New crew roles drop regularly — check back soon!",
         )
         return
 
-    # No pre-filter — AI evaluates all jobs and decides matches
-    jobs = all_jobs[:30]
-
-    # Calculate time estimate: ceil(jobs / batch_size) × avg seconds per OpenAI call
-    _BATCH_SIZE = 5
+    _BATCH_SIZE = 10
     _AVG_SECS_PER_BATCH = 8
-    import math as _math
-    num_batches = _math.ceil(len(jobs) / _BATCH_SIZE)
+    num_batches = _math.ceil(len(all_jobs) / _BATCH_SIZE)
     est_secs = num_batches * _AVG_SECS_PER_BATCH
-    if est_secs < 60:
-        est_str = f"~{est_secs} seconds"
-    else:
-        est_mins = round(est_secs / 60)
-        est_str = f"~{est_mins} minute{'s' if est_mins != 1 else ''}"
+    est_str = f"~{est_secs} seconds" if est_secs < 60 else f"~{round(est_secs / 60)} min"
 
     await _send_whatsapp(
         phone_number,
         f"⏳ *Finding Your Matches...*\n\n"
-        f"Scanning *{len(jobs)} yacht positions* — "
-        f"estimated time: *{est_str}*.\n\n"
+        f"Scanning *{len(all_jobs)} yacht positions* — estimated time: *{est_str}*.\n\n"
         f"Stand by, we'll send your results shortly!",
     )
 
-    # Build matching engine objects
-    yrs = 0.0
-    try:
-        yrs = float(profile.years_experience or 0)
-    except (ValueError, TypeError):
-        pass
+    # Build candidate profile (same as website)
     certs = [c.strip() for c in (profile.certifications or "").replace("\n", ",").split(",") if c.strip()]
-    langs = [l.strip() for l in (profile.languages or "").split(",") if l.strip()]
-    pay_min = 0.0
-    try:
-        pay_min = float(profile.salary_min or 0)
-    except (ValueError, TypeError):
-        pass
-    pay_max = 0.0
-    try:
-        pay_max = float(profile.salary_max or 0)
-    except (ValueError, TypeError):
-        pass
+    langs = [lang.strip() for lang in (profile.languages or "").split(",") if lang.strip()]
 
     job_history_entries = (
         db.query(JobHistoryEntry)
@@ -560,69 +519,66 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         .limit(10)
         .all()
     )
-    history_data = [
+    history = [
         {"role": e.role, "yacht": e.yacht_name, "yacht_type": e.yacht_type or "",
          "start_date": e.start_date or "", "end_date": e.end_date or "",
          "description": (e.description or "")[:200]}
         for e in job_history_entries
     ]
 
-    user_profile = UserProfile(
-        user_id=phone_number,
+    candidate = CandidateProfile(
+        user_key=phone_number,
+        first_name=profile.first_name or "",
+        last_name=profile.last_name or "",
+        sex=profile.sex or "",
         desired_role=profile.desired_role or "",
-        location=profile.preferred_locations or profile.current_location or "Unknown",
-        desired_pay_min=pay_min,
-        desired_length=profile.contract_type or "Any",
-        skills=[],
-        certifications=certs,
-        years_experience=yrs,
-        languages=langs,
+        location=profile.current_location or "",
+        preferred_locations=profile.preferred_locations or "",
         nationality=profile.nationality or "",
+        years_experience=profile.years_experience or "",
+        salary_min=profile.salary_min or "",
+        salary_max=profile.salary_max or "",
+        contract_type=profile.contract_type or "",
         rotation_preference=profile.rotation_preference or "",
         available_from=profile.available_from or "",
-        salary_max=pay_max,
-        bio=(profile.bio or "")[:400],
-        job_history=history_data,
+        certifications=certs,
+        languages=langs,
+        bio=profile.bio or "",
+        job_history=history,
     )
 
-    job_postings = []
-    jobs_by_id = {}
-    for j in jobs:
-        try:
-            pay = float(j.salary_max or j.salary_min or 0.0)
-        except (ValueError, TypeError):
-            pay = 0.0
-        skills = [s.strip() for s in (j.requirements or "")[:300].replace("\n", ",").split(",") if s.strip()]
-        jcerts = [c.strip() for c in (j.certifications_required or "").replace("\n", ",").split(",") if c.strip()]
-        jp = JobPosting(
-            job_id=str(j.id),
-            title=j.title,
-            role=j.role or "",
-            location=j.location,
-            pay=pay,
-            length=j.contract_type or "Unknown",
+    job_summaries = [
+        JobSummary(
+            job_id=j.id, title=j.title, role=j.role or "", department=j.department or "",
+            location=j.location, yacht_type=j.yacht_type or "", yacht_length_m=j.yacht_length_m,
+            start_date=j.start_date or "", contract_type=j.contract_type or "",
+            rotation=j.rotation or "", season=j.season or "",
+            salary_min=j.salary_min, salary_max=j.salary_max,
+            salary_currency=j.salary_currency or "EUR",
+            experience_required_years=j.experience_required_years,
+            certifications_required=j.certifications_required or "",
+            languages_required=j.languages_required or "",
             description=j.description or "",
-            required_skills=skills,
-            preferred_certifications=jcerts,
         )
-        job_postings.append(jp)
-        jobs_by_id[str(j.id)] = j
-
-    service = MatchingService(
-        llm_client=OpenAIClient(api_key=settings.OPENAI_API_KEY, model=settings.OPENAI_MODEL),
-        batch_strategy=FixedSizeBatchStrategy(batch_size=5),
-        prompt_builder=PromptBuilder(),
-        verbose=False,
-    )
+        for j in all_jobs
+    ]
+    jobs_by_id = {j.id: j for j in all_jobs}
 
     try:
-        results = await asyncio.to_thread(service.match_user_to_jobs, user_profile, job_postings)
+        results = await asyncio.to_thread(
+            match_candidate_to_jobs,
+            api_key=settings.OPENAI_API_KEY,
+            model=settings.OPENAI_MODEL,
+            candidate=candidate,
+            jobs=job_summaries,
+        )
     except Exception as exc:
         log.error("WhatsApp match engine error | %s", exc)
         await _send_whatsapp(phone_number, "⚠️ Matching hit a snag. Give it another try in a moment.")
         return
 
-    matched = [r for r in (results or []) if r.matched and (r.compatibility or 0) >= 75][:3]
+    # Return ALL matches (matched=True) — no extra compatibility filter
+    matched = [r for r in (results or []) if r.matched]
     if not matched:
         await _send_whatsapp(
             phone_number,
@@ -635,10 +591,10 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         )
         return
 
-    # Store matches in session for job_info and apply commands
+    # WhatsApp buttons only support 3 — store top 3 for interactive actions, list rest as text
+    top_matches = matched[:3]
     stored = []
-    num_labels = ["1️⃣", "2️⃣", "3️⃣"]
-    for i, m in enumerate(matched, 1):
+    for m in top_matches:
         job = jobs_by_id.get(m.job_id)
         if not job:
             continue
@@ -649,19 +605,19 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
     _save_session(wa_session, db, json.loads(wa_session.history), partial)
     metrics.increment("crew_matches")
 
-    # Header
     await _send_whatsapp(
         phone_number,
-        f"🎯 *Found {len(stored)} yacht match{'es' if len(stored) > 1 else ''}!*\n\n"
-        f"Tap *See More* for full details, or *Draft Application* to apply to the role.",
+        f"🎯 *Found {len(matched)} yacht match{'es' if len(matched) != 1 else ''}!*\n\n"
+        f"Showing your top matches — tap *See More* for details or *Draft Application* to apply.",
     )
 
-    # One button message per match
-    for i, m in enumerate(matched, 1):
+    # Button messages for top 3
+    num_labels = ["1️⃣", "2️⃣", "3️⃣"]
+    for i, m in enumerate(top_matches, 1):
         job = jobs_by_id.get(m.job_id)
         if not job:
             continue
-        compat = int(m.compatibility or 0)
+        compat = int(m.compatibility)
         salary_line = ""
         if job.salary_min or job.salary_max:
             lo = f"€{int(job.salary_min)}" if job.salary_min else ""
@@ -682,6 +638,23 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
                 (f"btn_apply_{i}", "Draft Application"),
             ],
         )
+
+    # List remaining matches as text (if more than 3)
+    if len(matched) > 3:
+        extra_lines = []
+        for m in matched[3:]:
+            job = jobs_by_id.get(m.job_id)
+            if not job:
+                continue
+            compat = int(m.compatibility)
+            extra_lines.append(f"• *{job.title}* — {job.location} ({compat}%)")
+        if extra_lines:
+            await _send_whatsapp(
+                phone_number,
+                f"📋 *{len(extra_lines)} more match{'es' if len(extra_lines) != 1 else ''}:*\n\n"
+                + "\n".join(extra_lines)
+                + "\n\n_Check the job board for full details on all positions._",
+            )
 
 
 async def _handle_job_info_command(number: int, wa_session: WhatsAppSession, db: Session) -> None:
