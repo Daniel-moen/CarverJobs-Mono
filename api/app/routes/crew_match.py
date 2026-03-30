@@ -490,6 +490,7 @@ async def draft_email(
 Draft a short, polite application email from {name} for the position below.
 Keep it under 120 words. Be warm but professional — no fluff.
 Mention relevant experience/qualifications from their profile where they match the job.
+Include their profile link in the email body if available.
 End with a sign-off using their first name only.
 
 Crew profile:
@@ -507,15 +508,24 @@ Requirements: {(job.requirements or '')[:300]}
 Return strict JSON only:
 {{"subject": "<email subject line>", "body": "<email body text>"}}"""
 
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+    ]
+
+    if payload.prompt and payload.previous_body:
+        messages.append({"role": "assistant", "content": json.dumps({"subject": "", "body": payload.previous_body})})
+        messages.append({"role": "user", "content": f"Revise the email based on this instruction: {payload.prompt}"})
+    elif payload.prompt:
+        messages.append({"role": "user", "content": f"Draft the application email. Additional instruction: {payload.prompt}"})
+    else:
+        messages.append({"role": "user", "content": "Draft the application email."})
+
     t0 = time.perf_counter()
     try:
         text = await asyncio.to_thread(
             call_openai,
             api_key=settings.OPENAI_API_KEY,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Draft the application email."},
-            ],
+            messages=messages,
             model=settings.OPENAI_MODEL,
             max_tokens=400,
             temperature=0.7,

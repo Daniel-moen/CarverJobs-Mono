@@ -457,6 +457,8 @@ class CrewMatchResponse(APIModel):
 
 class DraftEmailRequest(APIModel):
     job_id: Annotated[int, Field(ge=1)]
+    prompt: str | None = Field(default=None, max_length=500)
+    previous_body: str | None = Field(default=None, max_length=3000)
 
 
 class DraftEmailResponse(APIModel):

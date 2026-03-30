@@ -13,34 +13,18 @@
   let retries = $state(0)
 
   let draftingJob = $state(null)
-  let profileSlug = $state('')
-  let profileUrl = $derived(profileSlug ? `${window.location.origin}/crew/${profileSlug}` : '')
   let draftTo = $state('')
   let draftSubject = $state('')
   let draftBody = $state('')
+  let draftLoading = $state(false)
+  let draftError = $state('')
+  let draftPrompt = $state('')
   let copiedEmail = $state(false)
 
   const MAX_RETRIES = 2
 
-  async function loadProfileSlug() {
-    try {
-      const saved = localStorage.getItem('carver_profile')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (parsed.profileSlug) { profileSlug = parsed.profileSlug; return }
-      }
-    } catch { /* ignore */ }
-    try {
-      const res = await apiFetch(`${API_BASE_URL}/profile/me`, { credentials: 'include' })
-      if (!res.ok) return
-      const data = await res.json()
-      profileSlug = data.profile?.profile_slug ?? ''
-    } catch { /* ignore */ }
-  }
-
   onMount(async () => {
     requestAnimationFrame(() => (mounted = true))
-    loadProfileSlug()
     if (autoStartMatch && state === 'idle') {
       onMatchStarted()
       runMatch()
@@ -134,28 +118,58 @@
     }
   }
 
-  function draftEmail(job) {
-    const role = job.title ?? job.role
-    const yacht = job.yacht ?? 'the vessel'
-    draftTo = job.contact_email ?? ''
-    draftSubject = `Application – ${role} on ${yacht}`
-    draftBody = `Dear Hiring Manager,
+  async function callDraftApi(jobId, prompt = null, previousBody = null) {
+    draftLoading = true
+    draftError = ''
+    try {
+      const body = { job_id: jobId }
+      if (prompt) body.prompt = prompt
+      if (previousBody) body.previous_body = previousBody
+      const res = await apiFetch(`${API_BASE_URL}/matching/draft-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        draftError = err.detail || 'Could not draft email. Try again.'
+        return
+      }
+      const data = await res.json()
+      draftTo = data.to || draftTo
+      draftSubject = data.subject || draftSubject
+      draftBody = data.body || draftBody
+    } catch {
+      draftError = 'Could not reach drafting service.'
+    } finally {
+      draftLoading = false
+    }
+  }
 
-I am writing to express my interest in the ${role} position on ${yacht}${job.location ? ` (${job.location})` : ''}.
-
-Please find my full crew profile and qualifications here:
-${profileUrl || '[Complete your profile to generate your link]'}
-
-I would welcome the opportunity to discuss how my experience aligns with this role. Please don't hesitate to reach out with any questions.
-
-Kind regards`
-    copiedEmail = false
+  async function draftEmail(job) {
     draftingJob = job
+    draftTo = job.contact_email ?? ''
+    draftSubject = ''
+    draftBody = ''
+    draftPrompt = ''
+    draftError = ''
+    copiedEmail = false
+    await callDraftApi(job.id)
+  }
+
+  async function repromptDraft() {
+    if (!draftPrompt.trim() || !draftingJob) return
+    const instruction = draftPrompt.trim()
+    draftPrompt = ''
+    await callDraftApi(draftingJob.id, instruction, draftBody || null)
   }
 
   function closeDraft() {
     draftingJob = null
     copiedEmail = false
+    draftPrompt = ''
+    draftError = ''
   }
 
   async function copyDraft() {
@@ -368,71 +382,93 @@ Kind regards`
       </div>
 
       <div class="grid gap-4 px-5 py-5 sm:px-6">
-        <label class="grid gap-1.5">
-          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</span>
-          <input
-            type="email"
-            bind:value={draftTo}
-            placeholder="recruiter@example.com"
-            class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30"
-          />
-        </label>
-
-        <label class="grid gap-1.5">
-          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Subject</span>
-          <input
-            type="text"
-            bind:value={draftSubject}
-            class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30"
-          />
-        </label>
-
-        <label class="grid gap-1.5">
-          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Message</span>
-          <textarea
-            bind:value={draftBody}
-            rows="10"
-            class="rounded-lg border border-white/10 bg-black/40 px-3 py-3 text-sm leading-relaxed text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30 resize-y"
-          ></textarea>
-        </label>
-
-        {#if profileUrl}
-          <div class="flex items-center gap-2 rounded-lg border border-sky-400/15 bg-sky-400/5 px-3 py-2">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-sky-500">Profile Link</span>
-            <a href={profileUrl} target="_blank" rel="noopener" class="truncate text-xs text-sky-300 underline decoration-sky-400/30 hover:text-white">
-              {profileUrl}
-            </a>
+        {#if draftLoading && !draftBody}
+          <div class="flex flex-col items-center gap-3 py-8">
+            <div class="h-6 w-6 rounded-full border-2 border-cyan-400/30 border-t-cyan-400 spinner"></div>
+            <p class="text-sm text-slate-400">AI is drafting your email...</p>
           </div>
         {:else}
-          <div class="flex items-center gap-2 rounded-lg border border-amber-400/15 bg-amber-400/5 px-3 py-2">
-            <span class="text-xs text-amber-300">Complete your profile to attach your crew link.</span>
+          <label class="grid gap-1.5">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</span>
+            <input
+              type="email"
+              bind:value={draftTo}
+              placeholder="recruiter@example.com"
+              class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30"
+            />
+          </label>
+
+          <label class="grid gap-1.5">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Subject</span>
+            <input
+              type="text"
+              bind:value={draftSubject}
+              class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30"
+            />
+          </label>
+
+          <label class="grid gap-1.5">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Message</span>
+            <textarea
+              bind:value={draftBody}
+              rows="10"
+              class="rounded-lg border border-white/10 bg-black/40 px-3 py-3 text-sm leading-relaxed text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30 resize-y"
+            ></textarea>
+          </label>
+
+          <!-- AI reprompt -->
+          <div class="grid gap-1.5">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Adjust with AI</span>
+            <div class="flex gap-2">
+              <input
+                type="text"
+                bind:value={draftPrompt}
+                placeholder="e.g. Make it more casual, mention my STCW cert..."
+                onkeydown={(e) => { if (e.key === 'Enter' && !draftLoading) repromptDraft() }}
+                class="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-violet-400/40 focus:ring-1 focus:ring-violet-400/30"
+              />
+              <button
+                type="button"
+                onclick={repromptDraft}
+                disabled={draftLoading || !draftPrompt.trim()}
+                class="flex-none rounded-lg border border-violet-400/30 bg-violet-400/10 px-4 py-2 text-xs font-semibold text-violet-300 transition-all hover:bg-violet-400/20 hover:text-white active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {draftLoading ? 'Rewriting...' : 'Rewrite'}
+              </button>
+            </div>
           </div>
+
+          {#if draftError}
+            <p class="text-sm text-rose-300">{draftError}</p>
+          {/if}
         {/if}
       </div>
 
-      <div class="flex flex-wrap items-center gap-2 border-t border-white/8 px-5 py-4 sm:px-6">
-        <button
-          type="button"
-          onclick={() => { window.open(buildMailto(), '_self'); trackClick('match_apply_mailto') }}
-          class="rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-400/20 hover:text-white active:scale-95"
-        >
-          Open in Mail App
-        </button>
-        <button
-          type="button"
-          onclick={copyDraft}
-          class="rounded-lg border border-white/12 bg-white/5 px-5 py-2 text-sm font-medium text-slate-300 transition-all hover:border-white/25 hover:text-white active:scale-95"
-        >
-          {copiedEmail ? 'Copied!' : 'Copy to Clipboard'}
-        </button>
-        <button
-          type="button"
-          onclick={closeDraft}
-          class="ml-auto rounded-lg px-4 py-2 text-sm text-slate-500 transition hover:text-white"
-        >
-          Cancel
-        </button>
-      </div>
+      {#if draftBody}
+        <div class="flex flex-wrap items-center gap-2 border-t border-white/8 px-5 py-4 sm:px-6">
+          <button
+            type="button"
+            onclick={() => { window.open(buildMailto(), '_self'); trackClick('match_apply_mailto') }}
+            class="rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-400/20 hover:text-white active:scale-95"
+          >
+            Open in Mail App
+          </button>
+          <button
+            type="button"
+            onclick={copyDraft}
+            class="rounded-lg border border-white/12 bg-white/5 px-5 py-2 text-sm font-medium text-slate-300 transition-all hover:border-white/25 hover:text-white active:scale-95"
+          >
+            {copiedEmail ? 'Copied!' : 'Copy to Clipboard'}
+          </button>
+          <button
+            type="button"
+            onclick={closeDraft}
+            class="ml-auto rounded-lg px-4 py-2 text-sm text-slate-500 transition hover:text-white"
+          >
+            Cancel
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
