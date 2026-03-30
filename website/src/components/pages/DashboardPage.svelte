@@ -35,6 +35,64 @@
   let reviewResult     = $state(null)
   let reviewError      = $state('')
 
+  let pfLoading        = $state(false)
+  let pfResult         = $state(null)
+  let pfError          = $state('')
+  let pfSubStatus      = $state(null)
+  let pfCancelling     = $state(false)
+
+  async function pfCheckout(redirect) {
+    pfLoading = true
+    pfError = ''
+    pfResult = null
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/subscription/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { pfError = data.detail || `Error ${res.status}`; return }
+      pfResult = data
+      if (redirect && data.payfast_url && data.form_fields) {
+        const form = document.createElement('form')
+        form.method = 'POST'
+        form.action = data.payfast_url
+        for (const [k, v] of Object.entries(data.form_fields)) {
+          const input = document.createElement('input')
+          input.type = 'hidden'; input.name = k; input.value = String(v)
+          form.appendChild(input)
+        }
+        document.body.appendChild(form)
+        form.submit()
+      }
+    } catch { pfError = 'Could not reach server.' }
+    finally { pfLoading = false }
+  }
+
+  async function pfStatus() {
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/subscription/status`, { method: 'GET', credentials: 'include' })
+      pfSubStatus = res.ok ? await res.json() : { error: `Error ${res.status}` }
+    } catch { pfSubStatus = { error: 'Could not reach server.' } }
+  }
+
+  async function pfCancel() {
+    pfCancelling = true
+    pfError = ''
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/subscription/cancel`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { pfError = data.detail || `Error ${res.status}`; return }
+      pfSubStatus = { ok: true, subscribed: false }
+      pfError = ''
+      pfResult = null
+    } catch { pfError = 'Could not reach server.' }
+    finally { pfCancelling = false }
+  }
+
   async function loadStats() {
     error = ''
     errorCode = ''
@@ -1127,6 +1185,92 @@
         </div>
 
       </div>
+    </div>
+
+    <!-- ── PayFast Test ── -->
+    <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:450ms;">
+      <div class="mb-4 flex items-center gap-2">
+        <span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
+        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">PayFast Subscription Test</p>
+      </div>
+
+      <div class="grid gap-3 lg:grid-cols-3">
+        <!-- Checkout -->
+        <div class="rounded-xl border border-white/8 bg-zinc-900/50 p-4">
+          <p class="mb-2 text-xs font-bold text-slate-200">Checkout</p>
+          <p class="mb-3 text-[10px] text-slate-600">POST /subscription/checkout</p>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onclick={() => pfCheckout(false)}
+              disabled={pfLoading}
+              class="rounded-lg border border-cyan-400/25 bg-cyan-400/8 px-3 py-1.5 text-xs font-bold text-cyan-200 transition hover:border-cyan-400/45 hover:bg-cyan-400/15 disabled:opacity-35 active:scale-95"
+            >
+              {pfLoading ? 'Loading...' : 'Get Data'}
+            </button>
+            <button
+              type="button"
+              onclick={() => pfCheckout(true)}
+              disabled={pfLoading}
+              class="rounded-lg border border-emerald-400/25 bg-emerald-400/8 px-3 py-1.5 text-xs font-bold text-emerald-200 transition hover:border-emerald-400/45 hover:bg-emerald-400/15 disabled:opacity-35 active:scale-95"
+            >
+              {pfLoading ? 'Redirecting...' : 'Go to PayFast'}
+            </button>
+          </div>
+        </div>
+
+        <!-- Status -->
+        <div class="rounded-xl border border-white/8 bg-zinc-900/50 p-4">
+          <p class="mb-2 text-xs font-bold text-slate-200">Status</p>
+          <p class="mb-3 text-[10px] text-slate-600">GET /subscription/status</p>
+          <button
+            type="button"
+            onclick={pfStatus}
+            class="rounded-lg border border-violet-400/25 bg-violet-400/8 px-3 py-1.5 text-xs font-bold text-violet-200 transition hover:border-violet-400/45 hover:bg-violet-400/15 active:scale-95"
+          >
+            Check Status
+          </button>
+          {#if pfSubStatus}
+            <div class="mt-3">
+              {#if pfSubStatus.error}
+                <span class="rounded-full bg-rose-400/15 px-2 py-0.5 text-[10px] font-bold text-rose-300">{pfSubStatus.error}</span>
+              {:else if pfSubStatus.subscribed}
+                <span class="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">Active</span>
+                {#if pfSubStatus.next_billing_date}
+                  <p class="mt-1 text-[10px] text-slate-500">Next bill: {pfSubStatus.next_billing_date}</p>
+                {/if}
+              {:else}
+                <span class="rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold text-slate-400">Not subscribed</span>
+              {/if}
+            </div>
+          {/if}
+        </div>
+
+        <!-- Cancel -->
+        <div class="rounded-xl border border-white/8 bg-zinc-900/50 p-4">
+          <p class="mb-2 text-xs font-bold text-slate-200">Cancel</p>
+          <p class="mb-3 text-[10px] text-slate-600">POST /subscription/cancel</p>
+          <button
+            type="button"
+            onclick={pfCancel}
+            disabled={pfCancelling}
+            class="rounded-lg border border-rose-400/25 bg-rose-400/8 px-3 py-1.5 text-xs font-bold text-rose-200 transition hover:border-rose-400/45 hover:bg-rose-400/15 disabled:opacity-35 active:scale-95"
+          >
+            {pfCancelling ? 'Cancelling...' : 'Cancel Sub'}
+          </button>
+        </div>
+      </div>
+
+      {#if pfError}
+        <div class="mt-3 rounded-lg border border-rose-400/20 bg-rose-400/8 px-3 py-2 text-xs text-rose-300">{pfError}</div>
+      {/if}
+
+      {#if pfResult}
+        <div class="mt-3 rounded-lg border border-white/8 bg-black/40 p-3">
+          <p class="mb-1 text-[10px] font-bold text-slate-500">Response</p>
+          <pre class="max-h-48 overflow-auto text-[10px] leading-relaxed text-slate-400">{JSON.stringify(pfResult, null, 2)}</pre>
+        </div>
+      {/if}
     </div>
 
     <!-- ── Error Log ── -->
