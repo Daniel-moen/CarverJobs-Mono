@@ -521,30 +521,39 @@ Return strict JSON only:
         messages.append({"role": "user", "content": "Draft the application email."})
 
     t0 = time.perf_counter()
-    try:
-        text = await asyncio.to_thread(
-            call_openai,
-            api_key=settings.OPENAI_API_KEY,
-            messages=messages,
-            model=settings.OPENAI_MODEL,
-            max_tokens=400,
-            temperature=0.7,
-            response_format={"type": "json_object"},
-        )
-    except AIClientError as exc:
-        log.error("AI error drafting email | code=%s | error=%s", exc.crv_code, exc)
-        raise HTTPException(status_code=502, detail="Could not draft email. Try again.")
-    except Exception as exc:
-        log.error("Unexpected error drafting email | error=%s", exc)
-        raise HTTPException(status_code=502, detail="Drafting service error.")
-    finally:
-        metrics.record_ai_response_time(round((time.perf_counter() - t0) * 1000))
+    text = ""
+    for _attempt in range(2):
+        try:
+            text = await asyncio.to_thread(
+                call_openai,
+                api_key=settings.OPENAI_API_KEY,
+                messages=messages,
+                model=settings.OPENAI_MODEL,
+                max_tokens=600,
+                temperature=0.7,
+            )
+            if text and text.strip():
+                break
+        except AIClientError as exc:
+            log.error("AI error drafting email | code=%s | error=%s | attempt=%d", exc.crv_code, exc, _attempt + 1)
+            if _attempt == 1:
+                raise HTTPException(status_code=502, detail="Could not draft email. Try again.")
+        except Exception as exc:
+            log.error("Unexpected error drafting email | error=%s | attempt=%d", exc, _attempt + 1)
+            if _attempt == 1:
+                raise HTTPException(status_code=502, detail="Drafting service error.")
+    metrics.record_ai_response_time(round((time.perf_counter() - t0) * 1000))
+
+    if not text or not text.strip():
+        raise HTTPException(status_code=502, detail="AI returned an empty draft. Try again.")
 
     log.info("Draft email raw response | %s", text[:300])
 
+    json_start = text.find("{")
+    json_end = text.rfind("}") + 1
     try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
+        parsed = json.loads(text[json_start:json_end] if json_start >= 0 else text)
+    except (json.JSONDecodeError, ValueError):
         raise HTTPException(status_code=502, detail="Could not parse draft.")
 
     return DraftEmailResponse(
