@@ -494,7 +494,7 @@ async def draft_email(
 
     profile_url = ""
     if profile.profile_slug:
-        profile_url = f"https://carver.app/crew/{profile.profile_slug}"
+        profile_url = f"{settings.FRONTEND_BASE_URL}/crew/{profile.profile_slug}"
 
     first_name = profile.first_name or "the applicant"
     name = " ".join(filter(None, [profile.first_name, profile.last_name])) or "the applicant"
