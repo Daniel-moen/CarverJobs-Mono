@@ -1,4 +1,4 @@
-from typing import Any
+from typing import NotRequired, TypedDict, cast
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
@@ -10,6 +10,15 @@ from app.settings import settings
 
 log = get_logger("carver.security")
 _serializer = URLSafeTimedSerializer(settings.SECRET_KEY, salt="carver-session")
+
+
+class SessionPayload(TypedDict):
+    """Signed session cookie payload (itsdangerous-serialized)."""
+
+    sub: str
+    role: str
+    user_id: NotRequired[int]
+    provider: NotRequired[str]
 
 
 def hash_password(raw_password: str) -> str:
@@ -25,13 +34,14 @@ def verify_password(raw_password: str, hashed: str) -> bool:
         return False
 
 
-def issue_session_token(payload: dict[str, Any]) -> str:
+def issue_session_token(payload: SessionPayload) -> str:
   return _serializer.dumps(payload)
 
 
-def parse_session_token(token: str) -> dict[str, Any]:
+def parse_session_token(token: str) -> SessionPayload:
   try:
-    return _serializer.loads(token, max_age=settings.SESSION_TTL_SECONDS)
+    data = _serializer.loads(token, max_age=settings.SESSION_TTL_SECONDS)
+    return cast(SessionPayload, data)
   except SignatureExpired as exc:
     log.warning("Session token expired")
     raise HTTPException(
@@ -48,11 +58,11 @@ def parse_session_token(token: str) -> dict[str, Any]:
     ) from exc
 
 
-def optional_session(request: Request) -> dict[str, Any] | None:
+def optional_session(request: Request) -> SessionPayload | None:
   """Return session payload if a valid cookie exists, else None (no exception)."""
   if settings.AUTO_LOGIN_AS_ADMIN:
     log.debug("Auto-login as admin active")
-    return {"sub": settings.ADMIN_USERNAME, "role": "admin"}
+    return cast(SessionPayload, {"sub": settings.ADMIN_USERNAME, "role": "admin"})
   token = request.cookies.get(settings.SESSION_COOKIE_NAME)
   if not token:
     return None
@@ -62,7 +72,7 @@ def optional_session(request: Request) -> dict[str, Any] | None:
     return None
 
 
-def require_session(request: Request) -> dict[str, Any]:
+def require_session(request: Request) -> SessionPayload:
   session = optional_session(request)
   if session is None:
     log.debug("No session cookie on request | path=%s", request.url.path)
@@ -74,7 +84,7 @@ def require_session(request: Request) -> dict[str, Any]:
   return session
 
 
-def require_admin_session(session: dict[str, Any] = Depends(require_session)) -> dict[str, Any]:
+def require_admin_session(session: SessionPayload = Depends(require_session)) -> SessionPayload:
   if session.get("role") != "admin":
     log.warning("Admin access denied | sub=%s | role=%s", session.get("sub"), session.get("role"))
     raise HTTPException(

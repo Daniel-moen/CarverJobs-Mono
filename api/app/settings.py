@@ -118,6 +118,21 @@ class Settings:
 settings = Settings()
 
 
+def validate_database_not_configured_for_postgres() -> None:
+    """This API uses SQLite only; refuse a Railway/Heroku-style Postgres DATABASE_URL."""
+    url = os.getenv("DATABASE_URL", "").strip()
+    if not url:
+        return
+    low = url.lower()
+    if low.startswith(("postgres://", "postgresql://")):
+        raise RuntimeError(
+            "DATABASE_URL is set to PostgreSQL, but this service uses SQLite only. "
+            "Remove the Postgres plugin / DATABASE_URL from Railway (or unset it). "
+            "Persist data with a volume on api/data/carver.db or set CARVER_SQLITE_PATH "
+            "to your .db file path."
+        )
+
+
 def validate_production_settings() -> None:
     """Refuse to boot in production with insecure defaults."""
     if settings.APP_ENV != "production":

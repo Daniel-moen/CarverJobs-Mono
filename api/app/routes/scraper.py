@@ -9,7 +9,7 @@ import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -18,6 +18,7 @@ from app.database import SessionLocal
 from app.error_codes import CRV_6001, CRV_6002
 from app.logger import get_logger
 from app.scheduler import get_scraper_state, run_scrape_once
+from app.schemas import APIModel
 from app.security import require_admin_session
 from app.settings import settings
 
@@ -122,7 +123,7 @@ async def trigger_web_scrape(request: Request):
 
 # ── Manual import ─────────────────────────────────────────────────────────────
 
-class ImportJobRequest(BaseModel):
+class ImportJobRequest(APIModel):
     text: Annotated[str, Field(min_length=10, max_length=5000, description="Raw job post text to review")]
     url: Annotated[str, Field(default="", max_length=260, description="Source URL (optional)")] = ""
 

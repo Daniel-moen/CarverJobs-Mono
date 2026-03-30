@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
-from typing import Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import Field, JsonValue
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import func
@@ -13,6 +13,7 @@ from app.database import get_db
 from app.error_codes import CRV_1005, CRV_5001, CRV_5002, CRV_5003
 from app.logger import get_logger
 from app.models import ErrorLog, Job, User, WhatsAppMagicToken, WhatsAppSession
+from app.schemas import APIModel
 from app.security import require_admin_session
 from app.services.ai_client import AIClientError, call_openai
 from app.settings import settings
@@ -91,8 +92,8 @@ def get_flags():
     }
 
 
-class FlagUpdate(BaseModel):
-    key: str
+class FlagUpdate(APIModel):
+    key: Annotated[str, Field(min_length=1, max_length=80)]
     enabled: bool
 
 
@@ -196,16 +197,16 @@ def analyze_error(request: Request, error_id: int, db: Session = Depends(get_db)
 
 # ── Analytics ──────────────────────────────────────────────────────────────────
 
-class AnalyticsEventSchema(BaseModel):
-    type: str
-    session_id: str | None = None
-    page: str | None = None
-    label: str | None = None
-    value: Any = None
-    ts: str | None = None
+class AnalyticsEventSchema(APIModel):
+    type: Annotated[str, Field(min_length=1, max_length=80)]
+    session_id: Annotated[str | None, Field(default=None, max_length=128)] = None
+    page: Annotated[str | None, Field(default=None, max_length=300)] = None
+    label: Annotated[str | None, Field(default=None, max_length=300)] = None
+    value: JsonValue | None = None
+    ts: Annotated[str | None, Field(default=None, max_length=64)] = None
 
 
-class AnalyticsBatch(BaseModel):
+class AnalyticsBatch(APIModel):
     events: list[AnalyticsEventSchema]
 
 

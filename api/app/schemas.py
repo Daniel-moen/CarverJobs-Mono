@@ -4,6 +4,13 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+
+class APIModel(BaseModel):
+    """API request/response models: no extra JSON keys, no silent type coercion."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 # ── Reusable annotated types ──────────────────────────────────────────────────
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
@@ -22,17 +29,17 @@ _VALID_JOB_STATUSES = {"open", "closed", "priority", "filled", "draft"}
 
 # ── Auth schemas ──────────────────────────────────────────────────────────────
 
-class LoginRequest(BaseModel):
+class LoginRequest(APIModel):
     username: Annotated[str, Field(min_length=1, max_length=80)]
     password: Annotated[str, Field(min_length=1, max_length=256)]
 
 
-class GoogleLoginRequest(BaseModel):
+class GoogleLoginRequest(APIModel):
     # Google ID tokens are JWT strings — allow up to 4 KB.
     id_token: Annotated[str, Field(min_length=1, max_length=4096)]
 
 
-class WaitlistSignupRequest(BaseModel):
+class WaitlistSignupRequest(APIModel):
     email: Annotated[str, Field(min_length=5, max_length=160)]
 
     @field_validator("email")
@@ -44,7 +51,7 @@ class WaitlistSignupRequest(BaseModel):
         return v
 
 
-class SignupRequest(BaseModel):
+class SignupRequest(APIModel):
     email: Annotated[str, Field(min_length=5, max_length=160)]
     full_name: Annotated[str, Field(min_length=1, max_length=120)]
     password: Annotated[str, Field(min_length=8, max_length=256)]
@@ -68,19 +75,19 @@ class SignupRequest(BaseModel):
 
 # ── Interview schemas ─────────────────────────────────────────────────────────
 
-class InterviewMessage(BaseModel):
+class InterviewMessage(APIModel):
     role: Literal["user", "assistant"]
     content: Annotated[str, Field(min_length=0, max_length=4000)]
 
 
-class InterviewRequest(BaseModel):
+class InterviewRequest(APIModel):
     user_message: Annotated[str, Field(default="", max_length=4000)] = ""
-    history: Annotated[list[InterviewMessage], Field(default_factory=list, max_length=50)] = []
-    profile: dict[str, str] = {}
+    history: Annotated[list[InterviewMessage], Field(default_factory=list, max_length=50)]
+    profile: Annotated[dict[str, str], Field(default_factory=dict)]
 
     @field_validator("profile")
     @classmethod
-    def _validate_profile(cls, v: dict) -> dict:
+    def _validate_profile(cls, v: dict[str, str]) -> dict[str, str]:
         if len(v) > 50:
             raise ValueError("profile may not have more than 50 fields")
         for k, val in v.items():
@@ -89,14 +96,14 @@ class InterviewRequest(BaseModel):
         return v
 
 
-class InterviewResponse(BaseModel):
+class InterviewResponse(APIModel):
     message: str
-    updates: dict[str, str] = {}
+    updates: Annotated[dict[str, str], Field(default_factory=dict)]
 
 
 # ── User schemas ──────────────────────────────────────────────────────────────
 
-class UserBase(BaseModel):
+class UserBase(APIModel):
     email: Annotated[str, Field(min_length=5, max_length=160)]
     full_name: ShortStr
     role: Annotated[str, Field(default="crew", max_length=50)] = "crew"
@@ -127,7 +134,7 @@ class UserCreate(UserBase):
     password: Annotated[str, Field(min_length=8, max_length=256)]
 
 
-class UserUpdate(BaseModel):
+class UserUpdate(APIModel):
     full_name: Optional[ShortStr] = None
     role: Annotated[Optional[str], Field(default=None, max_length=50)] = None
     phone: OptShort = None
@@ -151,12 +158,12 @@ class UserRead(UserBase):
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid", strict=True)
 
 
 # ── Job schemas ───────────────────────────────────────────────────────────────
 
-class JobBase(BaseModel):
+class JobBase(APIModel):
     title:                   ShortStr
     role:                    ShortStr
     yacht:                   ShortStr
@@ -216,7 +223,7 @@ class JobCreate(JobBase):
     pass
 
 
-class JobUpdate(BaseModel):
+class JobUpdate(APIModel):
     title:                   Optional[ShortStr] = None
     role:                    Optional[ShortStr] = None
     yacht:                   Optional[ShortStr] = None
@@ -269,7 +276,7 @@ class JobRead(JobBase):
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid", strict=True)
 
 
 # ── Crew profile schemas ─────────────────────────────────────────────────────
@@ -277,7 +284,7 @@ class JobRead(JobBase):
 _VALID_SEX_VALUES = {"male", "female", "other", "prefer_not_to_say"}
 
 
-class CrewProfileSave(BaseModel):
+class CrewProfileSave(APIModel):
     first_name: OptShort = None
     last_name: OptShort = None
     sex: Annotated[Optional[str], Field(default=None, max_length=20)] = None
@@ -311,10 +318,10 @@ class CrewProfileRead(CrewProfileSave):
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid", strict=True)
 
 
-class PublicProfileResponse(BaseModel):
+class PublicProfileResponse(APIModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     nationality: Optional[str] = None
@@ -332,12 +339,12 @@ class PublicProfileResponse(BaseModel):
     has_references: bool = False
     has_photo: bool = False
     photo_url: Optional[str] = None
-    job_history: list["JobHistoryRead"] = []
+    job_history: Annotated[list["JobHistoryRead"], Field(default_factory=list)]
 
 
 # ── Job history schemas ──────────────────────────────────────────────────────
 
-class JobHistoryCreate(BaseModel):
+class JobHistoryCreate(APIModel):
     yacht_name: ShortStr
     yacht_type: OptShort = None
     role: ShortStr
@@ -346,7 +353,7 @@ class JobHistoryCreate(BaseModel):
     description: OptLong = None
 
 
-class JobHistoryUpdate(BaseModel):
+class JobHistoryUpdate(APIModel):
     yacht_name: Optional[ShortStr] = None
     yacht_type: OptShort = None
     role: Optional[ShortStr] = None
@@ -355,7 +362,7 @@ class JobHistoryUpdate(BaseModel):
     description: OptLong = None
 
 
-class JobHistoryRead(BaseModel):
+class JobHistoryRead(APIModel):
     id: int
     yacht_name: str
     yacht_type: Optional[str] = None
@@ -365,41 +372,41 @@ class JobHistoryRead(BaseModel):
     description: Optional[str] = None
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid", strict=True)
 
 
 # ── Matching schemas ──────────────────────────────────────────────────────────
 
-class MatchingRequest(BaseModel):
+class MatchingRequest(APIModel):
     user_id:         Annotated[int, Field(ge=1)]
     job_limit:       Annotated[int, Field(default=20, ge=1, le=200)] = 20
-    job_statuses:    Annotated[list[str], Field(default_factory=lambda: ["open", "priority"], max_length=10)] = ["open", "priority"]
+    job_statuses:    Annotated[list[str], Field(default_factory=lambda: ["open", "priority"], max_length=10)]
     timeout_seconds: Annotated[int, Field(default=180, ge=5, le=600)] = 180
 
 
-class MatchResultItem(BaseModel):
+class MatchResultItem(APIModel):
     job_id:        str
     matched:       bool
     compatibility: Annotated[float, Field(ge=0.0, le=100.0)]
     reason:        str
-    strengths:     list[str] = []
-    gaps:          list[str] = []
-    factor_scores: dict[str, float] = {}
+    strengths:     Annotated[list[str], Field(default_factory=list)]
+    gaps:          Annotated[list[str], Field(default_factory=list)]
+    factor_scores: Annotated[dict[str, float], Field(default_factory=dict)]
 
 
-class MatchingEnqueueResponse(BaseModel):
+class MatchingEnqueueResponse(APIModel):
     request_id: str
     queued:     bool
 
 
-class MatchingRunResponse(BaseModel):
+class MatchingRunResponse(APIModel):
     request_id: str
     matches:    list[MatchResultItem]
 
 
 # ── Crew matching schemas ────────────────────────────────────────────────────
 
-class CrewMatchJob(BaseModel):
+class CrewMatchJob(APIModel):
     id: int
     title: str
     role: str
@@ -428,31 +435,31 @@ class CrewMatchJob(BaseModel):
     urgent_hire: bool = False
     source: Optional[str] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid", strict=True)
 
 
-class CrewMatchAI(BaseModel):
+class CrewMatchAI(APIModel):
     reason: str = ""
     compatibility: float = 0.0
-    strengths: list[str] = []
-    gaps: list[str] = []
+    strengths: Annotated[list[str], Field(default_factory=list)]
+    gaps: Annotated[list[str], Field(default_factory=list)]
 
 
-class CrewMatchItem(BaseModel):
+class CrewMatchItem(APIModel):
     job: CrewMatchJob
     ai: CrewMatchAI
 
 
-class CrewMatchResponse(BaseModel):
+class CrewMatchResponse(APIModel):
     matched: bool
-    matches: list[CrewMatchItem] = []
+    matches: Annotated[list[CrewMatchItem], Field(default_factory=list)]
 
 
-class DraftEmailRequest(BaseModel):
+class DraftEmailRequest(APIModel):
     job_id: Annotated[int, Field(ge=1)]
 
 
-class DraftEmailResponse(BaseModel):
+class DraftEmailResponse(APIModel):
     to: str
     subject: str
     body: str
@@ -460,17 +467,17 @@ class DraftEmailResponse(BaseModel):
 
 # ── Match session schemas ────────────────────────────────────────────────────
 
-class MatchSessionResultItem(BaseModel):
+class MatchSessionResultItem(APIModel):
     job: CrewMatchJob
     matched: bool
     compatibility: float
     reason: str = ""
-    strengths: list[str] = []
-    gaps: list[str] = []
-    factor_scores: dict[str, float] = {}
+    strengths: Annotated[list[str], Field(default_factory=list)]
+    gaps: Annotated[list[str], Field(default_factory=list)]
+    factor_scores: Annotated[dict[str, float], Field(default_factory=dict)]
 
 
-class MatchSessionSummary(BaseModel):
+class MatchSessionSummary(APIModel):
     id: int
     status: str
     total_jobs_scanned: int
@@ -478,26 +485,26 @@ class MatchSessionSummary(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid", strict=True)
 
 
-class MatchSessionDetail(BaseModel):
+class MatchSessionDetail(APIModel):
     id: int
     status: str
     total_jobs_scanned: int
     total_matched: int
     created_at: datetime
     completed_at: Optional[datetime] = None
-    results: list[MatchSessionResultItem] = []
+    results: Annotated[list[MatchSessionResultItem], Field(default_factory=list)]
 
 
-class MatchSessionListResponse(BaseModel):
-    sessions: list[MatchSessionSummary] = []
+class MatchSessionListResponse(APIModel):
+    sessions: Annotated[list[MatchSessionSummary], Field(default_factory=list)]
 
 
-class CrewMatchV2Response(BaseModel):
+class CrewMatchV2Response(APIModel):
     session_id: int
     matched: bool
     total_jobs_scanned: int
     total_matched: int
-    matches: list[MatchSessionResultItem] = []
+    matches: Annotated[list[MatchSessionResultItem], Field(default_factory=list)]

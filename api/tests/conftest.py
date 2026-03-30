@@ -15,7 +15,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.security import require_admin_session, require_session
+from app.security import optional_session, require_admin_session, require_session
+from app.settings import settings
 
 SQLALCHEMY_TEST_URL = "sqlite:///:memory:"
 
@@ -42,6 +43,12 @@ def _override_require_session():
 
 
 @pytest.fixture(autouse=True)
+def _disable_auto_login(monkeypatch):
+    """Real auth tests must not depend on a developer .env enabling auto-login."""
+    monkeypatch.setattr(settings, "AUTO_LOGIN_AS_ADMIN", False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_db():
     """Re-create all tables before each test so each test starts clean."""
     Base.metadata.create_all(bind=_engine)
@@ -63,6 +70,7 @@ def _seed_csrf(client):
 def client():
     """TestClient with DB + session auth overridden."""
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[optional_session] = _override_require_session
     app.dependency_overrides[require_session] = _override_require_session
     app.dependency_overrides[require_admin_session] = _override_require_session
     app.state.limiter.enabled = False

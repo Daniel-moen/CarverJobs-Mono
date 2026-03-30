@@ -22,7 +22,7 @@ from app.logger import get_logger, setup_logging
 from app.routes import admin, auth, crew_match, documents, health, interview, job_history, jobs, matching, profile, scraper, users, whatsapp
 from app.scheduler import scraper_loop
 from app.seed_users import ensure_default_user
-from app.settings import settings, validate_production_settings
+from app.settings import settings, validate_database_not_configured_for_postgres, validate_production_settings
 
 setup_logging()
 log = get_logger("carver.api")
@@ -33,6 +33,7 @@ limiter = Limiter(key_func=get_remote_address)
 def _init_database() -> None:
     """Create tables, run migrations, seed users. Never crashes the process."""
     try:
+        validate_database_not_configured_for_postgres()
         validate_production_settings()
     except RuntimeError:
         log.exception("Production settings validation failed — refusing to start")

@@ -77,4 +77,7 @@ def test_session_endpoint_authenticated(client):
 
 def test_session_endpoint_unauthenticated(auth_client):
     resp = auth_client.get("/auth/session")
-    assert resp.status_code == 401
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["authenticated"] is False

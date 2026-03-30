@@ -1,12 +1,19 @@
+import os
 import sqlite3
 from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DB_DIR = Path(__file__).resolve().parent.parent / "data"
-DB_DIR.mkdir(exist_ok=True)
-DB_PATH = DB_DIR / "carver.db"
+# SQLite only — no PostgreSQL. Optional absolute path for the DB file (e.g. mounted volume).
+_sqlite_override = os.getenv("CARVER_SQLITE_PATH", "").strip()
+if _sqlite_override:
+    DB_PATH = Path(_sqlite_override).resolve()
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+else:
+    DB_DIR = Path(__file__).resolve().parent.parent / "data"
+    DB_DIR.mkdir(exist_ok=True)
+    DB_PATH = DB_DIR / "carver.db"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})

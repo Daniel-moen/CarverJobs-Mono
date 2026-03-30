@@ -63,7 +63,7 @@ def test_issue_and_parse_session_token():
 def test_parse_expired_token_raises_401(monkeypatch):
     """A negative max_age means every token is immediately expired."""
     import app.security as sec_module
-    token = issue_session_token({"sub": "admin"})
+    token = issue_session_token({"sub": "admin", "role": "admin"})
     # -1 ensures age (>=0) > max_age (-1) is always True → SignatureExpired.
     monkeypatch.setattr(sec_module.settings, "SESSION_TTL_SECONDS", -1)
     with pytest.raises(HTTPException) as exc_info:
@@ -72,7 +72,7 @@ def test_parse_expired_token_raises_401(monkeypatch):
 
 
 def test_parse_bad_signature_raises_401():
-    token = issue_session_token({"sub": "admin"})
+    token = issue_session_token({"sub": "admin", "role": "admin"})
     tampered = token[:-4] + "XXXX"
     with pytest.raises(HTTPException) as exc_info:
         parse_session_token(tampered)
