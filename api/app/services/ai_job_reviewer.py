@@ -84,12 +84,18 @@ If it IS a hiring post:
   "travel_reimbursement": false
 }"""
 
-_NORMALISE_PROMPT = """You are a yacht industry data normaliser. You receive structured text from a yacht crew job listing scraped from a job board (not a social media post — it is already confirmed to be a job).
+_NORMALISE_PROMPT = """You are a yacht industry data normaliser. You receive text scraped from a yacht crew job board website.
 
-Your job: extract and normalise every available detail into the JSON schema below. Fill in as many fields as possible from the text.
+Your job:
+1. First, verify the text actually contains a real, specific yacht crew job listing. Scrapers sometimes pick up navigation text, ads, expired placeholders, error pages, login prompts, or other non-job content.
+2. If it IS a real job listing, extract and normalise every available detail into the JSON schema below.
 
 Return ONLY a JSON object. No markdown, no explanation, nothing else.
 
+If the text is NOT a real job listing (garbage, navigation, ads, empty/placeholder content, expired listing, or no identifiable crew role):
+{"is_job": false}
+
+If it IS a real job listing:
 {
   "is_job": true,
   "title": "concise job title, max 100 chars",
@@ -143,10 +149,10 @@ def review_post(
         post_url:       URL of the post/listing (used for logging).
         api_key:        OpenAI API key.
         model:          OpenAI model name.
-        trusted_source: If True (e.g. Dockwalk, WorkOnAYacht), skip the "is
-                        this even a job?" classification and use a lighter
-                        normalisation prompt instead. Saves tokens on sources
-                        that are already confirmed job boards.
+        trusted_source: If True (e.g. Dockwalk, WorkOnAYacht), use a lighter
+                        normalisation prompt instead of the full strict classifier.
+                        Still validates that the content is actually a job — rejects
+                        garbage, navigation text, ads, and expired placeholders.
 
     Returns:
         A dict of job fields (matching the Job model) if the post is a job offer.
@@ -209,8 +215,8 @@ def review_post(
         )
         parsed = json.loads(content)
 
-        if not trusted_source and not parsed.get("is_job"):
-            log.debug("AI: not a job posting | url=%s", post_url)
+        if not parsed.get("is_job"):
+            log.debug("AI: not a job posting | trusted=%s | url=%s", trusted_source, post_url)
             return None
 
         parsed.pop("is_job", None)
