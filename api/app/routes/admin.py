@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import analytics, flags, metrics
 from app.database import get_db
-from app.error_codes import CRV_1005, CRV_5001, CRV_5002, CRV_5003
+from app.error_codes import CRV_1005, CRV_5001, CRV_5002, CRV_5003, CRV_5004
 from app.logger import get_logger
 from app.models import ErrorLog, Job, User, WhatsAppMagicToken, WhatsAppSession
 from app.schemas import APIModel
@@ -193,6 +193,107 @@ def analyze_error(request: Request, error_id: int, db: Session = Depends(get_db)
     db.commit()
     log.info("AI error analysis complete | error_id=%d", error_id)
     return {"ok": True, "analysis": analysis}
+
+
+# ── AI job review ──────────────────────────────────────────────────────────────
+
+_JOB_REVIEW_PROMPT = """You are a strict quality checker for a yacht crew job board database. You will receive a batch of job listings as a JSON array. Each entry has an "id" and a "summary" string.
+
+For EACH entry decide whether it is a GENUINE, SPECIFIC yacht crew job posting.
+
+REJECT (not a real job) if ANY of these are true:
+- It is a crew member seeking work (not an employer offering a position)
+- It is an agency spam blast listing many roles without a specific yacht
+- It is a training course ad, news article, discussion, or equipment sale
+- It lacks basic job details (no specific role, no location, no start date/period)
+- The description is gibberish, a test entry, or clearly non-job content
+- It is a duplicate placeholder or template with no real information
+
+ACCEPT (real job) if it describes a specific open crew position on a yacht with at least a role and some concrete details.
+
+Return ONLY a JSON object with this shape — no markdown, no explanation:
+{"results": [{"id": <int>, "is_job": <bool>, "reason": "<short reason>"}]}
+
+Every input id MUST appear in the output."""
+
+
+@router.post("/jobs/review")
+@_limiter.limit("5/minute")
+def review_jobs(request: Request, db: Session = Depends(get_db)):
+    """AI-review all jobs in the DB; delete entries that are not real jobs."""
+    import json as _json
+
+    api_key = settings.OPENAI_API_KEY
+    model = settings.OPENAI_MODEL or "gpt-4o-mini"
+
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI API key is not configured.",
+            headers={"X-Error-Code": CRV_5004},
+        )
+
+    jobs = db.query(Job).all()
+    if not jobs:
+        return {"ok": True, "reviewed": 0, "deleted": 0, "deleted_jobs": []}
+
+    def _summarise(job: Job) -> str:
+        parts = [f"Title: {job.title}", f"Role: {job.role}"]
+        if job.yacht:
+            parts.append(f"Yacht: {job.yacht}")
+        if job.location:
+            parts.append(f"Location: {job.location}")
+        if job.start_date:
+            parts.append(f"Start: {job.start_date}")
+        if job.description:
+            parts.append(f"Description: {(job.description or '')[:300]}")
+        return " | ".join(parts)
+
+    BATCH_SIZE = 20
+    deleted_jobs: list[dict] = []
+    reviewed = 0
+
+    for i in range(0, len(jobs), BATCH_SIZE):
+        batch = jobs[i : i + BATCH_SIZE]
+        payload = [{"id": j.id, "summary": _summarise(j)} for j in batch]
+
+        try:
+            content = call_openai(
+                api_key=api_key,
+                messages=[
+                    {"role": "system", "content": _JOB_REVIEW_PROMPT},
+                    {"role": "user", "content": _json.dumps(payload)},
+                ],
+                model=model,
+                max_tokens=1500,
+                temperature=0.0,
+                response_format={"type": "json_object"},
+            )
+            parsed = _json.loads(content)
+            results = parsed.get("results", [])
+        except (AIClientError, _json.JSONDecodeError, Exception) as exc:
+            log.error("AI job review batch failed | batch=%d | error=%s", i // BATCH_SIZE, exc)
+            continue
+
+        reject_ids = {r["id"] for r in results if not r.get("is_job")}
+        for job in batch:
+            reviewed += 1
+            if job.id in reject_ids:
+                reason = next((r.get("reason", "") for r in results if r["id"] == job.id), "")
+                deleted_jobs.append({"id": job.id, "title": job.title, "reason": reason})
+                db.delete(job)
+
+    db.commit()
+    log.warning(
+        "AI job review complete | reviewed=%d | deleted=%d",
+        reviewed, len(deleted_jobs),
+    )
+    return {
+        "ok": True,
+        "reviewed": reviewed,
+        "deleted": len(deleted_jobs),
+        "deleted_jobs": deleted_jobs,
+    }
 
 
 # ── Analytics ──────────────────────────────────────────────────────────────────

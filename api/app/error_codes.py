@@ -53,6 +53,7 @@ CRV_4002 = "CRV-4002"  # Matching engine is not available in this deployment
 CRV_5001 = "CRV-5001"  # Admin stats query failed (database error)
 CRV_5002 = "CRV-5002"  # Unknown feature flag key supplied to PATCH /admin/flags
 CRV_5003 = "CRV-5003"  # AI error analysis failed (OpenAI or config issue)
+CRV_5004 = "CRV-5004"  # AI job review failed
 
 # ── APIFY Scraper / Job Ingestion ────────────────────────────────────────────
 CRV_6001 = "CRV-6001"  # APIFY API key is missing or not configured
@@ -92,6 +93,7 @@ DESCRIPTIONS: dict[str, str] = {
     CRV_5001: "Admin stats query failed",
     CRV_5002: "Unknown feature flag key",
     CRV_5003: "AI error analysis failed",
+    CRV_5004: "AI job review failed",
     CRV_6001: "APIFY API key not configured",
     CRV_6002: "No APIFY actor IDs configured",
     CRV_6003: "APIFY actor run timed out",

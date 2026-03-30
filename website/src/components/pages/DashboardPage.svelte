@@ -31,6 +31,10 @@
   let analyzingId      = $state(null)
   let expandedError    = $state(null)
 
+  let reviewingJobs    = $state(false)
+  let reviewResult     = $state(null)
+  let reviewError      = $state('')
+
   async function loadStats() {
     error = ''
     errorCode = ''
@@ -266,6 +270,29 @@
       }
     } catch { /* silent */ } finally {
       analyzingId = null
+    }
+  }
+
+  async function reviewJobs() {
+    reviewingJobs = true
+    reviewResult  = null
+    reviewError   = ''
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/admin/jobs/review`, {
+        method: 'POST', credentials: 'include',
+      })
+      if (res.ok) {
+        reviewResult = await res.json()
+        loadStats()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        const code = res.headers.get('X-Error-Code') || ''
+        reviewError = (data.detail || 'AI job review failed.') + (code ? ` (${code})` : '')
+      }
+    } catch {
+      reviewError = 'Could not reach the server.'
+    } finally {
+      reviewingJobs = false
     }
   }
 
@@ -631,6 +658,75 @@
           </div>
         {/if}
       </div>
+    </div>
+
+    <!-- ── AI Job Review ── -->
+    <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:160ms;">
+      <div class="mb-4 flex items-center gap-2">
+        <span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
+        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">AI Job Review</p>
+      </div>
+      <p class="mb-4 text-xs text-slate-500">
+        Scan all jobs in the database with AI. Non-job entries (spam, seekers, ads) are automatically deleted.
+      </p>
+
+      <div class="flex items-center gap-3">
+        <button
+          type="button"
+          onclick={reviewJobs}
+          disabled={reviewingJobs}
+          class="rounded-lg border border-amber-400/25 bg-amber-400/8 px-4 py-2 text-xs font-bold text-amber-200 transition hover:border-amber-400/45 hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-35 active:scale-95"
+        >
+          {reviewingJobs ? 'Reviewing…' : 'Review All Jobs'}
+        </button>
+        {#if reviewingJobs}
+          <span class="text-[10px] text-slate-500 animate-pulse">AI is scanning jobs — this may take a moment…</span>
+        {/if}
+      </div>
+
+      {#if reviewError}
+        <div class="mt-3 rounded-lg border border-rose-400/20 bg-rose-400/8 px-3 py-2">
+          <p class="text-xs text-rose-300">{reviewError}</p>
+        </div>
+      {/if}
+
+      {#if reviewResult}
+        <div class="mt-4 rounded-xl border border-white/8 bg-zinc-900/50 p-4">
+          <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <div>
+              <p class="text-[10px] text-slate-600">Reviewed</p>
+              <p class="mt-1 text-2xl font-black text-slate-200">{reviewResult.reviewed}</p>
+            </div>
+            <div>
+              <p class="text-[10px] text-slate-600">Deleted</p>
+              <p class="mt-1 text-2xl font-black {reviewResult.deleted > 0 ? 'text-rose-300' : 'text-emerald-300'}">{reviewResult.deleted}</p>
+            </div>
+            <div>
+              <p class="text-[10px] text-slate-600">Kept</p>
+              <p class="mt-1 text-2xl font-black text-emerald-300">{reviewResult.reviewed - reviewResult.deleted}</p>
+            </div>
+          </div>
+
+          {#if reviewResult.deleted_jobs?.length > 0}
+            <div class="mt-4 border-t border-white/5 pt-3">
+              <p class="mb-2 text-[10px] font-bold uppercase tracking-wider text-rose-400">Removed Entries</p>
+              <div class="max-h-48 space-y-1.5 overflow-y-auto">
+                {#each reviewResult.deleted_jobs as job}
+                  <div class="flex items-start gap-2 rounded-lg bg-rose-400/5 px-3 py-2">
+                    <span class="mt-0.5 flex-none rounded bg-rose-400/15 px-1.5 py-0.5 font-mono text-[10px] text-rose-400">#{job.id}</span>
+                    <div class="min-w-0">
+                      <p class="truncate text-xs font-medium text-slate-300">{job.title}</p>
+                      <p class="mt-0.5 text-[10px] text-slate-500">{job.reason}</p>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {:else if reviewResult.deleted === 0}
+            <p class="mt-3 text-xs text-emerald-400/80">All jobs passed review — database is clean.</p>
+          {/if}
+        </div>
+      {/if}
     </div>
 
     <!-- ── Request Activity ── -->
