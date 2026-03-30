@@ -142,8 +142,10 @@ def _job_to_schema(j: Job) -> CrewMatchJob:
     )
 
 
-def _profile_summary(p: CrewProfile) -> str:
+def _profile_summary(p: CrewProfile, job_history: list | None = None) -> str:
     parts = []
+    if p.first_name or p.last_name:
+        parts.append(f"Name: {' '.join(filter(None, [p.first_name, p.last_name]))}")
     if p.desired_role:
         parts.append(f"Desired role: {p.desired_role}")
     if p.years_experience:
@@ -164,6 +166,16 @@ def _profile_summary(p: CrewProfile) -> str:
         parts.append(f"Salary range: {p.salary_min or '?'}-{p.salary_max or '?'} EUR/mo")
     if p.bio:
         parts.append(f"Bio: {p.bio[:300]}")
+    if job_history:
+        history_lines = []
+        for e in job_history[:5]:
+            line = f"  - {e.role} on {e.yacht_name}"
+            if e.yacht_type:
+                line += f" ({e.yacht_type})"
+            if e.start_date or e.end_date:
+                line += f" | {e.start_date or '?'} – {e.end_date or 'present'}"
+            history_lines.append(line)
+        parts.append("Work history:\n" + "\n".join(history_lines))
     return "\n".join(parts) if parts else "No profile details available."
 
 
@@ -484,29 +496,43 @@ async def draft_email(
     if profile.profile_slug:
         profile_url = f"https://carver.app/crew/{profile.profile_slug}"
 
+    first_name = profile.first_name or "the applicant"
     name = " ".join(filter(None, [profile.first_name, profile.last_name])) or "the applicant"
 
-    system_prompt = f"""You are a professional yacht crew career assistant.
-Draft a short, polite application email from {name} for the position below.
-Keep it under 120 words. Be warm but professional — no fluff.
-Mention relevant experience/qualifications from their profile where they match the job.
-Include their profile link in the email body if available.
-End with a sign-off using their first name only.
+    job_history = (
+        db.query(JobHistoryEntry)
+        .filter(JobHistoryEntry.user_key == user_key)
+        .order_by(JobHistoryEntry.start_date.desc())
+        .limit(5)
+        .all()
+    )
+
+    profile_text = _profile_summary(profile, job_history)
+
+    system_prompt = f"""You write application emails for yacht crew members. Your output must sound like a real person wrote it — natural, confident, and conversational. Not robotic, not overly formal.
+
+STRICT RULES:
+- ONLY mention qualifications, certifications, experience, and facts that appear in the crew profile below. NEVER invent or assume anything.
+- If the profile is sparse, keep the email shorter rather than making things up.
+- Do NOT use clichés like "I am excited to" or "I believe I would be a great fit". Write like an experienced crew member who knows their worth.
+- Keep it under 150 words. Short paragraphs. No bullet points.
+- Include the profile link naturally (e.g. "You can view my full profile and documents here: [link]").
+- Sign off with just the first name: {first_name}
 
 Crew profile:
-{_profile_summary(profile)}
+{profile_text}
 
-Job details:
+Job:
 Role: {job.role}
 Yacht: {job.yacht}
 Location: {job.location}
 Contract: {job.contract_type or 'Not specified'}
-Description: {(job.description or '')[:400]}
-Requirements: {(job.requirements or '')[:300]}
-{"Profile link: " + profile_url if profile_url else ""}
+{('Description: ' + (job.description or '')[:400]) if job.description else ''}
+{('Requirements: ' + (job.requirements or '')[:300]) if job.requirements else ''}
+{('Profile link: ' + profile_url) if profile_url else 'No profile link available.'}
 
-Return strict JSON only:
-{{"subject": "<email subject line>", "body": "<email body text>"}}"""
+Respond with JSON only. No markdown, no explanation:
+{{"subject": "...", "body": "..."}}"""
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
@@ -514,11 +540,11 @@ Return strict JSON only:
 
     if payload.prompt and payload.previous_body:
         messages.append({"role": "assistant", "content": json.dumps({"subject": "", "body": payload.previous_body})})
-        messages.append({"role": "user", "content": f"Revise the email based on this instruction: {payload.prompt}"})
+        messages.append({"role": "user", "content": f"Revise the email with this instruction (keep the same strict rules — don't invent facts): {payload.prompt}"})
     elif payload.prompt:
-        messages.append({"role": "user", "content": f"Draft the application email. Additional instruction: {payload.prompt}"})
+        messages.append({"role": "user", "content": f"Write the email. Extra instruction: {payload.prompt}"})
     else:
-        messages.append({"role": "user", "content": "Draft the application email."})
+        messages.append({"role": "user", "content": "Write the email."})
 
     t0 = time.perf_counter()
     text = ""
