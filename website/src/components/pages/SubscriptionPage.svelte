@@ -1,10 +1,25 @@
 <script>
   import { onMount } from 'svelte'
+  import { API_BASE_URL, apiFetch } from '../../config/api'
 
   let { isSubscribed = false, onNavigate = () => {} } = $props()
 
   let mounted = $state(false)
-  onMount(() => requestAnimationFrame(() => (mounted = true)))
+  let isLoading = $state(false)
+  let isCancelling = $state(false)
+  let checkoutError = $state('')
+  let returnStatus = $state('')
+  let showCancelConfirm = $state(false)
+
+  onMount(() => {
+    requestAnimationFrame(() => (mounted = true))
+    const params = new URLSearchParams(window.location.search)
+    const status = params.get('status')
+    if (status === 'success' || status === 'cancelled') {
+      returnStatus = status
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  })
 
   const freeFeatures = ['Browse Job Board', 'Manage Profile', 'Upload Documents']
   const lockedFeatures = ['Auto Match', 'Auto Apply', 'Match Insights']
@@ -17,6 +32,64 @@
     { label: 'Unlimited Applications', desc: 'No cap on monthly applications' },
     { label: 'Document Storage', desc: 'Secure CV, passport, STCW & ENG1 vault' },
   ]
+
+  async function startCheckout() {
+    isLoading = true
+    checkoutError = ''
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/subscription/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        checkoutError = err.detail || 'Could not start checkout. Please try again.'
+        return
+      }
+      const data = await response.json()
+      // Create a hidden form and submit to PayFast
+      const form = document.createElement('form')
+      form.method = 'POST'
+      form.action = data.payfast_url
+      for (const [key, value] of Object.entries(data.form_fields)) {
+        const input = document.createElement('input')
+        input.type = 'hidden'
+        input.name = key
+        input.value = String(value)
+        form.appendChild(input)
+      }
+      document.body.appendChild(form)
+      form.submit()
+    } catch {
+      checkoutError = 'Could not reach the server. Please try again.'
+    } finally {
+      isLoading = false
+    }
+  }
+
+  async function cancelSubscription() {
+    isCancelling = true
+    checkoutError = ''
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/subscription/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        checkoutError = err.detail || 'Could not cancel subscription.'
+        return
+      }
+      window.location.reload()
+    } catch {
+      checkoutError = 'Could not reach the server. Please try again.'
+    } finally {
+      isCancelling = false
+      showCancelConfirm = false
+    }
+  }
 </script>
 
 <section class="grid gap-4">
@@ -34,6 +107,30 @@
     </div>
   </header>
 
+  {#if returnStatus === 'success' && !isSubscribed}
+    <div class="sub-card rounded-2xl border border-amber-400/22 bg-amber-950/30 p-5" class:visible={mounted} style="--delay:60ms;">
+      <div class="flex items-start gap-3">
+        <span class="mt-0.5 text-lg">&#9203;</span>
+        <div>
+          <p class="font-semibold text-amber-200">Payment processing</p>
+          <p class="mt-1 text-sm text-slate-400">Your payment is being confirmed. This usually takes a few seconds. Refresh the page shortly to see your subscription activated.</p>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if returnStatus === 'cancelled'}
+    <div class="sub-card rounded-2xl border border-slate-500/20 bg-zinc-900/60 p-5" class:visible={mounted} style="--delay:60ms;">
+      <p class="text-sm text-slate-400">Checkout was cancelled. No charge was made. You can try again whenever you're ready.</p>
+    </div>
+  {/if}
+
+  {#if checkoutError}
+    <div class="rounded-xl border border-rose-400/20 bg-rose-950/30 px-4 py-3 text-sm text-rose-300">
+      {checkoutError}
+    </div>
+  {/if}
+
   {#if isSubscribed}
     <!-- Subscribed state -->
     <article class="sub-card relative overflow-hidden rounded-2xl border border-emerald-400/22 bg-gradient-to-br from-emerald-950/40 to-zinc-950 p-6" class:visible={mounted} style="--delay:80ms;">
@@ -47,13 +144,47 @@
         <div>
           <p class="font-bold text-white">You're subscribed to CARVER Pro</p>
           <p class="mt-1 text-sm text-slate-400">Full access to all features is active on your account.</p>
-          <button
-            type="button"
-            onclick={() => onNavigate('auto-apply')}
-            class="mt-4 rounded-lg border border-emerald-300/30 bg-emerald-300/8 px-5 py-2 text-sm font-semibold text-emerald-200 transition-all hover:bg-emerald-300/18 hover:text-white active:scale-95"
-          >
-            Go to Auto Apply →
-          </button>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onclick={() => onNavigate('auto-apply')}
+              class="rounded-lg border border-emerald-300/30 bg-emerald-300/8 px-5 py-2 text-sm font-semibold text-emerald-200 transition-all hover:bg-emerald-300/18 hover:text-white active:scale-95"
+            >
+              Go to Auto Apply →
+            </button>
+            {#if !showCancelConfirm}
+              <button
+                type="button"
+                onclick={() => (showCancelConfirm = true)}
+                class="text-xs text-slate-600 transition hover:text-slate-400"
+              >
+                Cancel subscription
+              </button>
+            {/if}
+          </div>
+
+          {#if showCancelConfirm}
+            <div class="mt-4 rounded-lg border border-rose-400/15 bg-rose-950/20 p-4">
+              <p class="text-sm text-slate-300">Are you sure you want to cancel your Pro subscription?</p>
+              <div class="mt-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  onclick={cancelSubscription}
+                  disabled={isCancelling}
+                  class="rounded-lg border border-rose-400/30 bg-rose-400/10 px-4 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-400/20 disabled:opacity-50"
+                >
+                  {isCancelling ? 'Cancelling...' : 'Yes, cancel'}
+                </button>
+                <button
+                  type="button"
+                  onclick={() => (showCancelConfirm = false)}
+                  class="text-xs text-slate-500 transition hover:text-slate-300"
+                >
+                  Keep subscription
+                </button>
+              </div>
+            </div>
+          {/if}
         </div>
       </div>
     </article>
@@ -65,7 +196,7 @@
       <article class="sub-card rounded-2xl border border-white/8 bg-zinc-950 p-6" class:visible={mounted} style="--delay:80ms;">
         <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Free</p>
         <div class="mt-3 flex items-end gap-1">
-          <span class="text-4xl font-black text-white">€0</span>
+          <span class="text-4xl font-black text-white">R0</span>
           <span class="mb-1 text-sm text-slate-600">/ month</span>
         </div>
         <p class="mt-2 text-sm text-slate-500">Browse listings and manage your profile.</p>
@@ -109,7 +240,7 @@
             </span>
           </div>
           <div class="mt-3 flex items-end gap-1">
-            <span class="text-4xl font-black text-white">€29</span>
+            <span class="text-4xl font-black text-white">R299</span>
             <span class="mb-1 text-sm text-slate-400">/ month</span>
           </div>
           <p class="mt-2 text-sm text-slate-300">Everything you need to land your next position.</p>
@@ -128,21 +259,18 @@
 
           <button
             type="button"
-            onclick={() => window.open('mailto:hello@carver.crew?subject=CARVER Pro Subscription', '_blank')}
-            class="mt-7 w-full rounded-xl border border-cyan-300/30 bg-cyan-300/10 py-3 text-sm font-bold text-cyan-100 transition-all hover:border-cyan-300/50 hover:bg-cyan-300/18 hover:text-white active:scale-95"
+            onclick={startCheckout}
+            disabled={isLoading}
+            class="mt-7 w-full rounded-xl border border-cyan-300/30 bg-cyan-300/10 py-3 text-sm font-bold text-cyan-100 transition-all hover:border-cyan-300/50 hover:bg-cyan-300/18 hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Get CARVER Pro →
+            {isLoading ? 'Redirecting to PayFast...' : 'Get CARVER Pro →'}
           </button>
           <p class="mt-2.5 text-center text-[10px] text-slate-600">
-            Contact us to activate — we'll enable your account within 24 hours.
+            Secure payment via PayFast. Cancel anytime.
           </p>
         </div>
       </article>
     </div>
-
-    <p class="text-center text-[10px] text-slate-700">
-      Payments are managed manually while we integrate billing. Reach out and we'll sort it.
-    </p>
   {/if}
 </section>
 

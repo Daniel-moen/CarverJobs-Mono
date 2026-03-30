@@ -219,6 +219,26 @@ class WaitlistSignup(Base):
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
+class Subscription(Base):
+  __tablename__ = "subscriptions"
+
+  id = Column(Integer, primary_key=True, index=True)
+  user_key = Column(String(160), nullable=False, index=True)
+  m_payment_id = Column(String(64), unique=True, nullable=False, index=True)
+  payfast_token = Column(String(120), nullable=True)
+  status = Column(String(20), nullable=False, default="pending")
+  amount = Column(String(20), nullable=False)
+  frequency = Column(Integer, nullable=False, default=3)
+  next_billing_date = Column(String(40), nullable=True)
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+  updated_at = Column(
+    DateTime(timezone=True),
+    server_default=func.now(),
+    onupdate=func.now(),
+    nullable=False,
+  )
+
+
 class MatchSession(Base):
   __tablename__ = "match_sessions"
 

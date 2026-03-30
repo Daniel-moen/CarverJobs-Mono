@@ -149,4 +149,25 @@ def run_migrations() -> None:
         "CREATE INDEX IF NOT EXISTS ix_match_session_results_session_id ON match_session_results (session_id)"
     )
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_key VARCHAR(160) NOT NULL,
+            m_payment_id VARCHAR(64) NOT NULL UNIQUE,
+            payfast_token VARCHAR(120),
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            amount VARCHAR(20) NOT NULL,
+            frequency INTEGER NOT NULL DEFAULT 3,
+            next_billing_date VARCHAR(40),
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+            updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_subscriptions_user_key ON subscriptions (user_key)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_m_payment_id ON subscriptions (m_payment_id)"
+    )
+
     conn.commit()

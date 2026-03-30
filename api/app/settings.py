@@ -107,6 +107,13 @@ class Settings:
   FASTSTREAM_ENABLED: bool = os.getenv("FASTSTREAM_ENABLED", "true").lower() == "true"
   SUPERYACHTTIMES_ENABLED: bool = os.getenv("SUPERYACHTTIMES_ENABLED", "true").lower() == "true"
 
+  # PayFast — recurring subscription billing
+  PAYFAST_MERCHANT_ID: str = os.getenv("PAYFAST_MERCHANT_ID", "").strip()
+  PAYFAST_MERCHANT_KEY: str = os.getenv("PAYFAST_MERCHANT_KEY", "").strip()
+  PAYFAST_PASSPHRASE: str = os.getenv("PAYFAST_PASSPHRASE", "").strip()
+  PAYFAST_SANDBOX: bool = os.getenv("PAYFAST_SANDBOX", "true").lower() == "true"
+  PAYFAST_MONTHLY_AMOUNT: str = os.getenv("PAYFAST_MONTHLY_AMOUNT", "299.00").strip()
+
   # Scrape.do — HTML scraping proxy (alternative scraper)
   SCRAPE_DO_TOKEN: str = os.getenv("SCRAPE_DO_TOKEN", "").strip()
   # Comma-separated URLs to scrape via scrape.do

@@ -218,9 +218,19 @@ def logout(response: Response):
 
 
 @router.get("/session")
-def get_session(session: dict | None = Depends(optional_session)):
+def get_session(session: dict | None = Depends(optional_session), db: Session = Depends(get_db)):
   if session is None:
     return {"ok": True, "authenticated": False}
   log.debug("Session check | sub=%s", session.get("sub"))
-  is_subscribed = session.get("role") == "admin"
+  # Admins always have full access; crew users check active subscription
+  if session.get("role") == "admin":
+    is_subscribed = True
+  else:
+    user_key = session.get("sub", "")
+    active_sub = (
+        db.query(models.Subscription)
+        .filter(models.Subscription.user_key == user_key, models.Subscription.status == "active")
+        .first()
+    )
+    is_subscribed = active_sub is not None
   return {"ok": True, "authenticated": True, "session": {**session, "is_subscribed": is_subscribed}}
