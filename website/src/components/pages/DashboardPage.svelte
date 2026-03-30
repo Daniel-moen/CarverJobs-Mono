@@ -692,10 +692,14 @@
 
       {#if reviewResult}
         <div class="mt-4 rounded-xl border border-white/8 bg-zinc-900/50 p-4">
-          <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <p class="text-[10px] text-slate-600">Total</p>
+              <p class="mt-1 text-2xl font-black text-slate-200">{reviewResult.total ?? reviewResult.reviewed}</p>
+            </div>
             <div>
               <p class="text-[10px] text-slate-600">Reviewed</p>
-              <p class="mt-1 text-2xl font-black text-slate-200">{reviewResult.reviewed}</p>
+              <p class="mt-1 text-2xl font-black text-cyan-300">{reviewResult.reviewed}</p>
             </div>
             <div>
               <p class="text-[10px] text-slate-600">Deleted</p>
@@ -706,6 +710,9 @@
               <p class="mt-1 text-2xl font-black text-emerald-300">{reviewResult.reviewed - reviewResult.deleted}</p>
             </div>
           </div>
+          {#if reviewResult.failed_batches > 0}
+            <p class="mt-2 text-[10px] text-amber-400">{reviewResult.failed_batches} batch(es) failed — those jobs were kept as-is.</p>
+          {/if}
 
           {#if reviewResult.deleted_jobs?.length > 0}
             <div class="mt-4 border-t border-white/5 pt-3">

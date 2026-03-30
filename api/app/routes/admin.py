@@ -249,9 +249,10 @@ def review_jobs(request: Request, db: Session = Depends(get_db)):
             parts.append(f"Description: {(job.description or '')[:300]}")
         return " | ".join(parts)
 
-    BATCH_SIZE = 20
+    BATCH_SIZE = 10
     deleted_jobs: list[dict] = []
     reviewed = 0
+    failed_batches = 0
 
     for i in range(0, len(jobs), BATCH_SIZE):
         batch = jobs[i : i + BATCH_SIZE]
@@ -265,7 +266,7 @@ def review_jobs(request: Request, db: Session = Depends(get_db)):
                     {"role": "user", "content": _json.dumps(payload)},
                 ],
                 model=model,
-                max_tokens=1500,
+                max_tokens=2000,
                 temperature=0.0,
                 response_format={"type": "json_object"},
             )
@@ -273,25 +274,33 @@ def review_jobs(request: Request, db: Session = Depends(get_db)):
             results = parsed.get("results", [])
         except (AIClientError, _json.JSONDecodeError, Exception) as exc:
             log.error("AI job review batch failed | batch=%d | error=%s", i // BATCH_SIZE, exc)
+            reviewed += len(batch)
+            failed_batches += 1
             continue
 
         reject_ids = {r["id"] for r in results if not r.get("is_job")}
+        reviewed_ids = {r["id"] for r in results}
+
         for job in batch:
             reviewed += 1
             if job.id in reject_ids:
                 reason = next((r.get("reason", "") for r in results if r["id"] == job.id), "")
                 deleted_jobs.append({"id": job.id, "title": job.title, "reason": reason})
                 db.delete(job)
+            elif job.id not in reviewed_ids:
+                log.warning("AI job review: job id=%d missing from AI response, skipping", job.id)
 
     db.commit()
     log.warning(
-        "AI job review complete | reviewed=%d | deleted=%d",
-        reviewed, len(deleted_jobs),
+        "AI job review complete | total=%d | reviewed=%d | deleted=%d | failed_batches=%d",
+        len(jobs), reviewed, len(deleted_jobs), failed_batches,
     )
     return {
         "ok": True,
+        "total": len(jobs),
         "reviewed": reviewed,
         "deleted": len(deleted_jobs),
+        "failed_batches": failed_batches,
         "deleted_jobs": deleted_jobs,
     }
 
