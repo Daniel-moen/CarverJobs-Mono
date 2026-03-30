@@ -415,13 +415,15 @@
   {:else if waToken}
     <WhatsAppAuthPage
       token={waToken}
-      onAuthenticated={() => {
+      onAuthenticated={(redirect) => {
         waToken = ''
         isAuthenticated = true
         hasActiveSession = true
-        currentPage = 'profile'
-        history.replaceState({ page: 'profile' }, '', '/profile')
-        trackPageView('profile')
+        const targetPath = redirect || '/profile'
+        const targetPage = PATH_TO_PAGE[targetPath] ?? 'auto-apply'
+        currentPage = targetPage
+        history.replaceState({ page: targetPage }, '', targetPath)
+        trackPageView(targetPage)
       }}
     />
   {:else if publicSlug}

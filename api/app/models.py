@@ -174,6 +174,7 @@ class WhatsAppMagicToken(Base):
   phone_number = Column(String(30), nullable=False, index=True)
   expires_at = Column(DateTime(timezone=True), nullable=False)
   used = Column(Boolean, nullable=False, default=False)
+  redirect_to = Column(String(120), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

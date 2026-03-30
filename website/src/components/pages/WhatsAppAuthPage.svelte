@@ -3,7 +3,7 @@
   import { API_BASE_URL, apiFetch } from '../../config/api'
 
   export let token = ''
-  export let onAuthenticated = () => {}
+  export let onAuthenticated = (redirect) => {}
 
   let state = 'loading' // 'loading' | 'error'
   let errorMessage = ''
@@ -25,8 +25,8 @@
         state = 'error'
         return
       }
-      // Session cookie is now set — tell App.svelte we're authenticated
-      onAuthenticated()
+      const data = await response.json().catch(() => ({}))
+      onAuthenticated(data.redirect || '/profile')
     } catch {
       errorMessage = 'Could not reach the server. Please try again.'
       state = 'error'

@@ -209,11 +209,24 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
 }
 
 
-def _make_magic_link(phone_number: str, db: Session) -> str:
-    """Create a WhatsAppMagicToken and return the full magic link URL."""
+_ALLOWED_REDIRECTS = frozenset({
+    "/profile", "/jobs", "/status", "/", "/subscription",
+})
+
+
+def _make_magic_link(phone_number: str, db: Session, *, redirect_to: str | None = None) -> str:
+    """Create a WhatsAppMagicToken and return the full magic link URL.
+
+    ``redirect_to`` must be a known internal path (validated against an allowlist
+    to prevent open-redirect attacks).  Defaults to ``/profile`` when omitted.
+    """
+    safe_redirect = redirect_to if redirect_to in _ALLOWED_REDIRECTS else None
     token = secrets.token_urlsafe(16)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.WA_MAGIC_TOKEN_TTL_SECONDS)
-    db.add(WhatsAppMagicToken(token=token, phone_number=phone_number, expires_at=expires_at))
+    db.add(WhatsAppMagicToken(
+        token=token, phone_number=phone_number,
+        expires_at=expires_at, redirect_to=safe_redirect,
+    ))
     db.commit()
     return f"{settings.FRONTEND_BASE_URL}/wa/{token}"
 
@@ -442,12 +455,13 @@ async def _handle_docs_command(phone_number: str, db: Session) -> str:
     return "\n".join(lines)
 
 
-async def _handle_jobs_command() -> str:
-    job_board_url = f"{settings.FRONTEND_BASE_URL}/jobs"
+async def _handle_jobs_command(phone_number: str, db: Session) -> str:
+    link = _make_magic_link(phone_number, db, redirect_to="/jobs")
     return (
         "🔎 *Browse Open Yacht Positions*\n\n"
         "View all live superyacht crew roles — deck, interior, engineering & more:\n\n"
-        f"👉 {job_board_url}"
+        f"👉 {link}\n\n"
+        "_Link expires in 30 minutes._"
     )
 
 
@@ -973,7 +987,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         return None
 
     if cmd in ("jobs", "open jobs", "positions", "vacancies"):
-        return await _handle_jobs_command()
+        return await _handle_jobs_command(phone, db)
 
     if cmd in ("match", "find jobs", "find matches", "matching", "find me jobs", "job match"):
         await _handle_match_command(phone, wa_session, db)
@@ -1154,6 +1168,7 @@ async def whatsapp_magic_auth(token: str, response: Response, db: Session = Depe
         max_age=settings.SESSION_TTL_SECONDS,
         path="/",
     )
-    log.info("WhatsApp magic auth success | phone=%s", record.phone_number[:6] + "****")
+    redirect = record.redirect_to if record.redirect_to in _ALLOWED_REDIRECTS else "/profile"
+    log.info("WhatsApp magic auth success | phone=%s | redirect=%s", record.phone_number[:6] + "****", redirect)
     metrics.increment("whatsapp_magic_logins")
-    return {"ok": True, "redirect": "/profile"}
+    return {"ok": True, "redirect": redirect}

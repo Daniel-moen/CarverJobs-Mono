@@ -111,6 +111,9 @@ def run_migrations() -> None:
         "CREATE INDEX IF NOT EXISTS ix_error_logs_created_at ON error_logs (created_at)"
     )
 
+    wmt_cols = _existing("whatsapp_magic_tokens")
+    _add("whatsapp_magic_tokens", "redirect_to", "VARCHAR(120)", wmt_cols)
+
     cp_cols = _existing("crew_profiles")
     _add("crew_profiles", "sex", "VARCHAR(20)", cp_cols)
 
