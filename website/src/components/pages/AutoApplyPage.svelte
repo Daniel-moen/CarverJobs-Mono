@@ -12,7 +12,9 @@
   let totalScanned = $state(0)
   let retries = $state(0)
 
-  let draftingJobId = $state(null)
+  let draftingJob = $state(null)
+  let profileSlug = $state('')
+  let profileUrl = $derived(profileSlug ? `${window.location.origin}/crew/${profileSlug}` : '')
   let draftTo = $state('')
   let draftSubject = $state('')
   let draftBody = $state('')
@@ -20,8 +22,25 @@
 
   const MAX_RETRIES = 2
 
+  async function loadProfileSlug() {
+    try {
+      const saved = localStorage.getItem('carver_profile')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.profileSlug) { profileSlug = parsed.profileSlug; return }
+      }
+    } catch { /* ignore */ }
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/profile/me`, { credentials: 'include' })
+      if (!res.ok) return
+      const data = await res.json()
+      profileSlug = data.profile?.profile_slug ?? ''
+    } catch { /* ignore */ }
+  }
+
   onMount(async () => {
     requestAnimationFrame(() => (mounted = true))
+    loadProfileSlug()
     if (autoStartMatch && state === 'idle') {
       onMatchStarted()
       runMatch()
@@ -115,34 +134,28 @@
     }
   }
 
-  async function draftEmail(job) {
-    draftingJobId = job.id
-    draftTo = ''
-    draftSubject = ''
-    draftBody = ''
+  function draftEmail(job) {
+    const role = job.title ?? job.role
+    const yacht = job.yacht ?? 'the vessel'
+    draftTo = job.contact_email ?? ''
+    draftSubject = `Application – ${role} on ${yacht}`
+    draftBody = `Dear Hiring Manager,
+
+I am writing to express my interest in the ${role} position on ${yacht}${job.location ? ` (${job.location})` : ''}.
+
+Please find my full crew profile and qualifications here:
+${profileUrl || '[Complete your profile to generate your link]'}
+
+I would welcome the opportunity to discuss how my experience aligns with this role. Please don't hesitate to reach out with any questions.
+
+Kind regards`
     copiedEmail = false
-    try {
-      const res = await apiFetch(`${API_BASE_URL}/matching/draft-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ job_id: job.id }),
-      })
-      if (!res.ok) {
-        draftingJobId = null
-        return
-      }
-      const data = await res.json()
-      draftTo = data.to || job.contact_email || ''
-      draftSubject = data.subject || ''
-      draftBody = data.body || ''
-    } catch {
-      draftingJobId = null
-    }
+    draftingJob = job
   }
 
   function closeDraft() {
-    draftingJobId = null
+    draftingJob = null
+    copiedEmail = false
   }
 
   async function copyDraft() {
@@ -301,63 +314,128 @@
 
         <!-- Apply / Draft -->
         <div class="mt-3 border-t border-white/6 pt-3">
-          {#if draftingJobId === job.id && draftBody}
-            <div class="space-y-2.5">
-              <div class="rounded-lg border border-white/8 bg-black/40 p-3 text-sm">
-                <div class="flex gap-2 text-xs text-slate-500"><span class="font-medium">To:</span><span class="text-white">{draftTo}</span></div>
-                <div class="mt-1 flex gap-2 text-xs text-slate-500"><span class="font-medium">Subject:</span><span class="text-white">{draftSubject}</span></div>
-                <pre class="mt-2 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-300">{draftBody}</pre>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <button onclick={copyDraft} class="rounded-md border border-cyan-300/25 bg-cyan-300/8 px-3 py-1.5 text-xs font-medium text-cyan-200 transition hover:bg-cyan-300/18">
-                  {copiedEmail ? 'Copied!' : 'Copy'}
-                </button>
-                <a
-                  href={buildMailto()}
-                  onclick={() => trackClick('match_apply_mailto')}
-                  class="rounded-md border border-emerald-300/30 bg-emerald-300/10 px-3 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-300/20"
-                >
-                  Open in Email
-                </a>
-                <button onclick={closeDraft} class="rounded-md border border-white/10 px-3 py-1.5 text-xs text-slate-500 transition hover:text-white">
-                  Close
-                </button>
-              </div>
-            </div>
-          {:else if draftingJobId === job.id && !draftBody}
-            <div class="flex items-center gap-2">
-              <div class="h-4 w-4 rounded-full border-2 border-cyan-400/30 border-t-cyan-400 spinner"></div>
-              <span class="text-xs text-slate-500">Drafting email...</span>
-            </div>
-          {:else}
-            <div class="flex flex-wrap items-center gap-2">
-              {#if job.contact_email}
-                <button
-                  onclick={() => draftEmail(job)}
-                  class="rounded-md border border-emerald-300/30 bg-emerald-300/10 px-4 py-1.5 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-300/20 hover:text-white active:scale-95"
-                >
-                  Apply
-                </button>
-              {:else}
-                <span class="text-xs text-slate-600">No contact email</span>
-              {/if}
-              {#if job.application_url}
-                <a
-                  href={job.application_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="rounded-md border border-white/10 px-3 py-1.5 text-xs text-slate-400 transition hover:text-white"
-                >
-                  View Listing
-                </a>
-              {/if}
-            </div>
-          {/if}
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              onclick={() => draftEmail(job)}
+              class="rounded-md border border-cyan-300/30 bg-cyan-300/8 px-4 py-1.5 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-300/18 hover:text-white active:scale-95"
+            >
+              Draft Email
+            </button>
+            {#if job.application_url}
+              <a
+                href={job.application_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="rounded-md border border-white/10 px-3 py-1.5 text-xs text-slate-400 transition hover:text-white"
+              >
+                View Listing
+              </a>
+            {/if}
+          </div>
         </div>
       </article>
     {/each}
   {/if}
 </section>
+
+{#if draftingJob}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+    onclick={(e) => { if (e.target === e.currentTarget) closeDraft() }}
+    onkeydown={(e) => { if (e.key === 'Escape') closeDraft() }}
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+  >
+    <div class="draft-panel relative w-full max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-white/8 px-5 py-4 sm:px-6">
+        <div class="min-w-0">
+          <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Draft Email</p>
+          <h2 class="mt-1 truncate text-base font-bold text-white">
+            {draftingJob.title ?? draftingJob.role} — {draftingJob.yacht ?? ''}
+          </h2>
+        </div>
+        <button
+          type="button"
+          onclick={closeDraft}
+          class="ml-4 flex-none rounded-lg border border-white/10 p-1.5 text-slate-500 transition hover:border-white/20 hover:text-white"
+          aria-label="Close"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="grid gap-4 px-5 py-5 sm:px-6">
+        <label class="grid gap-1.5">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">To</span>
+          <input
+            type="email"
+            bind:value={draftTo}
+            placeholder="recruiter@example.com"
+            class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30"
+          />
+        </label>
+
+        <label class="grid gap-1.5">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Subject</span>
+          <input
+            type="text"
+            bind:value={draftSubject}
+            class="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30"
+          />
+        </label>
+
+        <label class="grid gap-1.5">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Message</span>
+          <textarea
+            bind:value={draftBody}
+            rows="10"
+            class="rounded-lg border border-white/10 bg-black/40 px-3 py-3 text-sm leading-relaxed text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30 resize-y"
+          ></textarea>
+        </label>
+
+        {#if profileUrl}
+          <div class="flex items-center gap-2 rounded-lg border border-sky-400/15 bg-sky-400/5 px-3 py-2">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-sky-500">Profile Link</span>
+            <a href={profileUrl} target="_blank" rel="noopener" class="truncate text-xs text-sky-300 underline decoration-sky-400/30 hover:text-white">
+              {profileUrl}
+            </a>
+          </div>
+        {:else}
+          <div class="flex items-center gap-2 rounded-lg border border-amber-400/15 bg-amber-400/5 px-3 py-2">
+            <span class="text-xs text-amber-300">Complete your profile to attach your crew link.</span>
+          </div>
+        {/if}
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 border-t border-white/8 px-5 py-4 sm:px-6">
+        <button
+          type="button"
+          onclick={() => { window.open(buildMailto(), '_self'); trackClick('match_apply_mailto') }}
+          class="rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-400/20 hover:text-white active:scale-95"
+        >
+          Open in Mail App
+        </button>
+        <button
+          type="button"
+          onclick={copyDraft}
+          class="rounded-lg border border-white/12 bg-white/5 px-5 py-2 text-sm font-medium text-slate-300 transition-all hover:border-white/25 hover:text-white active:scale-95"
+        >
+          {copiedEmail ? 'Copied!' : 'Copy to Clipboard'}
+        </button>
+        <button
+          type="button"
+          onclick={closeDraft}
+          class="ml-auto rounded-lg px-4 py-2 text-sm text-slate-500 transition hover:text-white"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   section {
@@ -374,5 +452,12 @@
   }
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+  .draft-panel {
+    animation: draftSlideIn 0.25s ease-out;
+  }
+  @keyframes draftSlideIn {
+    from { opacity: 0; transform: translateY(24px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
   }
 </style>
