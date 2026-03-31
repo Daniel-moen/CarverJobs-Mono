@@ -58,12 +58,23 @@ def parse_session_token(token: str) -> SessionPayload:
     ) from exc
 
 
+def _extract_token(request: Request) -> str | None:
+  """Get session token from cookie or Authorization: Bearer header."""
+  token = request.cookies.get(settings.SESSION_COOKIE_NAME)
+  if token:
+    return token
+  auth = request.headers.get("Authorization", "")
+  if auth.startswith("Bearer "):
+    return auth[7:].strip() or None
+  return None
+
+
 def optional_session(request: Request) -> SessionPayload | None:
-  """Return session payload if a valid cookie exists, else None (no exception)."""
+  """Return session payload if a valid cookie/token exists, else None (no exception)."""
   if settings.AUTO_LOGIN_AS_ADMIN:
     log.debug("Auto-login as admin active")
     return cast(SessionPayload, {"sub": settings.ADMIN_USERNAME, "role": "admin"})
-  token = request.cookies.get(settings.SESSION_COOKIE_NAME)
+  token = _extract_token(request)
   if not token:
     return None
   try:

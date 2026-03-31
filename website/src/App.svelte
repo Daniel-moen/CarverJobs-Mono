@@ -423,20 +423,7 @@
   {#if currentPage === 'launch-signup'}
     <LaunchSignupPage />
   {:else if waToken}
-    <WhatsAppAuthPage
-      token={waToken}
-      onAuthenticated={(redirect) => {
-        waToken = ''
-        isAuthenticated = true
-        hasActiveSession = true
-        const targetPath = redirect || '/profile'
-        const targetPage = pageFromPath(targetPath)
-        matchSessionId = extractMatchSessionId(targetPath)
-        currentPage = targetPage
-        history.replaceState({ page: targetPage }, '', targetPath)
-        trackPageView(targetPage)
-      }}
-    />
+    <WhatsAppAuthPage token={waToken} />
   {:else if publicSlug}
     <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
       <PublicProfilePage slug={publicSlug} />

@@ -8,6 +8,10 @@ let _csrfToken = ''
 let _seedingPromise = null
 let _lastUnauthorizedEventMs = 0
 
+let _waSessionToken = ''
+export function setWaSessionToken(token) { _waSessionToken = token }
+export function getWaSessionToken() { return _waSessionToken }
+
 async function _seedCsrfToken() {
   if (_csrfToken) return
   if (_seedingPromise) return _seedingPromise
@@ -39,6 +43,10 @@ export async function apiFetch(url, options = {}) {
 
   if (!SAFE_METHODS.has(method) && _csrfToken) {
     headers[CSRF_HEADER] = _csrfToken
+  }
+
+  if (_waSessionToken && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${_waSessionToken}`
   }
 
   let signal = fetchOptions.signal

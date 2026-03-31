@@ -1080,4 +1080,4 @@ async def whatsapp_magic_auth(token: str, response: Response, db: Session = Depe
     redirect = record.redirect_to if _is_safe_redirect(record.redirect_to) else "/profile"
     log.info("WhatsApp magic auth success | phone=%s | redirect=%s", record.phone_number[:6] + "****", redirect)
     metrics.increment("whatsapp_magic_logins")
-    return {"ok": True, "redirect": redirect}
+    return {"ok": True, "redirect": redirect, "session_token": session_token}
