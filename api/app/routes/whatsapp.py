@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app import flags, metrics
 from app.database import SessionLocal, get_db
 from app.logger import get_logger
-from app.models import CrewProfile, Document, Job, JobHistoryEntry, WhatsAppMagicToken, WhatsAppSession
+from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppSession
 from app.security import issue_session_token
 from app.settings import settings
 
@@ -194,12 +194,6 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_match": "match",
     "cmd_jobs": "jobs",
     "cmd_help": "help",
-    "btn_apply_1": "apply 1",
-    "btn_apply_2": "apply 2",
-    "btn_apply_3": "apply 3",
-    "btn_job_info_1": "job_info 1",
-    "btn_job_info_2": "job_info 2",
-    "btn_job_info_3": "job_info 3",
     "btn_find_matches": "match",
     "btn_edit_profile": "edit",
     "btn_upload_docs": "upload",
@@ -212,6 +206,16 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
 _ALLOWED_REDIRECTS = frozenset({
     "/profile", "/jobs", "/status", "/", "/subscription",
 })
+_ALLOWED_REDIRECT_PREFIXES = ("/matches/",)
+
+
+def _is_safe_redirect(path: str | None) -> bool:
+    """Check if a redirect path is allowed (exact match or prefix)."""
+    if not path:
+        return False
+    if path in _ALLOWED_REDIRECTS:
+        return True
+    return any(path.startswith(p) for p in _ALLOWED_REDIRECT_PREFIXES)
 
 
 def _make_magic_link(phone_number: str, db: Session, *, redirect_to: str | None = None) -> str:
@@ -219,8 +223,9 @@ def _make_magic_link(phone_number: str, db: Session, *, redirect_to: str | None 
 
     ``redirect_to`` must be a known internal path (validated against an allowlist
     to prevent open-redirect attacks).  Defaults to ``/profile`` when omitted.
+    Tokens are reusable within their TTL window.
     """
-    safe_redirect = redirect_to if redirect_to in _ALLOWED_REDIRECTS else None
+    safe_redirect = redirect_to if _is_safe_redirect(redirect_to) else None
     token = secrets.token_urlsafe(16)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.WA_MAGIC_TOKEN_TTL_SECONDS)
     db.add(WhatsAppMagicToken(
@@ -444,14 +449,14 @@ def _fallback_extract(partial: dict, user_message: str) -> dict:
     return updates
 
 
-async def _call_openai(system: str, history: list, user_message: str) -> dict:
+async def _call_openai(system: str, history: list, user_message: str, *, model: str | None = None) -> dict:
     """Call OpenAI and return parsed JSON dict."""
     messages = [{"role": "system", "content": system}]
     for msg in history[-16:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_message or "Begin."})
 
-    model = settings.OPENAI_MODEL
+    model = model or settings.WHATSAPP_AI_MODEL
     _gpt5 = "gpt-5" in model
     payload: dict = {
         "model": model,
@@ -585,9 +590,10 @@ async def _handle_jobs_command(phone_number: str, db: Session) -> str:
 
 
 async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, db: Session) -> None:
-    """Run the AI matching engine and send results with apply buttons.
+    """Run the AI matching engine, save results, and send a website link.
 
-    Uses the same matching_engine as the website — one engine, consistent results.
+    Results are persisted as a MatchSession so the user can view all matches
+    and draft application emails on the website.
     """
     import asyncio
     import math as _math
@@ -602,17 +608,17 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
     if not profile:
         await _send_whatsapp(
             phone_number,
-            "🙈 *No Crew Profile*\n\nSet up your profile first so we can match you to superyacht roles. Tap below — quick setup!",
+            "You don't have a crew profile yet — set one up first so we can match you to yacht roles.",
         )
         await _send_whatsapp_buttons(
             phone_number,
-            "Ready to join the fleet?",
+            "Ready to get started?",
             [("btn_edit_profile", "Edit Profile"), ("btn_help", "Help")],
         )
         return
 
     if not settings.OPENAI_API_KEY:
-        await _send_whatsapp(phone_number, "⚠️ Matching engine is in dry dock. Please try again soon.")
+        await _send_whatsapp(phone_number, "⚠️ Matching engine is temporarily unavailable. Try again soon.")
         return
 
     all_jobs = (
@@ -622,26 +628,20 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         .all()
     )
     if not all_jobs:
-        await _send_whatsapp(
-            phone_number,
-            "📭 *No Open Yacht Roles Right Now*\n\nNo positions at the moment. New crew roles drop regularly — check back soon!",
-        )
+        await _send_whatsapp(phone_number, "No open yacht positions right now — check back soon!")
         return
 
     _BATCH_SIZE = 10
     _AVG_SECS_PER_BATCH = 8
     num_batches = _math.ceil(len(all_jobs) / _BATCH_SIZE)
     est_secs = num_batches * _AVG_SECS_PER_BATCH
-    est_str = f"~{est_secs} seconds" if est_secs < 60 else f"~{round(est_secs / 60)} min"
+    est_str = f"~{est_secs}s" if est_secs < 60 else f"~{round(est_secs / 60)} min"
 
     await _send_whatsapp(
         phone_number,
-        f"⏳ *Finding Your Matches...*\n\n"
-        f"Scanning *{len(all_jobs)} yacht positions* — estimated time: *{est_str}*.\n\n"
-        f"Stand by, we'll send your results shortly!",
+        f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
     )
 
-    # Build candidate profile (same as website)
     certs = [c.strip() for c in (profile.certifications or "").replace("\n", ",").split(",") if c.strip()]
     langs = [lang.strip() for lang in (profile.languages or "").split(",") if lang.strip()]
 
@@ -652,7 +652,7 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         .limit(10)
         .all()
     )
-    history = [
+    jh = [
         {"role": e.role, "yacht": e.yacht_name, "yacht_type": e.yacht_type or "",
          "start_date": e.start_date or "", "end_date": e.end_date or "",
          "description": (e.description or "")[:200]}
@@ -677,7 +677,7 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         certifications=certs,
         languages=langs,
         bio=profile.bio or "",
-        job_history=history,
+        job_history=jh,
     )
 
     job_summaries = [
@@ -707,270 +707,70 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         )
     except Exception as exc:
         log.error("WhatsApp match engine error | %s", exc)
-        await _send_whatsapp(phone_number, "⚠️ Matching hit a snag. Give it another try in a moment.")
+        await _send_whatsapp(phone_number, "⚠️ Matching hit a snag — try again in a moment.")
         return
 
-    # Return ALL matches (matched=True) — no extra compatibility filter
     matched = [r for r in (results or []) if r.matched]
     if not matched:
         await _send_whatsapp(
             phone_number,
-            "😔 *No Strong Matches Yet*\n\nNo great yacht fit right now. A complete crew profile with certs and docs boosts your chances — keep it shipshape!",
+            "No strong matches right now. A complete profile with certs and docs boosts your chances!",
         )
         await _send_whatsapp_buttons(
             phone_number,
             "Want to improve your match rate?",
-            [("btn_edit_profile", "Edit Profile"), ("btn_upload_docs", "Upload Docs"), ("btn_menu", "Main Menu")],
+            [("btn_edit_profile", "Edit Profile"), ("btn_upload_docs", "Upload Docs"), ("btn_menu", "Menu")],
         )
         return
 
-    # WhatsApp buttons only support 3 — store top 3 for interactive actions, list rest as text
-    top_matches = matched[:3]
-    stored = []
-    for m in top_matches:
-        job = jobs_by_id.get(m.job_id)
-        if not job:
-            continue
-        stored.append({"job_id": job.id, "title": job.title, "contact_email": job.contact_email or ""})
-
-    partial = json.loads(wa_session.partial_profile)
-    partial["_last_matches"] = stored
-    _save_session(wa_session, db, json.loads(wa_session.history), partial)
+    # Persist results as a MatchSession for the website
+    match_session = MatchSession(
+        user_key=phone_number,
+        status="completed",
+        total_jobs_scanned=len(all_jobs),
+        total_matched=len(matched),
+        completed_at=datetime.now(timezone.utc),
+    )
+    db.add(match_session)
+    db.flush()
+    for r in matched:
+        db.add(MatchSessionResult(
+            session_id=match_session.id,
+            job_id=r.job_id,
+            matched=r.matched,
+            compatibility=r.compatibility,
+            reason=r.reason,
+            strengths=json.dumps(r.strengths),
+            gaps=json.dumps(r.gaps),
+            factor_scores=json.dumps(r.factor_scores),
+        ))
+    db.commit()
     metrics.increment("crew_matches")
 
-    await _send_whatsapp(
-        phone_number,
-        f"🎯 *Found {len(matched)} yacht match{'es' if len(matched) != 1 else ''}!*\n\n"
-        f"Showing your top matches — tap *See More* for details or *Draft Application* to apply.",
-    )
-
-    # Button messages for top 3
-    num_labels = ["1️⃣", "2️⃣", "3️⃣"]
-    for i, m in enumerate(top_matches, 1):
+    # Build brief summary for WhatsApp (top 3)
+    top = matched[:3]
+    lines = [f"🎯 *Found {len(matched)} match{'es' if len(matched) != 1 else ''}!*\n"]
+    for i, m in enumerate(top, 1):
         job = jobs_by_id.get(m.job_id)
         if not job:
             continue
         compat = int(m.compatibility)
-        salary_line = ""
-        if job.salary_min or job.salary_max:
-            lo = f"€{int(job.salary_min)}" if job.salary_min else ""
-            hi = f"€{int(job.salary_max)}" if job.salary_max else ""
-            salary_str = f"{lo}–{hi}/mo" if lo and hi else f"{lo or hi}/mo"
-            salary_line = f"\n💰 {salary_str}"
-        reason = f"\n_\"{m.reason[:120]}\"_" if m.reason else ""
-        body = (
-            f"{num_labels[i - 1]} *{job.title}*\n"
-            f"📍 {job.location}  ·  ✅ {compat}% match"
-            f"{salary_line}{reason}"
-        )
-        await _send_whatsapp_buttons(
-            phone_number,
-            body,
-            [
-                (f"btn_job_info_{i}", "See More"),
-                (f"btn_apply_{i}", "Draft Application"),
-            ],
-        )
-
-    # List remaining matches as text (if more than 3)
+        lines.append(f"{i}. *{job.title}* — {job.location} ({compat}%)")
     if len(matched) > 3:
-        extra_lines = []
-        for m in matched[3:]:
-            job = jobs_by_id.get(m.job_id)
-            if not job:
-                continue
-            compat = int(m.compatibility)
-            extra_lines.append(f"• *{job.title}* — {job.location} ({compat}%)")
-        if extra_lines:
-            await _send_whatsapp(
-                phone_number,
-                f"📋 *{len(extra_lines)} more match{'es' if len(extra_lines) != 1 else ''}:*\n\n"
-                + "\n".join(extra_lines)
-                + "\n\n_Check the job board for full details on all positions._",
-            )
+        lines.append(f"   _...and {len(matched) - 3} more_")
 
+    # Magic link to the match session page
+    link = _make_magic_link(phone_number, db, redirect_to=f"/matches/{match_session.id}")
+    lines.append(f"\nView all matches & draft applications:\n👉 {link}")
+    lines.append("_Link expires in 30 min._")
 
-async def _handle_job_info_command(number: int, wa_session: WhatsAppSession, db: Session) -> None:
-    """Send full details for a stored match result."""
-    phone = wa_session.phone_number
-    partial = json.loads(wa_session.partial_profile)
-    last_matches = partial.get("_last_matches", [])
+    await _send_whatsapp(phone_number, "\n".join(lines))
 
-    if not last_matches or number > len(last_matches):
-        await _send_whatsapp(phone, "🔍 *No Recent Matches*\n\nRun *Find Matches* first to scan yacht positions.")
-        return
-
-    match_data = last_matches[number - 1]
-    job = db.query(Job).filter(Job.id == match_data["job_id"]).first()
-    if not job:
-        await _send_whatsapp(phone, "😔 That yacht role is no longer available.")
-        return
-
-    num_labels = ["1️⃣", "2️⃣", "3️⃣"]
-    lines = [f"{num_labels[number - 1]} *{job.title}*\n"]
-
-    if job.role:          lines.append(f"⚓ *Role:* {job.role}")
-    if job.location:      lines.append(f"📍 *Location:* {job.location}")
-    if job.yacht:         lines.append(f"🛥️ *Yacht:* {job.yacht}")
-    if job.contract_type: lines.append(f"📋 *Contract:* {job.contract_type}")
-    if job.start_date:    lines.append(f"📅 *Start date:* {job.start_date}")
-    if job.salary_min or job.salary_max:
-        lo = f"€{int(job.salary_min)}" if job.salary_min else ""
-        hi = f"€{int(job.salary_max)}" if job.salary_max else ""
-        salary_str = f"{lo}–{hi}/mo" if lo and hi else f"{lo or hi}/mo"
-        lines.append(f"💰 *Salary:* {salary_str}")
-    if job.certifications_required:
-        lines.append(f"🏅 *Certs required:* {job.certifications_required}")
-    if job.description:
-        lines.append(f"\n📝 *About the role:*\n{job.description[:700]}")
-    if job.requirements:
-        lines.append(f"\n✅ *Requirements:*\n{job.requirements[:400]}")
-    if job.contact_email:
-        lines.append(f"\n📧 *Contact:* {job.contact_email}")
-
-    await _send_whatsapp(phone, "\n".join(lines))
-    await _send_whatsapp_buttons(
-        phone,
-        "Ready to apply for this yacht role?",
-        [
-            (f"btn_apply_{number}", "Draft Application"),
-            ("btn_find_matches", "Find More Jobs"),
-            ("btn_menu", "Main Menu"),
-        ],
-    )
-
-
-async def _handle_apply_command(number: int, wa_session: WhatsAppSession, db: Session) -> None:
-    """Draft an application email for a stored match result, sending messages directly."""
-    import asyncio
-    from app.services.ai_client import call_openai
-
-    phone = wa_session.phone_number
-    partial = json.loads(wa_session.partial_profile)
-    last_matches = partial.get("_last_matches", [])
-
-    if not last_matches:
-        await _send_whatsapp(phone, "🔍 *No Recent Matches*\n\nRun *Find Matches* first to find yacht roles, then tap one to apply.")
-        return
-
-    idx = number - 1
-    if idx < 0 or idx >= len(last_matches):
-        await _send_whatsapp(phone, f"⚠️ Please choose a number between 1 and {len(last_matches)}.")
-        return
-
-    match_data = last_matches[idx]
-    job = db.query(Job).filter(Job.id == match_data["job_id"]).first()
-    if not job:
-        await _send_whatsapp(phone, "😔 That yacht role is no longer available.")
-        return
-
-    profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone).first()
-    if not profile:
-        await _send_whatsapp(phone, "🙈 *No Crew Profile*\n\nSet up your profile before applying to yacht roles. Tap *Edit Profile* to get started.")
-        return
-
-    if not settings.OPENAI_API_KEY:
-        await _send_whatsapp(phone, "⚠️ Email drafting is in dry dock. Try again in a moment.")
-        return
-
-    name = " ".join(filter(None, [profile.first_name, profile.last_name])) or "the applicant"
-    first_name = (profile.first_name or name.split()[0])
-    profile_url = f"{settings.FRONTEND_BASE_URL}/crew/{profile.profile_slug}" if profile.profile_slug else ""
-
-    # Build a rich candidate summary for the AI
-    profile_parts = []
-    if profile.desired_role:       profile_parts.append(f"Desired role: {profile.desired_role}")
-    if profile.years_experience:   profile_parts.append(f"Years experience: {profile.years_experience}")
-    if profile.nationality:        profile_parts.append(f"Nationality: {profile.nationality}")
-    if profile.current_location:   profile_parts.append(f"Current location: {profile.current_location}")
-    if profile.preferred_locations:profile_parts.append(f"Preferred locations: {profile.preferred_locations}")
-    if profile.contract_type:      profile_parts.append(f"Contract preference: {profile.contract_type}")
-    if profile.certifications:     profile_parts.append(f"Certifications: {profile.certifications}")
-    if profile.languages:          profile_parts.append(f"Languages: {profile.languages}")
-    if profile.salary_min or profile.salary_max:
-        profile_parts.append(f"Salary expectation: €{profile.salary_min or '?'}–€{profile.salary_max or '?'}/mo")
-    if profile.available_from:     profile_parts.append(f"Available from: {profile.available_from}")
-    if profile.bio:                profile_parts.append(f"Bio: {profile.bio[:300]}")
-    candidate_summary = "\n".join(profile_parts)
-
-    system_prompt = f"""You are writing a genuine, personal job application email on behalf of {name}, a superyacht crew member.
-
-Your task: write a compelling, specific email that feels like a real human wrote it — not a template.
-- Open with something specific to the role or yacht if possible (e.g. mention the yacht name, the location, the contract type)
-- Highlight the 1–2 most relevant qualifications from the candidate's profile that directly match what this job needs
-- Keep it concise — under 150 words — but make every sentence count
-- Sound confident and enthusiastic, not desperate or generic
-- Do NOT use phrases like "I am writing to express my interest" — start with something more direct
-- Do NOT include a profile link — it will be appended automatically
-- Close with the candidate's first name only ({first_name})
-
-Candidate profile:
-{candidate_summary}
-
-Job being applied for:
-Title: {job.title}
-Role: {job.role}
-Yacht: {job.yacht or 'not specified'}
-Location: {job.location}
-Contract: {job.contract_type or 'not specified'}
-Description: {(job.description or '')[:500]}
-Requirements: {(job.requirements or '')[:400]}
-
-Return strict JSON only — no markdown:
-{{"subject": "<punchy subject line — include role and yacht name>", "body": "<the full email body text>"}}"""
-
-    try:
-        text = await asyncio.to_thread(
-            call_openai,
-            api_key=settings.OPENAI_API_KEY,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Draft the application email."},
-            ],
-            model=settings.OPENAI_MODEL,
-            max_tokens=400,
-            temperature=0.7,
-            response_format={"type": "json_object"},
-        )
-    except Exception as exc:
-        log.error("WhatsApp apply email draft failed | %s", exc)
-        await _send_whatsapp(phone, "⚠️ Couldn't draft the email. Give it another try in a moment.")
-        return
-
-    try:
-        parsed = json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        await _send_whatsapp(phone, "⚠️ Couldn't parse the draft. Please try again.")
-        return
-
-    subject = parsed.get("subject", f"Application: {job.role} – {job.yacht}")
-    body = parsed.get("body", "")
-
-    # Always append the CARVER profile link so recruiters can view the full profile
-    if profile_url:
-        body = f"{body}\n\nView my full crew profile: {profile_url}"
-
-    to_email = job.contact_email or ""
-    metrics.increment("whatsapp_apply_drafts")
-
-    # Message 1: header with send-to email (WhatsApp auto-links plain email addresses)
-    header = f"✉️ *Application Draft*\n_{job.title}_\n"
-    if to_email:
-        header += f"\n📧 *Send to:* {to_email}"
-    else:
-        header += "\n⚠️ _No contact email on file — check the job board._"
-    await _send_whatsapp(phone, header)
-
-    # Message 2: subject line — short, easy to copy
-    await _send_whatsapp(phone, f"📝 *Subject (copy this):*\n\n{subject}")
-
-    # Message 3: email body — long-press to copy on WhatsApp
-    await _send_whatsapp(phone, f"📋 *Email body (copy this):*\n\n{body}")
 
 
 # ── Onboarding flow ───────────────────────────────────────────────────────────
 
-_FIRST_ONBOARD_MESSAGE = (
+_FALLBACK_GREETING = (
     "Ahoy! 👋 Welcome aboard CARVER — your superyacht crew platform. "
     "Let's build your crew profile in a few quick questions. What's your full name?"
 )
@@ -980,16 +780,21 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
     history = json.loads(wa_session.history)
     partial = json.loads(wa_session.partial_profile)
 
-    # First message: use fixed welcome to avoid odd AI phrasing like "trouble connecting"
+    system = _build_onboard_system(partial)
+    parsed = await _call_openai(system, history, user_message)
+
+    # First message: use AI greeting, fall back to static if AI fails
     if not history:
-        message = _FIRST_ONBOARD_MESSAGE
+        message = (parsed.get("message") or "").strip() or _FALLBACK_GREETING
+        updates = parsed.get("updates") if isinstance(parsed.get("updates"), dict) else {}
+        clean_updates = {k: str(v).strip() for k, v in updates.items() if isinstance(k, str) and v and str(v).strip()}
+        partial = _apply_updates(partial, clean_updates)
         history.append({"role": "user", "content": user_message})
         history.append({"role": "assistant", "content": message})
         _save_session(wa_session, db, history, partial)
         return message
 
-    system = _build_onboard_system(partial)
-    parsed = await _call_openai(system, history, user_message)
+    # parsed already populated above for non-first messages
 
     message = (parsed.get("message") or "").strip()
     done = bool(parsed.get("done"))
@@ -1110,20 +915,6 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
 
     if cmd in ("match", "find jobs", "find matches", "matching", "find me jobs", "job match"):
         await _handle_match_command(phone, wa_session, db)
-        return None
-
-    import re as _re
-
-    # job_info 1 / job_info 2 / job_info 3
-    job_info_match = _re.match(r'^job_info\s+([123])$', cmd)
-    if job_info_match:
-        await _handle_job_info_command(int(job_info_match.group(1)), wa_session, db)
-        return None
-
-    # apply 1 / apply 2 / apply 3
-    apply_match = _re.match(r'^apply\s+([123])$', cmd)
-    if apply_match:
-        await _handle_apply_command(int(apply_match.group(1)), wa_session, db)
         return None
 
     # Unrecognised input → show the menu
@@ -1258,24 +1049,23 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
 
 @router.get("/wa/auth/{token}")
 async def whatsapp_magic_auth(token: str, response: Response, db: Session = Depends(get_db)):
-    """Validate a WhatsApp magic link token and issue a session cookie."""
+    """Validate a WhatsApp magic link token and issue a session cookie.
+
+    Tokens are reusable within their TTL — clicking the same link twice works
+    as long as it hasn't expired.
+    """
     if len(token) > 64:
         raise HTTPException(status_code=400, detail="Invalid token")
 
     record = db.query(WhatsAppMagicToken).filter(WhatsAppMagicToken.token == token).first()
     if not record:
-        raise HTTPException(status_code=404, detail="Link not found or already used")
-    if record.used:
-        raise HTTPException(status_code=410, detail="This link has already been used")
+        raise HTTPException(status_code=404, detail="Link not found.")
     now = datetime.now(timezone.utc)
     expires = record.expires_at
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
     if now > expires:
-        raise HTTPException(status_code=410, detail="This link has expired. Type 'edit' on WhatsApp to get a new one.")
-
-    record.used = True
-    db.commit()
+        raise HTTPException(status_code=410, detail="This link has expired. Send any message on WhatsApp to get a new one.")
 
     session_token = issue_session_token({"sub": record.phone_number, "role": "crew", "provider": "whatsapp"})
     response.set_cookie(
@@ -1287,7 +1077,7 @@ async def whatsapp_magic_auth(token: str, response: Response, db: Session = Depe
         max_age=settings.SESSION_TTL_SECONDS,
         path="/",
     )
-    redirect = record.redirect_to if record.redirect_to in _ALLOWED_REDIRECTS else "/profile"
+    redirect = record.redirect_to if _is_safe_redirect(record.redirect_to) else "/profile"
     log.info("WhatsApp magic auth success | phone=%s | redirect=%s", record.phone_number[:6] + "****", redirect)
     metrics.increment("whatsapp_magic_logins")
     return {"ok": True, "redirect": redirect}

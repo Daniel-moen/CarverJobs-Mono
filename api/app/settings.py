@@ -61,6 +61,7 @@ class Settings:
   GOOGLE_REQUIRE_VERIFIED_EMAIL = os.getenv("GOOGLE_REQUIRE_VERIFIED_EMAIL", "true").lower() == "true"
   OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
   OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+  WHATSAPP_AI_MODEL = os.getenv("WHATSAPP_AI_MODEL", "gpt-5-mini").strip()
 
   CORS_ORIGINS = _csv_env(
     "CORS_ORIGINS",

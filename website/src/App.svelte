@@ -13,6 +13,7 @@
   import MobileMarketingPage from './components/pages/MobileMarketingPage.svelte'
   import PublicProfilePage from './components/pages/PublicProfilePage.svelte'
   import WhatsAppAuthPage from './components/pages/WhatsAppAuthPage.svelte'
+  import MatchSessionPage from './components/pages/MatchSessionPage.svelte'
   import LaunchSignupPage from './components/pages/LaunchSignupPage.svelte'
   import SignUpPage from './components/pages/SignUpPage.svelte'
   import { API_BASE_URL, apiFetch } from './config/api'
@@ -45,10 +46,16 @@
     return match ? match[1] : ''
   }
 
+  function extractMatchSessionId(pathname) {
+    const match = pathname.match(/^\/matches\/(\d+)$/)
+    return match ? parseInt(match[1], 10) : 0
+  }
+
   function pageFromPath(pathname) {
     if (!SITE_LAUNCHED) return 'launch-signup'
     if (pathname.startsWith('/crew/')) return 'public-profile'
     if (pathname.startsWith('/wa/')) return 'whatsapp-auth'
+    if (pathname.startsWith('/matches/')) return 'match-session'
     if (pathname === '/signup') return 'signup'
     return PATH_TO_PAGE[pathname] ?? 'auto-apply'
   }
@@ -67,6 +74,7 @@
 
   let publicSlug = SITE_LAUNCHED ? extractCrewSlug(window.location.pathname) : ''
   let waToken = SITE_LAUNCHED ? extractWaToken(window.location.pathname) : ''
+  let matchSessionId = SITE_LAUNCHED ? extractMatchSessionId(window.location.pathname) : 0
   let currentPage = pageFromPath(window.location.pathname)
   let isCheckingSession = true
   let isAuthenticated = false
@@ -153,6 +161,7 @@
   const pageMap = {
     'auto-apply': AutoApplyPage,
     'job-board': JobBoardPage,
+    'match-session': MatchSessionPage,
     profile: ProfilePage,
     status: StatusPage,
     dashboard: DashboardPage,
@@ -391,6 +400,7 @@
       }
       publicSlug = extractCrewSlug(window.location.pathname)
       waToken = extractWaToken(window.location.pathname)
+      matchSessionId = extractMatchSessionId(window.location.pathname)
       currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
       showSignup = currentPage === 'signup'
       showLogin = false
@@ -420,7 +430,8 @@
         isAuthenticated = true
         hasActiveSession = true
         const targetPath = redirect || '/profile'
-        const targetPage = PATH_TO_PAGE[targetPath] ?? 'auto-apply'
+        const targetPage = pageFromPath(targetPath)
+        matchSessionId = extractMatchSessionId(targetPath)
         currentPage = targetPage
         history.replaceState({ page: targetPage }, '', targetPath)
         trackPageView(targetPage)
@@ -588,7 +599,7 @@
     {/if}
 
     <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
-      <svelte:component this={ActivePage} isSubscribed={isSubscribed} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} />
+      <svelte:component this={ActivePage} isSubscribed={isSubscribed} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} sessionId={matchSessionId} />
     </main>
     <SiteFooter />
   {/if}
