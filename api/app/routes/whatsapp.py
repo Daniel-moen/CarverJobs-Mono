@@ -761,7 +761,6 @@ async def _handle_job_info_command(number: int, wa_session: WhatsAppSession, db:
 async def _handle_apply_command(number: int, wa_session: WhatsAppSession, db: Session) -> None:
     """Draft an application email for a stored match result, sending messages directly."""
     import asyncio
-    from urllib.parse import quote as _quote
     from app.services.ai_client import call_openai
 
     phone = wa_session.phone_number
@@ -872,31 +871,19 @@ Return strict JSON only — no markdown:
     to_email = job.contact_email or ""
     metrics.increment("whatsapp_apply_drafts")
 
+    # Message 1: header with send-to email (WhatsApp auto-links plain email addresses)
+    header = f"✉️ *Application Draft*\n_{job.title}_\n"
     if to_email:
-        mailto = (
-            f"mailto:{_quote(to_email)}"
-            f"?subject={_quote(subject)}"
-            f"&body={_quote(body)}"
-        )
-        send_action = f"👉 *Open in email app:*\n{mailto}"
+        header += f"\n📧 *Send to:* {to_email}"
     else:
-        send_action = "_(no contact email on file — check the job board)_"
+        header += "\n⚠️ _No contact email on file — check the job board._"
+    await _send_whatsapp(phone, header)
 
-    # ── Message 1: header card (no body) ──
-    await _send_whatsapp(
-        phone,
-        f"✉️ *Application Draft*\n"
-        f"_{job.title}_\n\n"
-        f"📧 *To:* {to_email or 'unknown'}\n"
-        f"📝 *Subject:* {subject}\n\n"
-        f"{send_action}",
-    )
+    # Message 2: subject line — short, easy to copy
+    await _send_whatsapp(phone, f"📝 *Subject (copy this):*\n\n{subject}")
 
-    # ── Message 2: clean body — long-press → Copy in WhatsApp ──
-    await _send_whatsapp(
-        phone,
-        f"📋 *Long-press to copy:*\n\n{body}",
-    )
+    # Message 3: email body — long-press to copy on WhatsApp
+    await _send_whatsapp(phone, f"📋 *Email body (copy this):*\n\n{body}")
 
 
 # ── Onboarding flow ───────────────────────────────────────────────────────────
