@@ -338,3 +338,13 @@ def get_flows(db: Session = Depends(get_db)):
     flows = analytics.get_user_flows(limit=20, db=db)
     transitions = analytics.get_page_transitions(db=db)
     return {"ok": True, "flows": flows, "transitions": transitions}
+
+
+@router.delete("/whatsapp/sessions")
+def wipe_whatsapp_sessions(db: Session = Depends(get_db)):
+    """Delete all WhatsApp sessions and magic tokens (admin only)."""
+    sessions_deleted = db.query(WhatsAppSession).delete()
+    tokens_deleted = db.query(WhatsAppMagicToken).delete()
+    db.commit()
+    log.warning("Admin wiped WhatsApp data | sessions=%d | tokens=%d", sessions_deleted, tokens_deleted)
+    return {"ok": True, "sessions_deleted": sessions_deleted, "tokens_deleted": tokens_deleted}
