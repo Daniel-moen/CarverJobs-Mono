@@ -154,16 +154,6 @@ def _profile_summary(p: CrewProfile, job_history: list | None = None) -> str:
         parts.append(f"Certifications: {p.certifications}")
     if p.languages:
         parts.append(f"Languages: {p.languages}")
-    if p.preferred_locations:
-        parts.append(f"Preferred locations: {p.preferred_locations}")
-    if p.contract_type:
-        parts.append(f"Contract preference: {p.contract_type}")
-    if p.current_location:
-        parts.append(f"Current location: {p.current_location}")
-    if p.nationality:
-        parts.append(f"Nationality: {p.nationality}")
-    if p.salary_min or p.salary_max:
-        parts.append(f"Salary range: {p.salary_min or '?'}-{p.salary_max or '?'} EUR/mo")
     if p.bio:
         parts.append(f"Bio: {p.bio[:300]}")
     if job_history:
@@ -508,29 +498,36 @@ async def draft_email(
 
     profile_text = _profile_summary(profile, job_history)
 
-    system_prompt = f"""You write application emails for yacht crew members. Your output must sound like a real person wrote it — natural, confident, and conversational. Not robotic, not overly formal.
+    system_prompt = f"""You write short application emails for yacht crew. Sound like a real person — casual-professional, confident, no fluff.
 
-STRICT RULES:
-- ONLY mention qualifications, certifications, experience, and facts that appear in the crew profile below. NEVER invent or assume anything.
-- If the profile is sparse, keep the email shorter rather than making things up.
-- Do NOT use clichés like "I am excited to" or "I believe I would be a great fit". Write like an experienced crew member who knows their worth.
-- Keep it under 150 words. Short paragraphs. No bullet points.
-- Include the profile link naturally (e.g. "You can view my full profile and documents here: [link]").
-- Sign off with just the first name: {first_name}
+WHAT TO DO:
+- Open with interest in the specific role and yacht. One sentence.
+- Mention 1-2 of the MOST RELEVANT qualifications or experiences for THIS job. Pick from the profile — don't list everything.
+- If they have work history, reference it briefly (e.g. "most recently worked as X on Y").
+- Drop the profile link so they can see the full picture.
+- Sign off with just: {first_name}
+
+WHAT NOT TO DO:
+- NEVER mention salary, pay, or compensation.
+- NEVER mention where the crew member wants to work or live.
+- NEVER mention contract preferences.
+- NEVER mention nationality or current location.
+- NEVER list every certification or qualification — pick what's relevant to the job.
+- NEVER invent facts not in the profile.
+- NEVER use phrases like "I am excited to", "I believe I would be a great fit", "I am writing to express my interest", "passionate about", "eager to".
+- NO bullet points. NO formal letter structure. Keep it under 120 words.
 
 Crew profile:
 {profile_text}
 
-Job:
+Job they're applying for:
 Role: {job.role}
 Yacht: {job.yacht}
-Location: {job.location}
-Contract: {job.contract_type or 'Not specified'}
 {('Description: ' + (job.description or '')[:400]) if job.description else ''}
 {('Requirements: ' + (job.requirements or '')[:300]) if job.requirements else ''}
 {('Profile link: ' + profile_url) if profile_url else 'No profile link available.'}
 
-Respond with JSON only. No markdown, no explanation:
+Respond with JSON only:
 {{"subject": "...", "body": "..."}}"""
 
     messages: list[dict[str, str]] = [
@@ -553,8 +550,8 @@ Respond with JSON only. No markdown, no explanation:
                 call_openai,
                 api_key=settings.OPENAI_API_KEY,
                 messages=messages,
-                model=settings.OPENAI_MODEL,
-                max_tokens=600,
+                model=settings.EMAIL_AI_MODEL,
+                max_tokens=400,
                 temperature=0.7,
                 response_format={"type": "json_object"},
             )
