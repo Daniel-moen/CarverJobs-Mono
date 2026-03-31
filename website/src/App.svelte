@@ -16,6 +16,7 @@
   import MatchSessionPage from './components/pages/MatchSessionPage.svelte'
   import LaunchSignupPage from './components/pages/LaunchSignupPage.svelte'
   import SignUpPage from './components/pages/SignUpPage.svelte'
+  import AdminJobIngestPage from './components/pages/AdminJobIngestPage.svelte'
   import { API_BASE_URL, apiFetch } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
 
@@ -30,6 +31,7 @@
     '/profile':      'profile',
     '/status':       'status',
     '/dashboard':    'dashboard',
+    '/dashboard/job-ingest': 'admin-job-ingest',
     '/subscription': 'subscription',
   }
   const PAGE_TO_PATH = Object.fromEntries(
@@ -68,6 +70,13 @@
     const path = PAGE_TO_PATH[pageKey] ?? '/'
     history.pushState({ page: pageKey }, '', path)
     trackPageView(pageKey)
+  }
+
+  function enforceAdminOnlyPageAccess() {
+    if (currentPage === 'admin-job-ingest' && userRole !== 'admin') {
+      currentPage = 'auto-apply'
+      history.replaceState({ page: 'auto-apply' }, '', '/')
+    }
   }
 
   const SITE_LAUNCHED = String(import.meta.env.VITE_SITE_LAUNCHED ?? 'true').toLowerCase() === 'true'
@@ -165,6 +174,7 @@
     profile: ProfilePage,
     status: StatusPage,
     dashboard: DashboardPage,
+    'admin-job-ingest': AdminJobIngestPage,
     subscription: SubscriptionPage,
   }
 
@@ -203,6 +213,7 @@
         isSubscribed = Boolean(data?.session?.is_subscribed)
         // Keep the page that matches the current URL; don't override with a default.
         currentPage = pageFromPath(window.location.pathname)
+        enforceAdminOnlyPageAccess()
         showOnboarding = checkOnboardingNeeded()
         if (!showOnboarding) showDocsReminder = checkDocsReminder()
       }
@@ -402,6 +413,7 @@
       waToken = extractWaToken(window.location.pathname)
       matchSessionId = extractMatchSessionId(window.location.pathname)
       currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
+      enforceAdminOnlyPageAccess()
       showSignup = currentPage === 'signup'
       showLogin = false
       trackPageView(currentPage)

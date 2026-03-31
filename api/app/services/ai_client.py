@@ -10,6 +10,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+import base64
 from typing import Any
 
 from app.logger import get_logger
@@ -60,7 +61,7 @@ class AIResponseError(AIClientError):
 def call_openai(
     *,
     api_key: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     model: str = "gpt-4o-mini",
     max_tokens: int = 1200,
     temperature: float = 0.1,
@@ -193,3 +194,42 @@ def call_openai(
                 f"OpenAI returned non-JSON response: {exc}",
                 crv_code="CRV-3006",
             ) from exc
+
+
+def extract_text_from_image(
+    *,
+    api_key: str,
+    image_bytes: bytes,
+    mime_type: str,
+    model: str = "gpt-4o-mini",
+) -> str:
+    """Extract plain text from a screenshot using OpenAI vision."""
+    if not image_bytes:
+        raise AIResponseError("Image bytes are empty.", crv_code="CRV-3006")
+
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    data_url = f"data:{mime_type};base64,{b64}"
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": (
+                "Extract all job-related text from the image exactly as plain text. "
+                "Do not summarize. Keep line breaks where useful. "
+                "If there is no readable text, return exactly: NO_TEXT_FOUND"
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Read this screenshot and extract all visible text."},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        },
+    ]
+    return call_openai(
+        api_key=api_key,
+        messages=messages,
+        model=model,
+        max_tokens=1200,
+        temperature=0.0,
+    ).strip()

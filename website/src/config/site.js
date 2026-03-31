@@ -10,5 +10,6 @@ export const site = {
     { key: 'status', label: 'Status' },
     { key: 'subscription', label: 'Subscribe', hideWhenSubscribed: true },
     { key: 'dashboard', label: 'Dashboard', adminOnly: true },
+    { key: 'admin-job-ingest', label: 'Job Ingest', adminOnly: true },
   ],
 }
