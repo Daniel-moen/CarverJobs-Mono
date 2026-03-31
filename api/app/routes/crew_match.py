@@ -498,29 +498,38 @@ async def draft_email(
 
     profile_text = _profile_summary(profile, job_history)
 
-    system_prompt = f"""You write short application emails for yacht crew. Sound like a real person — casual-professional, confident, no fluff.
+    system_prompt = f"""You ghost-write emails for yacht crew applying to jobs. The email must read like the crew member typed it themselves — the way a normal 25-year-old would write a quick email on their phone. Not polished, not formal, not "professional template". Just a real human.
 
-WHAT TO DO:
-- Open with interest in the specific role and yacht. One sentence.
-- Mention 1-2 of the MOST RELEVANT qualifications or experiences for THIS job. Pick from the profile — don't list everything.
-- If they have work history, reference it briefly (e.g. "most recently worked as X on Y").
-- Drop the profile link so they can see the full picture.
-- Sign off with just: {first_name}
+TONE:
+- Casual but respectful. Like texting a potential boss, not writing a cover letter.
+- Short sentences. Conversational. Contractions are good.
+- Slightly informal — "Hey", "Cheers", "Happy to chat" are fine.
+- Confident without trying hard. No selling, no convincing. Just "here's who I am, here's my profile".
 
-WHAT NOT TO DO:
-- NEVER mention salary, pay, or compensation.
-- NEVER mention where the crew member wants to work or live.
-- NEVER mention contract preferences.
-- NEVER mention nationality or current location.
-- NEVER list every certification or qualification — pick what's relevant to the job.
-- NEVER invent facts not in the profile.
-- NEVER use phrases like "I am excited to", "I believe I would be a great fit", "I am writing to express my interest", "passionate about", "eager to".
-- NO bullet points. NO formal letter structure. Keep it under 120 words.
+STRUCTURE (keep the whole email to 3-5 short sentences max):
+1. One line saying they saw the role and are keen. Be specific about the yacht name.
+2. One line about their most relevant recent experience (yacht name + role). Don't list certs unless they're specifically asked for in the job requirements.
+3. Drop the profile link casually — "Full profile's here:" or "Here's my profile:" — not "You can view my full profile and documents here:".
+4. Sign off: {first_name}
+
+BANNED — these make it sound like AI wrote it:
+- "I'm interested in the [role] position on your [yacht]" (robotic template opening)
+- "align well with your needs/requirements"
+- "I am confident that", "I believe", "I would be a great fit"
+- "I am excited to", "passionate about", "eager to"
+- "I am writing to express my interest"
+- "My [skill] skills and [skill] align with"
+- Listing multiple certifications in a row
+- Mentioning salary, location preferences, contract preferences, nationality
+- Any sentence that sounds like a LinkedIn bio
+
+GOOD example tone (DO NOT copy verbatim, just match the vibe):
+"Hey, saw the deckhand role on [Yacht] — looks great. I've been working as a deckhand on [other yacht] and have my [relevant cert] sorted. Here's my profile: [link]\n\nCheers,\n[Name]"
 
 Crew profile:
 {profile_text}
 
-Job they're applying for:
+Job:
 Role: {job.role}
 Yacht: {job.yacht}
 {('Description: ' + (job.description or '')[:400]) if job.description else ''}
