@@ -11,13 +11,13 @@
   let message = $state('')
   let messageIsError = $state(false)
   let importedJob = $state(null)
-  let extractedPreview = $state('')
+  let aiExtracted = $state(null)
 
   function resetFeedback() {
     message = ''
     messageIsError = false
     importedJob = null
-    extractedPreview = ''
+    aiExtracted = null
   }
 
   async function onTextFileChange(event) {
@@ -111,8 +111,8 @@
         return
       }
       importedJob = data.job || null
-      extractedPreview = data.extracted_text_preview || ''
-      message = 'Screenshot processed and imported.'
+      aiExtracted = data.ai_extracted || null
+      message = 'AI read the screenshot and imported the job.'
       messageIsError = false
     } catch {
       message = 'Could not reach server.'
@@ -180,8 +180,8 @@
     </article>
 
     <article class="rounded-2xl border border-white/8 bg-zinc-950 p-5">
-      <p class="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">Screenshot OCR</p>
-      <p class="mt-2 text-xs text-slate-500">Upload an image containing job details; server OCR extracts text, then imports.</p>
+      <p class="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">Screenshot</p>
+      <p class="mt-2 text-xs text-slate-500">Upload a screenshot — AI reads it directly and extracts the job in one step.</p>
 
       <label class="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-violet-400/25 bg-violet-400/8 px-3 py-1.5 text-xs font-semibold text-violet-200 transition hover:border-violet-400/40 hover:bg-violet-400/15">
         Select Screenshot
@@ -204,13 +204,18 @@
         disabled={importingImage}
         class="mt-4 rounded-lg border border-violet-400/25 bg-violet-400/8 px-4 py-2 text-xs font-bold text-violet-200 transition hover:border-violet-400/45 hover:bg-violet-400/15 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {importingImage ? 'Processing...' : 'Import from Screenshot'}
+        {importingImage ? 'AI is reading...' : 'Import from Screenshot'}
       </button>
 
-      {#if extractedPreview}
-        <div class="mt-4 rounded-lg border border-white/10 bg-black/40 p-3">
-          <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Extracted Text Preview</p>
-          <p class="whitespace-pre-wrap text-xs leading-relaxed text-slate-300">{extractedPreview}</p>
+      {#if aiExtracted}
+        <div class="mt-4 rounded-lg border border-violet-400/15 bg-violet-400/5 p-3">
+          <p class="mb-2 text-[10px] font-bold uppercase tracking-wider text-violet-400">AI Extracted</p>
+          <div class="grid gap-1 text-xs text-slate-300">
+            {#if aiExtracted.title}<p><span class="text-slate-500">Title:</span> {aiExtracted.title}</p>{/if}
+            {#if aiExtracted.role}<p><span class="text-slate-500">Role:</span> {aiExtracted.role}</p>{/if}
+            {#if aiExtracted.location}<p><span class="text-slate-500">Location:</span> {aiExtracted.location}</p>{/if}
+            {#if aiExtracted.description}<p class="mt-1 text-slate-400">{aiExtracted.description}</p>{/if}
+          </div>
         </div>
       {/if}
     </article>

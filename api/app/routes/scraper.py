@@ -147,7 +147,7 @@ def _run_import_pipeline(*, text: str, url: str):
     if ai_fields is None:
         return None
 
-    fields = _build_job_fields(ai_fields, {"url": url, "text": text})
+    fields = _build_job_fields(ai_fields, {"url": url, "text": text}, "manual")
     fields["source"] = "manual"
 
     h = _content_hash(text) if text else None
@@ -224,6 +224,32 @@ async def import_job(request: Request, payload: ImportJobRequest):
     return _shape_import_response(result)
 
 
+def _save_job_from_ai_fields(*, ai_fields: dict, url: str):
+    """Build Job row from AI-extracted fields and save to DB (dedup-aware)."""
+    from app.models import Job
+    from app.services.job_sync import _build_job_fields
+
+    fields = _build_job_fields(ai_fields, {"url": url}, "manual")
+    fields["source"] = "manual_screenshot"
+
+    db = SessionLocal()
+    try:
+        if fields.get("application_url"):
+            exists = db.query(Job.id).filter(
+                Job.application_url == fields["application_url"]
+            ).first()
+            if exists:
+                return {"duplicate": True, "id": exists[0]}
+
+        job = Job(**fields)
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return job
+    finally:
+        db.close()
+
+
 @router.post("/import-image", status_code=status.HTTP_201_CREATED)
 @_limiter.limit("20/minute")
 async def import_job_image(
@@ -231,8 +257,11 @@ async def import_job_image(
     file: UploadFile = File(...),
     url: str = Form(""),
 ):
-    """Extract text from a screenshot and import through the same AI job pipeline."""
-    from app.services.ai_client import extract_text_from_image
+    """AI reads a screenshot directly and extracts structured job fields in one pass."""
+    import json as _json
+
+    from app.services.ai_client import review_job_image
+    from app.services.ai_job_reviewer import _SYSTEM_PROMPT
 
     if not settings.OPENAI_API_KEY:
         raise HTTPException(
@@ -261,45 +290,58 @@ async def import_job_image(
             detail="Image exceeds 8 MB limit.",
         )
 
-    ocr_text = await asyncio.to_thread(
-        extract_text_from_image,
+    raw_json = await asyncio.to_thread(
+        review_job_image,
         api_key=settings.OPENAI_API_KEY,
         image_bytes=contents,
         mime_type=file.content_type or "image/png",
         model=settings.OPENAI_MODEL,
+        system_prompt=_SYSTEM_PROMPT,
     )
-    if not ocr_text or ocr_text.strip() == "NO_TEXT_FOUND":
+
+    try:
+        parsed = _json.loads(raw_json)
+    except (_json.JSONDecodeError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No readable job text found in screenshot.",
+            detail="AI could not parse the screenshot content.",
         )
 
-    final_text = ocr_text.strip()
-    if len(final_text) < 10:
+    if not parsed.get("is_job"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Extracted text is too short to import.",
+            detail="AI determined this is not a job posting.",
         )
+
+    parsed.pop("is_job", None)
 
     result = await asyncio.to_thread(
-        _run_import_pipeline,
-        text=final_text,
+        _save_job_from_ai_fields,
+        ai_fields=parsed,
         url=url.strip(),
     )
 
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="The AI determined this is not a job posting. No record was created.",
+            detail="Could not save the job. No record was created.",
         )
     if isinstance(result, dict) and result.get("duplicate"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"A job with this URL already exists (id={result['id']}).",
+            detail=f"A job with this content already exists (id={result['id']}).",
         )
+
+    log.info("Screenshot import succeeded | id=%d | title=%r", result.id, result.title)
+    metrics.increment("manual_job_imports")
 
     return {
         "ok": True,
         "job": _shape_import_response(result),
-        "extracted_text_preview": final_text[:500],
+        "ai_extracted": {
+            "title": parsed.get("title"),
+            "role": parsed.get("role"),
+            "location": parsed.get("location"),
+            "description": parsed.get("description"),
+        },
     }

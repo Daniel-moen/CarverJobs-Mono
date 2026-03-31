@@ -196,32 +196,33 @@ def call_openai(
             ) from exc
 
 
-def extract_text_from_image(
+def review_job_image(
     *,
     api_key: str,
     image_bytes: bytes,
     mime_type: str,
     model: str = "gpt-4o-mini",
+    system_prompt: str,
 ) -> str:
-    """Extract plain text from a screenshot using OpenAI vision."""
+    """Read a screenshot with AI vision and return the raw JSON string (same
+    schema as the text-based job reviewer).  One API call instead of two."""
     if not image_bytes:
         raise AIResponseError("Image bytes are empty.", crv_code="CRV-3006")
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
     data_url = f"data:{mime_type};base64,{b64}"
     messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": (
-                "Extract all job-related text from the image exactly as plain text. "
-                "Do not summarize. Keep line breaks where useful. "
-                "If there is no readable text, return exactly: NO_TEXT_FOUND"
-            ),
-        },
+        {"role": "system", "content": system_prompt},
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "Read this screenshot and extract all visible text."},
+                {
+                    "type": "text",
+                    "text": (
+                        "Read this screenshot of a yacht crew job posting. "
+                        "Analyse the visible content and return the JSON result."
+                    ),
+                },
                 {"type": "image_url", "image_url": {"url": data_url}},
             ],
         },
@@ -230,6 +231,7 @@ def extract_text_from_image(
         api_key=api_key,
         messages=messages,
         model=model,
-        max_tokens=1200,
-        temperature=0.0,
-    ).strip()
+        max_tokens=1500,
+        temperature=0.1,
+        response_format={"type": "json_object"},
+    )
