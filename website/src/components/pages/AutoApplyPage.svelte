@@ -362,15 +362,15 @@
 
 {#if draftingJob}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+    class="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto overscroll-contain bg-black/70 backdrop-blur-sm p-4"
     onclick={(e) => { if (e.target === e.currentTarget) closeDraft() }}
     onkeydown={(e) => { if (e.key === 'Escape') closeDraft() }}
     role="dialog"
     aria-modal="true"
     tabindex="-1"
   >
-    <div class="draft-panel relative w-full max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl">
-      <div class="flex items-center justify-between border-b border-white/8 px-5 py-4 sm:px-6">
+    <div class="draft-panel relative my-4 sm:my-0 w-full max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl flex flex-col max-h-[92dvh] sm:max-h-[85vh]">
+      <div class="flex-none flex items-center justify-between border-b border-white/8 px-5 py-4 sm:px-6">
         <div class="min-w-0">
           <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Draft Email</p>
           <h2 class="mt-1 truncate text-base font-bold text-white">
@@ -389,7 +389,7 @@
         </button>
       </div>
 
-      <div class="grid gap-4 px-5 py-5 sm:px-6">
+      <div class="flex-1 overflow-y-auto grid gap-4 px-5 py-5 sm:px-6">
         {#if draftLoading && !draftBody}
           <div class="flex flex-col items-center gap-3 py-8">
             <div class="h-6 w-6 rounded-full border-2 border-cyan-400/30 border-t-cyan-400 spinner"></div>
@@ -419,15 +419,14 @@
             <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Message</span>
             <textarea
               bind:value={draftBody}
-              rows="10"
-              class="rounded-lg border border-white/10 bg-black/40 px-3 py-3 text-sm leading-relaxed text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30 resize-y"
+              rows="6"
+              class="rounded-lg border border-white/10 bg-black/40 px-3 py-3 text-sm leading-relaxed text-white placeholder-slate-600 outline-none transition focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/30 resize-y min-h-[120px]"
             ></textarea>
           </label>
 
-          <!-- AI reprompt -->
           <div class="grid gap-1.5">
             <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Adjust with AI</span>
-            <div class="flex gap-2">
+            <div class="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 bind:value={draftPrompt}
@@ -453,11 +452,11 @@
       </div>
 
       {#if draftBody}
-        <div class="flex flex-wrap items-center gap-2 border-t border-white/8 px-5 py-4 sm:px-6">
+        <div class="flex-none grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center border-t border-white/8 px-5 py-4 sm:px-6">
           <button
             type="button"
             onclick={() => { window.open(buildMailto(), '_self'); trackClick('match_apply_mailto') }}
-            class="rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-400/20 hover:text-white active:scale-95"
+            class="col-span-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-5 py-2 text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-400/20 hover:text-white active:scale-95"
           >
             Open in Mail App
           </button>
@@ -471,7 +470,7 @@
           <button
             type="button"
             onclick={closeDraft}
-            class="ml-auto rounded-lg px-4 py-2 text-sm text-slate-500 transition hover:text-white"
+            class="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-500 transition hover:text-white sm:ml-auto"
           >
             Cancel
           </button>
