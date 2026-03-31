@@ -71,6 +71,8 @@
     draftPrompt = ''
     draftError = ''
     emailCopied = false
+    document.body.style.overflow = 'hidden'
+    window.scrollTo({ top: 0, behavior: 'instant' })
     await callDraftApi(job.id)
   }
 
@@ -93,6 +95,7 @@
     emailCopied = false
     draftPrompt = ''
     draftError = ''
+    document.body.style.overflow = ''
   }
 
   function openInMailClient() {

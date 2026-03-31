@@ -156,6 +156,8 @@
     draftPrompt = ''
     draftError = ''
     copiedEmail = false
+    document.body.style.overflow = 'hidden'
+    window.scrollTo({ top: 0, behavior: 'instant' })
     await callDraftApi(job.id)
   }
 
@@ -178,6 +180,7 @@
     copiedEmail = false
     draftPrompt = ''
     draftError = ''
+    document.body.style.overflow = ''
   }
 
   async function copyDraft() {
