@@ -149,17 +149,21 @@ async def interview_next(request: Request, payload: schemas.InterviewRequest):
     messages = _build_messages(system_text, payload.history, payload.user_message, limit=12)
 
     _ai_start = time.perf_counter()
+    _gpt5 = "gpt-5" in model
+    ai_payload: dict = {
+        "model": model,
+        "messages": messages,
+        "max_completion_tokens": max(1800, 4096) if _gpt5 else 450,
+        "response_format": {"type": "json_object"},
+    }
+    if not _gpt5:
+        ai_payload["temperature"] = 0.4
+
     try:
         response = await _http_client.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": 0.4,
-                "max_tokens": 450,
-                "response_format": {"type": "json_object"},
-            },
+            json=ai_payload,
         )
     except httpx.TimeoutException:
         log.error("OpenAI request timed out | model=%s", model)
@@ -256,17 +260,21 @@ async def interview_onboard(request: Request, payload: schemas.InterviewRequest)
     messages = _build_messages(system_text, payload.history, payload.user_message, limit=20, onboard=True)
 
     _ai_start = time.perf_counter()
+    _gpt5 = "gpt-5" in model
+    ai_payload: dict = {
+        "model": model,
+        "messages": messages,
+        "max_completion_tokens": max(2000, 4096) if _gpt5 else 500,
+        "response_format": {"type": "json_object"},
+    }
+    if not _gpt5:
+        ai_payload["temperature"] = 0.6
+
     try:
         response = await _http_client.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": 0.6,
-                "max_tokens": 500,
-                "response_format": {"type": "json_object"},
-            },
+            json=ai_payload,
         )
     except httpx.TimeoutException:
         log.error("Onboard OpenAI request timed out | model=%s", model)

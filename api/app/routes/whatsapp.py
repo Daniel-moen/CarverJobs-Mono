@@ -371,6 +371,79 @@ def _extract_json(text: str) -> dict:
     return {}
 
 
+def _fallback_extract(partial: dict, user_message: str) -> dict:
+    """Best-effort field extraction when the LLM call fails entirely."""
+    import re
+    updates: dict[str, str] = {}
+    text = user_message.strip()
+    if not text:
+        return updates
+
+    missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(partial.get(f, "")).strip()]
+    if not missing:
+        return updates
+
+    first_missing = missing[0]
+
+    if first_missing in ("firstName", "lastName"):
+        parts = text.split()
+        if 1 <= len(parts) <= 4 and all(p.isalpha() or p == "-" for p in parts):
+            updates["firstName"] = parts[0].title()
+            if len(parts) > 1:
+                updates["lastName"] = " ".join(parts[1:]).title()
+
+    elif first_missing == "yearsExperience":
+        m = re.search(r"(\d{1,2})", text)
+        if m:
+            updates["yearsExperience"] = m.group(1)
+
+    elif first_missing in ("salaryMin", "salaryMax"):
+        nums = re.findall(r"(\d[\d,.]*)", text.replace(" ", ""))
+        clean = [n.replace(",", "").replace(".", "") for n in nums]
+        clean = [n for n in clean if n.isdigit() and 500 <= int(n) <= 100000]
+        if len(clean) >= 2:
+            vals = sorted(int(n) for n in clean[:2])
+            updates["salaryMin"] = str(vals[0])
+            updates["salaryMax"] = str(vals[1])
+        elif len(clean) == 1:
+            updates["salaryMin"] = clean[0]
+
+    elif first_missing == "desiredRole":
+        if len(text) <= 60:
+            updates["desiredRole"] = text.title()
+
+    elif first_missing == "nationality":
+        if len(text) <= 40:
+            updates["nationality"] = text.title()
+
+    elif first_missing == "currentLocation":
+        if len(text) <= 60:
+            updates["currentLocation"] = text.title()
+
+    elif first_missing == "preferredLocations":
+        if len(text) <= 100:
+            updates["preferredLocations"] = text
+
+    elif first_missing == "contractType":
+        low = text.lower()
+        for ct in ("permanent", "seasonal", "rotational", "temporary"):
+            if ct in low:
+                updates["contractType"] = ct.title()
+                break
+        if not updates and len(text) <= 30:
+            updates["contractType"] = text.title()
+
+    elif first_missing == "certifications":
+        if len(text) <= 200:
+            updates["certifications"] = text
+
+    elif first_missing == "languages":
+        if len(text) <= 200:
+            updates["languages"] = text
+
+    return updates
+
+
 async def _call_openai(system: str, history: list, user_message: str) -> dict:
     """Call OpenAI and return parsed JSON dict."""
     messages = [{"role": "system", "content": system}]
@@ -378,16 +451,21 @@ async def _call_openai(system: str, history: list, user_message: str) -> dict:
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_message or "Begin."})
 
+    model = settings.OPENAI_MODEL
+    _gpt5 = "gpt-5" in model
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "max_completion_tokens": max(2000, 4096) if _gpt5 else 500,
+        "response_format": {"type": "json_object"},
+    }
+    if not _gpt5:
+        payload["temperature"] = 0.5
+
     resp = await _http.post(
         "https://api.openai.com/v1/chat/completions",
         headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-        json={
-            "model": settings.OPENAI_MODEL,
-            "messages": messages,
-            "temperature": 0.5,
-            "max_tokens": 500,
-            "response_format": {"type": "json_object"},
-        },
+        json=payload,
         timeout=25.0,
     )
     if resp.status_code >= 400:
@@ -398,6 +476,10 @@ async def _call_openai(system: str, history: list, user_message: str) -> dict:
     if not choices:
         return {}
     text = ((choices[0].get("message") or {}).get("content") or "").strip()
+    if not text:
+        log.error("OpenAI empty content | finish=%s | model=%s",
+                  choices[0].get("finish_reason", "?"), model)
+        return {}
     return _extract_json(text)
 
 
@@ -914,13 +996,23 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
     updates = parsed.get("updates") if isinstance(parsed.get("updates"), dict) else {}
     clean_updates = {k: str(v).strip() for k, v in updates.items() if isinstance(k, str) and v and str(v).strip()}
 
+    # When the LLM completely fails, try basic extraction from the user's message
+    # so the conversation can still make progress.
+    llm_failed = not parsed
+    if llm_failed:
+        clean_updates = _fallback_extract(partial, user_message)
+        log.warning("LLM failed — fallback extraction | updates=%s", clean_updates)
+
     partial = _apply_updates(partial, clean_updates)
 
     if not message:
         missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(partial.get(f, "")).strip()]
         if missing:
             question = _FIELD_QUESTIONS.get(missing[0], f"Could you tell me your {_FIELD_LABELS.get(missing[0], missing[0])}?")
-            message = f"Got it! {question}"
+            if clean_updates:
+                message = f"Got it, thanks! {question}"
+            else:
+                message = f"Hmm, I didn't quite catch that. {question}"
         else:
             message = "Perfect — we've got everything we need for your crew profile!"
             done = True
