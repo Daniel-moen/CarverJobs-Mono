@@ -497,7 +497,6 @@ async def draft_email(
         profile_url = f"{settings.FRONTEND_BASE_URL}/crew/{profile.profile_slug}"
 
     first_name = profile.first_name or "the applicant"
-    name = " ".join(filter(None, [profile.first_name, profile.last_name])) or "the applicant"
 
     job_history = (
         db.query(JobHistoryEntry)
@@ -557,6 +556,7 @@ Respond with JSON only. No markdown, no explanation:
                 model=settings.OPENAI_MODEL,
                 max_tokens=600,
                 temperature=0.7,
+                response_format={"type": "json_object"},
             )
             if text and text.strip():
                 break
@@ -580,10 +580,19 @@ Respond with JSON only. No markdown, no explanation:
     try:
         parsed = json.loads(text[json_start:json_end] if json_start >= 0 else text)
     except (json.JSONDecodeError, ValueError):
+        # Fallback: keep service usable even if model returns plain text.
+        parsed = {"subject": "", "body": text.strip()}
+
+    if not isinstance(parsed, dict):
         raise HTTPException(status_code=502, detail="Could not parse draft.")
+
+    subject = str(parsed.get("subject", "")).strip()
+    body = str(parsed.get("body", "")).strip()
+    if not body:
+        raise HTTPException(status_code=502, detail="AI returned an empty draft.")
 
     return DraftEmailResponse(
         to=job.contact_email or "",
-        subject=str(parsed.get("subject", f"Application: {job.role} – {job.yacht}")),
-        body=str(parsed.get("body", "")),
+        subject=subject or f"Application: {job.role} - {job.yacht}",
+        body=body,
     )

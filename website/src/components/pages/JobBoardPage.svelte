@@ -15,6 +15,7 @@
   let draftLoading = $state(false)
   let draftError = $state('')
   let draftPrompt = $state('')
+  const MAX_DRAFT_PROMPT_LEN = 500
 
   function contractLabel(job) {
     return job.contract_type ?? (job.rotation ? `Rotational (${job.rotation})` : 'Unspecified')
@@ -75,7 +76,14 @@
 
   async function repromptDraft() {
     if (!draftPrompt.trim() || !draftingJob) return
-    const instruction = draftPrompt.trim()
+    if (!emailBody.trim()) {
+      draftError = 'Generate the first draft before rewriting.'
+      return
+    }
+    const instruction = draftPrompt.trim().slice(0, MAX_DRAFT_PROMPT_LEN)
+    if (instruction.length < draftPrompt.trim().length) {
+      draftError = `Instruction is too long. Max ${MAX_DRAFT_PROMPT_LEN} characters.`
+    }
     draftPrompt = ''
     await callDraftApi(draftingJob.id, instruction, emailBody || null)
   }

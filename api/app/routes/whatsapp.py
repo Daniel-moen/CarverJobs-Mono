@@ -257,11 +257,48 @@ REQUIRED_ONBOARD_FIELDS = [
     "contractType", "salaryMin", "salaryMax", "certifications", "languages",
 ]
 
+_FIELD_LABELS: dict[str, str] = {
+    "firstName": "full name",
+    "lastName": "full name",
+    "desiredRole": "desired role",
+    "yearsExperience": "years of experience",
+    "nationality": "nationality",
+    "currentLocation": "current location",
+    "preferredLocations": "preferred work locations",
+    "contractType": "contract type",
+    "salaryMin": "salary expectations",
+    "salaryMax": "salary expectations",
+    "certifications": "certifications",
+    "languages": "languages spoken",
+}
+
+_FIELD_QUESTIONS: dict[str, str] = {
+    "firstName": "What's your full name?",
+    "lastName": "What's your full name?",
+    "desiredRole": "What role are you looking for? (e.g. Chief Stew, Bosun, Engineer, Chef)",
+    "yearsExperience": "How many years of experience do you have in yachting or maritime?",
+    "nationality": "What's your nationality?",
+    "currentLocation": "Where are you currently based?",
+    "preferredLocations": "Which regions or areas would you prefer to work in?",
+    "contractType": "What contract type suits you — Permanent, Seasonal, Rotational, or Temporary?",
+    "salaryMin": "What are your monthly salary expectations in EUR (min and max)?",
+    "salaryMax": "What are your monthly salary expectations in EUR (min and max)?",
+    "certifications": "What certifications do you hold? (STCW, ENG1, Yachtmaster, etc. — or 'none')",
+    "languages": "What languages do you speak?",
+}
+
 
 def _build_onboard_system(profile: dict) -> str:
     missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(profile.get(f, "")).strip()]
     all_done = len(missing) == 0
-    missing_text = ", ".join(missing) if missing else "none — all fields collected!"
+    seen_labels: set[str] = set()
+    readable_missing: list[str] = []
+    for f in missing:
+        label = _FIELD_LABELS.get(f, f)
+        if label not in seen_labels:
+            seen_labels.add(label)
+            readable_missing.append(label)
+    missing_text = ", ".join(readable_missing) if readable_missing else "none — all fields collected!"
     return f"""You are CARVER, a warm and professional onboarding assistant for a superyacht crew platform.
 Your sole job: collect every required profile field through natural conversation via WhatsApp.
 
@@ -894,8 +931,11 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
 
     if not message:
         missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(partial.get(f, "")).strip()]
-        message = f"Got it! {missing[0] if missing else 'Almost there'}?" if missing else "Perfect — we've got everything we need for your crew profile!"
-        if not missing:
+        if missing:
+            question = _FIELD_QUESTIONS.get(missing[0], f"Could you tell me your {_FIELD_LABELS.get(missing[0], missing[0])}?")
+            message = f"Got it! {question}"
+        else:
+            message = "Perfect — we've got everything we need for your crew profile!"
             done = True
 
     history.append({"role": "user", "content": user_message})
