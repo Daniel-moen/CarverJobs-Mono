@@ -6,14 +6,78 @@
   let sourceUrl = $state('')
   let textInput = $state('')
   let textFileName = $state('')
-  let importingText = $state(false)
-  let textMessage = $state('')
-  let textIsError = $state(false)
-  let textImportedJob = $state(null)
 
+  let textJobs = $state([])
   let imageJobs = $state([])
   let dragOver = $state(false)
   let nextId = 0
+
+  function splitTextIntoChunks(raw) {
+    return raw
+      .split(/^---+$/m)
+      .map(s => s.trim())
+      .filter(s => s.length >= 10)
+  }
+
+  const textChunkCount = $derived(splitTextIntoChunks(textInput).length)
+
+  function submitText() {
+    const chunks = splitTextIntoChunks(textInput)
+    if (!chunks.length) return
+    for (const chunk of chunks) {
+      const entry = {
+        id: nextId++,
+        label: chunk.slice(0, 60).replace(/\n/g, ' ') + (chunk.length > 60 ? '...' : ''),
+        text: chunk,
+        status: 'queued',
+        message: '',
+        job: null,
+      }
+      textJobs = [...textJobs, entry]
+      processTextChunk(entry)
+    }
+    textInput = ''
+    textFileName = ''
+  }
+
+  async function processTextChunk(entry) {
+    updateTextEntry(entry.id, { status: 'processing', message: 'AI reviewing...' })
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/scraper/import`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: entry.text, url: sourceUrl.trim() }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        updateTextEntry(entry.id, { status: 'error', message: data.detail || `Failed (${res.status})` })
+        return
+      }
+      updateTextEntry(entry.id, { status: 'success', message: 'Imported', job: data })
+    } catch {
+      updateTextEntry(entry.id, { status: 'error', message: 'Could not reach server.' })
+    }
+  }
+
+  function updateTextEntry(id, patch) {
+    textJobs = textJobs.map(e => e.id === id ? { ...e, ...patch } : e)
+  }
+
+  function dismissTextEntry(id) {
+    textJobs = textJobs.filter(e => e.id !== id)
+  }
+
+  function clearTextCompleted() {
+    textJobs = textJobs.filter(e => e.status === 'queued' || e.status === 'processing')
+  }
+
+  const textProcessing = $derived(textJobs.filter(e => e.status === 'processing').length)
+  const textSuccess = $derived(textJobs.filter(e => e.status === 'success').length)
+  const textError = $derived(textJobs.filter(e => e.status === 'error').length)
+  const textHasFinished = $derived(textJobs.some(e => e.status === 'success' || e.status === 'error'))
+
+  // ── Image handling ──
 
   function addFiles(files) {
     for (const file of files) {
@@ -54,20 +118,20 @@
     event.currentTarget.value = ''
   }
 
-  function updateEntry(id, patch) {
+  function updateImageEntry(id, patch) {
     imageJobs = imageJobs.map(e => e.id === id ? { ...e, ...patch } : e)
   }
 
-  function dismissEntry(id) {
+  function dismissImageEntry(id) {
     imageJobs = imageJobs.filter(e => e.id !== id)
   }
 
-  function clearCompleted() {
+  function clearImageCompleted() {
     imageJobs = imageJobs.filter(e => e.status === 'queued' || e.status === 'processing')
   }
 
   async function processImage(entry) {
-    updateEntry(entry.id, { status: 'processing', message: 'AI is reading...' })
+    updateImageEntry(entry.id, { status: 'processing', message: 'AI is reading...' })
     try {
       const formData = new FormData()
       formData.append('file', entry.file)
@@ -80,76 +144,38 @@
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        updateEntry(entry.id, {
-          status: 'error',
-          message: data.detail || `Failed (${res.status})`,
-        })
+        updateImageEntry(entry.id, { status: 'error', message: data.detail || `Failed (${res.status})` })
         return
       }
-      updateEntry(entry.id, {
+      updateImageEntry(entry.id, {
         status: 'success',
         message: 'Imported',
         job: data.job || null,
         aiExtracted: data.ai_extracted || null,
       })
     } catch {
-      updateEntry(entry.id, { status: 'error', message: 'Could not reach server.' })
+      updateImageEntry(entry.id, { status: 'error', message: 'Could not reach server.' })
     }
   }
+
+  const imgProcessing = $derived(imageJobs.filter(e => e.status === 'processing').length)
+  const imgSuccess = $derived(imageJobs.filter(e => e.status === 'success').length)
+  const imgError = $derived(imageJobs.filter(e => e.status === 'error').length)
+  const imgHasFinished = $derived(imageJobs.some(e => e.status === 'success' || e.status === 'error'))
 
   async function onTextFileChange(event) {
     const file = event.currentTarget.files?.[0]
     if (!file) return
     if (!(file.name || '').toLowerCase().endsWith('.txt')) {
-      textMessage = 'Please upload a .txt file.'
-      textIsError = true
       event.currentTarget.value = ''
       return
     }
     try {
       textInput = await file.text()
       textFileName = file.name
-      textMessage = `Loaded ${file.name}`
-      textIsError = false
-    } catch {
-      textMessage = 'Could not read the file.'
-      textIsError = true
-    } finally {
-      event.currentTarget.value = ''
-    }
+    } catch { /* ignore */ }
+    finally { event.currentTarget.value = '' }
   }
-
-  async function submitText() {
-    const trimmed = textInput.trim()
-    if (!trimmed) { textMessage = 'Add job text first.'; textIsError = true; return }
-    importingText = true
-    textMessage = ''
-    textIsError = false
-    textImportedJob = null
-    try {
-      const res = await apiFetch(`${API_BASE_URL}/scraper/import`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: trimmed, url: sourceUrl.trim() }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) { textMessage = data.detail || `Import failed (${res.status})`; textIsError = true; return }
-      textImportedJob = data
-      textMessage = 'Job imported successfully.'
-      textIsError = false
-    } catch {
-      textMessage = 'Could not reach server.'
-      textIsError = true
-    } finally {
-      importingText = false
-    }
-  }
-
-  const processingCount = $derived(imageJobs.filter(e => e.status === 'processing').length)
-  const successCount = $derived(imageJobs.filter(e => e.status === 'success').length)
-  const errorCount = $derived(imageJobs.filter(e => e.status === 'error').length)
-  const hasFinished = $derived(imageJobs.some(e => e.status === 'success' || e.status === 'error'))
 </script>
 
 <section class="grid gap-4">
@@ -157,7 +183,7 @@
     <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Admin Tool</p>
     <h1 class="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">Job Ingest</h1>
     <p class="mt-2 text-sm text-slate-500">
-      Import jobs by pasting text or dropping screenshots. AI reads images directly and imports valid jobs automatically.
+      Import jobs by pasting text or dropping screenshots. Multiple jobs in one text block? Separate them with <code class="rounded bg-white/8 px-1.5 py-0.5 text-cyan-300">---</code>
     </p>
   </header>
 
@@ -177,8 +203,10 @@
 
     <!-- Text input -->
     <article class="rounded-2xl border border-white/8 bg-zinc-950 p-5">
-      <p class="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">Manual Text</p>
-      <p class="mt-2 text-xs text-slate-500">Paste job text directly, or load a .txt file.</p>
+      <p class="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">Text</p>
+      <p class="mt-2 text-xs text-slate-500">
+        Paste one or many jobs. Use <code class="rounded bg-white/8 px-1 py-0.5 text-cyan-300">---</code> on its own line between jobs.
+      </p>
 
       <div class="mt-3">
         <label class="inline-flex cursor-pointer items-center rounded-lg border border-cyan-400/25 bg-cyan-400/8 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:border-cyan-400/40 hover:bg-cyan-400/15">
@@ -193,28 +221,82 @@
       <textarea
         bind:value={textInput}
         rows="10"
-        placeholder="Paste raw job post text..."
-        class="mt-3 w-full rounded-lg border border-white/12 bg-black/40 px-3 py-2 text-sm text-slate-100 outline-none ring-cyan-300/70 transition focus:border-cyan-200/40 focus:ring"
+        placeholder={"Paste job text here...\n---\nAnother job post here...\n---\nAnd another..."}
+        class="mt-3 w-full rounded-lg border border-white/12 bg-black/40 px-3 py-2 font-mono text-sm text-slate-100 outline-none ring-cyan-300/70 transition focus:border-cyan-200/40 focus:ring"
       ></textarea>
 
       <div class="mt-3 flex items-center justify-between gap-3">
-        <p class="text-[11px] text-slate-600">{textInput.trim().length} chars</p>
+        <p class="text-[11px] text-slate-600">
+          {textInput.trim().length} chars · {textChunkCount} job{textChunkCount !== 1 ? 's' : ''} detected
+        </p>
         <button
           type="button"
           onclick={submitText}
-          disabled={importingText}
+          disabled={textChunkCount === 0}
           class="rounded-lg border border-cyan-400/25 bg-cyan-400/8 px-4 py-2 text-xs font-bold text-cyan-200 transition hover:border-cyan-400/45 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {importingText ? 'Importing...' : 'Import from Text'}
+          Import {textChunkCount} Job{textChunkCount !== 1 ? 's' : ''}
         </button>
       </div>
 
-      {#if textMessage}
-        <p class="mt-3 text-xs {textIsError ? 'text-rose-300' : 'text-emerald-300'}">{textMessage}</p>
-      {/if}
-      {#if textImportedJob}
-        <div class="mt-3 rounded-lg border border-emerald-400/15 bg-emerald-400/5 p-3 text-xs text-slate-300">
-          <span class="text-slate-500">#{textImportedJob.id}</span> {textImportedJob.title ?? '—'} — <span class="text-emerald-300">{textImportedJob.role ?? '—'}</span>
+      {#if textJobs.length > 0}
+        <div class="mt-3 flex items-center justify-between gap-3">
+          <div class="flex flex-wrap gap-2 text-[11px]">
+            {#if textProcessing > 0}
+              <span class="flex items-center gap-1 text-cyan-300">
+                <span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400"></span>
+                {textProcessing} reviewing
+              </span>
+            {/if}
+            {#if textSuccess > 0}
+              <span class="text-emerald-300">{textSuccess} imported</span>
+            {/if}
+            {#if textError > 0}
+              <span class="text-rose-300">{textError} rejected</span>
+            {/if}
+          </div>
+          {#if textHasFinished}
+            <button type="button" onclick={clearTextCompleted} class="text-[11px] text-slate-600 transition hover:text-slate-400">Clear finished</button>
+          {/if}
+        </div>
+
+        <div class="mt-2 max-h-[320px] space-y-2 overflow-y-auto">
+          {#each textJobs as entry (entry.id)}
+            <div class="rounded-lg border p-3 transition-colors
+              {entry.status === 'processing' ? 'border-cyan-400/20 bg-cyan-400/5' :
+               entry.status === 'success' ? 'border-emerald-400/15 bg-emerald-400/5' :
+               entry.status === 'error' ? 'border-rose-400/15 bg-rose-400/5' :
+               'border-white/8 bg-white/[0.02]'}"
+            >
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                  {#if entry.status === 'processing'}
+                    <span class="h-2 w-2 flex-none animate-pulse rounded-full bg-cyan-400"></span>
+                  {:else if entry.status === 'success'}
+                    <span class="h-2 w-2 flex-none rounded-full bg-emerald-400"></span>
+                  {:else if entry.status === 'error'}
+                    <span class="h-2 w-2 flex-none rounded-full bg-rose-400"></span>
+                  {:else}
+                    <span class="h-2 w-2 flex-none rounded-full bg-slate-600"></span>
+                  {/if}
+                  <span class="truncate text-xs text-slate-400">{entry.label}</span>
+                </div>
+                <button type="button" onclick={() => dismissTextEntry(entry.id)} class="flex-none text-slate-600 transition hover:text-slate-400" aria-label="Dismiss">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+
+              {#if entry.status === 'processing'}
+                <p class="mt-1.5 text-[11px] text-cyan-300 animate-pulse">{entry.message}</p>
+              {:else if entry.status === 'error'}
+                <p class="mt-1.5 text-[11px] text-rose-300">{entry.message}</p>
+              {:else if entry.status === 'success' && entry.job}
+                <div class="mt-1.5 text-[11px] text-slate-300">
+                  <span class="text-slate-500">#{entry.job.id}</span> {entry.job.title ?? '—'} — <span class="text-emerald-300">{entry.job.role ?? '—'}</span>
+                </div>
+              {/if}
+            </div>
+          {/each}
         </div>
       {/if}
     </article>
@@ -252,27 +334,21 @@
       {#if imageJobs.length > 0}
         <div class="mt-3 flex items-center justify-between gap-3">
           <div class="flex flex-wrap gap-2 text-[11px]">
-            {#if processingCount > 0}
+            {#if imgProcessing > 0}
               <span class="flex items-center gap-1 text-violet-300">
                 <span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400"></span>
-                {processingCount} processing
+                {imgProcessing} processing
               </span>
             {/if}
-            {#if successCount > 0}
-              <span class="text-emerald-300">{successCount} imported</span>
+            {#if imgSuccess > 0}
+              <span class="text-emerald-300">{imgSuccess} imported</span>
             {/if}
-            {#if errorCount > 0}
-              <span class="text-rose-300">{errorCount} rejected</span>
+            {#if imgError > 0}
+              <span class="text-rose-300">{imgError} rejected</span>
             {/if}
           </div>
-          {#if hasFinished}
-            <button
-              type="button"
-              onclick={clearCompleted}
-              class="text-[11px] text-slate-600 transition hover:text-slate-400"
-            >
-              Clear finished
-            </button>
+          {#if imgHasFinished}
+            <button type="button" onclick={clearImageCompleted} class="text-[11px] text-slate-600 transition hover:text-slate-400">Clear finished</button>
           {/if}
         </div>
 
@@ -298,15 +374,8 @@
                   <span class="truncate text-xs text-slate-300">{entry.file.name}</span>
                   <span class="flex-none text-[10px] text-slate-600">{Math.ceil(entry.file.size / 1024)} KB</span>
                 </div>
-                <button
-                  type="button"
-                  onclick={() => dismissEntry(entry.id)}
-                  class="flex-none text-slate-600 transition hover:text-slate-400"
-                  aria-label="Dismiss"
-                >
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                <button type="button" onclick={() => dismissImageEntry(entry.id)} class="flex-none text-slate-600 transition hover:text-slate-400" aria-label="Dismiss">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
 
