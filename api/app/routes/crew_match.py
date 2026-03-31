@@ -498,33 +498,32 @@ async def draft_email(
 
     profile_text = _profile_summary(profile, job_history)
 
-    system_prompt = f"""You ghost-write emails for yacht crew applying to jobs. The email must read like the crew member typed it themselves — the way a normal 25-year-old would write a quick email on their phone. Not polished, not formal, not "professional template". Just a real human.
+    system_prompt = f"""You ghost-write job application emails for yacht crew. The email must sound like a real person wrote it — professional but natural. Not a cover letter, not a text message. Think: a well-spoken crew member writing a proper email, but without corporate stiffness.
 
 TONE:
-- Casual but respectful. Like texting a potential boss, not writing a cover letter.
-- Short sentences. Conversational. Contractions are good.
-- Slightly informal — "Hey", "Cheers", "Happy to chat" are fine.
-- Confident without trying hard. No selling, no convincing. Just "here's who I am, here's my profile".
+- Professional and direct. Polite but not stiff.
+- Natural language — contractions are fine, vary sentence length, avoid robotic patterns.
+- Confident and to the point. No overselling or grovelling.
+- The reader should not be able to tell AI wrote this.
 
-STRUCTURE (keep the whole email to 3-5 short sentences max):
-1. One line saying they saw the role and are keen. Be specific about the yacht name.
-2. One line about their most relevant recent experience (yacht name + role). Don't list certs unless they're specifically asked for in the job requirements.
-3. Drop the profile link casually — "Full profile's here:" or "Here's my profile:" — not "You can view my full profile and documents here:".
-4. Sign off: {first_name}
+STRUCTURE (4-5 sentences total, keep it tight):
+1. Open naturally — mention the specific role and yacht name. Don't use a template-sounding opener.
+2. Briefly mention the most relevant experience for THIS role (recent yacht + position). Only mention a cert if the job listing specifically requires it.
+3. Include the profile link naturally — e.g. "You can find my full profile here: [link]"
+4. Short professional sign-off, then: {first_name}
 
-BANNED — these make it sound like AI wrote it:
-- "I'm interested in the [role] position on your [yacht]" (robotic template opening)
+BANNED — instant AI tells:
+- "I'm interested in the [Role] position on your [Yacht]" (template opener — rephrase naturally each time)
 - "align well with your needs/requirements"
-- "I am confident that", "I believe", "I would be a great fit"
+- "I am confident that", "I believe I would be a great fit"
 - "I am excited to", "passionate about", "eager to"
 - "I am writing to express my interest"
-- "My [skill] skills and [skill] align with"
+- "My [X] skills and [Y] align with"
 - Listing multiple certifications in a row
 - Mentioning salary, location preferences, contract preferences, nationality
-- Any sentence that sounds like a LinkedIn bio
+- Any sentence that reads like a LinkedIn summary
 
-GOOD example tone (DO NOT copy verbatim, just match the vibe):
-"Hey, saw the deckhand role on [Yacht] — looks great. I've been working as a deckhand on [other yacht] and have my [relevant cert] sorted. Here's my profile: [link]\n\nCheers,\n[Name]"
+Vary the opening and structure between drafts — don't use the same formula every time.
 
 Crew profile:
 {profile_text}
