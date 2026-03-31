@@ -43,13 +43,15 @@ html {
   }
 }
 
-/* Mobile performance: reduce motion, improve scroll */
+/* Mobile performance: reduce motion, improve scroll, prevent horizontal overflow */
 @media screen and (max-width: 768px) {
   * {
     scroll-behavior: auto;
   }
   main {
     contain: layout style;
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 }
 

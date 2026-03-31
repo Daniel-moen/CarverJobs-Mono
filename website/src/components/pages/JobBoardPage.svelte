@@ -149,7 +149,7 @@
   onMount(() => loadJobs())
 </script>
 
-<section class="grid gap-4">
+<section class="grid gap-4 overflow-hidden">
   <!-- Header -->
   <header class="relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 px-4 py-4 sm:px-6 sm:py-5">
     <div class="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-sky-400/10 blur-3xl header-orb"></div>
@@ -183,7 +183,7 @@
           <div class="flex items-start justify-between gap-4">
             <div class="flex-1 space-y-2">
               <div class="skeleton h-3 w-20 rounded-full"></div>
-              <div class="skeleton h-5 w-48 rounded-lg"></div>
+              <div class="skeleton h-5 w-48 max-w-full rounded-lg"></div>
               <div class="skeleton h-3.5 w-32 rounded-full"></div>
             </div>
             <div class="skeleton h-6 w-16 rounded-full"></div>
@@ -221,7 +221,7 @@
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {#each jobs as job, i}
         <article
-          class="job-card group relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-cyan-400/22 hover:shadow-[0_18px_50px_-22px_rgba(34,211,238,0.3)]"
+          class="job-card group relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 p-4 sm:p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-cyan-400/22 hover:shadow-[0_18px_50px_-22px_rgba(34,211,238,0.3)] min-w-0"
           class:visible={mounted}
           style="--mx:50%; --my:50%; --delay:{i * 55}ms;"
           onmousemove={handlePointerMove}
@@ -252,42 +252,41 @@
               </span>
             </div>
 
-            <!-- Info grid -->
-            <div class="mt-4 grid grid-cols-2 gap-2">
-              <div class="rounded-xl border border-white/8 bg-black/30 p-3">
+            <div class="mt-4 grid grid-cols-2 gap-1.5 sm:gap-2">
+              <div class="rounded-xl border border-white/8 bg-black/30 p-2.5 sm:p-3 overflow-hidden">
                 <p class="text-[9px] font-bold uppercase tracking-wider text-slate-600">Timeline</p>
-                <p class="mt-1.5 text-xs text-slate-300">
+                <p class="mt-1.5 text-xs text-slate-300 truncate">
                   <span class="text-slate-600">Start</span> {job.start_date ?? 'TBC'}
                 </p>
-                <p class="mt-0.5 text-xs text-slate-300">
+                <p class="mt-0.5 text-xs text-slate-300 truncate">
                   <span class="text-slate-600">End</span> {endDateLabel(job)}
                 </p>
               </div>
-              <div class="rounded-xl border border-white/8 bg-black/30 p-3">
+              <div class="rounded-xl border border-white/8 bg-black/30 p-2.5 sm:p-3 overflow-hidden">
                 <p class="text-[9px] font-bold uppercase tracking-wider text-slate-600">Compensation</p>
-                <p class="mt-1.5 text-sm font-semibold text-cyan-300">{salaryLabel(job)}</p>
+                <p class="mt-1.5 text-sm font-semibold text-cyan-300 truncate">{salaryLabel(job)}</p>
                 <p class="mt-0.5 text-[10px] text-slate-500 truncate">{job.tips_bonus ?? 'Tips TBC'}</p>
               </div>
-              <div class="rounded-xl border border-white/8 bg-black/30 p-3">
+              <div class="rounded-xl border border-white/8 bg-black/30 p-2.5 sm:p-3 overflow-hidden">
                 <p class="text-[9px] font-bold uppercase tracking-wider text-slate-600">Contract</p>
-                <p class="mt-1.5 text-xs text-slate-300">{contractLabel(job)}</p>
-                <p class="mt-0.5 text-[10px] text-slate-500">
+                <p class="mt-1.5 text-xs text-slate-300 truncate">{contractLabel(job)}</p>
+                <p class="mt-0.5 text-[10px] text-slate-500 truncate">
                   {job.contract_type?.toLowerCase() === 'permanent' ? 'Long-term' : 'Fixed cycle'}
                 </p>
               </div>
-              <div class="rounded-xl border border-white/8 bg-black/30 p-3">
+              <div class="rounded-xl border border-white/8 bg-black/30 p-2.5 sm:p-3 overflow-hidden">
                 <p class="text-[9px] font-bold uppercase tracking-wider text-slate-600">Vessel</p>
-                <p class="mt-1.5 text-xs text-slate-300">
+                <p class="mt-1.5 text-xs text-slate-300 truncate">
                   {job.yacht_type ?? 'N/A'}{job.yacht_length_m ? ` · ${job.yacht_length_m}m` : ''}
                 </p>
-                <p class="mt-0.5 text-[10px] text-slate-500">{job.vessel_flag ?? 'Flag TBC'}</p>
+                <p class="mt-0.5 text-[10px] text-slate-500 truncate">{job.vessel_flag ?? 'Flag TBC'}</p>
               </div>
             </div>
 
             <!-- Optional description -->
             {#if job.description}
-              <div class="mt-3 rounded-xl border border-white/6 bg-black/20 px-3 py-2.5">
-                <p class="line-clamp-2 text-xs leading-relaxed text-slate-400">{job.description}</p>
+              <div class="mt-3 rounded-xl border border-white/6 bg-black/20 px-3 py-2.5 overflow-hidden">
+                <p class="line-clamp-2 text-xs leading-relaxed text-slate-400 break-words">{job.description}</p>
               </div>
             {/if}
 

@@ -137,7 +137,7 @@
   }
 </script>
 
-<section class="grid gap-5" class:visible={mounted}>
+<section class="grid gap-5 overflow-hidden" class:visible={mounted}>
 
   {#if loading}
     <div class="rounded-2xl border border-white/8 bg-zinc-950 p-8 sm:p-10 text-center">
@@ -179,7 +179,7 @@
     {#each matches as m, i (m.job?.id ?? i)}
       {@const job = m.job}
       {@const compat = Math.round(m.compatibility ?? 0)}
-      <article class="rounded-xl border border-white/8 bg-zinc-950 p-4 sm:p-5">
+      <article class="rounded-xl border border-white/8 bg-zinc-950 p-4 sm:p-5 overflow-hidden min-w-0">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="min-w-0">
             <h3 class="text-base font-bold text-white truncate">{job.title}</h3>
@@ -210,7 +210,7 @@
         </div>
 
         {#if m.reason}
-          <p class="mt-2.5 text-sm leading-relaxed text-slate-400">{m.reason}</p>
+          <p class="mt-2.5 text-sm leading-relaxed text-slate-400 break-words">{m.reason}</p>
         {/if}
 
         {#if m.strengths?.length || m.gaps?.length}
