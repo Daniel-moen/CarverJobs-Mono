@@ -30,7 +30,8 @@ def verify_password(raw_password: str, hashed: str) -> bool:
     """Verify a plaintext password against a bcrypt hash."""
     try:
         return bcrypt.checkpw(raw_password.encode("utf-8"), hashed.encode("utf-8"))
-    except Exception:
+    except (ValueError, TypeError) as exc:
+        log.warning("Password verification failed | error=%s", exc)
         return False
 
 

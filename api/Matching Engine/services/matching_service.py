@@ -1,8 +1,6 @@
 import json
 import logging
-import os
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from interfaces import BatchStrategy, LLMClient
@@ -12,19 +10,6 @@ from models.user import UserProfile
 from services.prompt_builder import PromptBuilder
 
 log = logging.getLogger("carver.matching_engine")
-
-# #region agent log
-_DBG_LOG = os.environ.get("DEBUG_LOG_PATH", "")
-def _dbg(location, message, data=None, hypothesis_id=""):
-    if not _DBG_LOG:
-        return
-    try:
-        import pathlib; pathlib.Path(_DBG_LOG).parent.mkdir(parents=True, exist_ok=True)
-        with open(_DBG_LOG, "a") as f:
-            f.write(json.dumps({"timestamp": int(time.time()*1000), "location": location, "message": message, "data": data or {}, "hypothesisId": hypothesis_id}) + "\n")
-    except Exception:
-        pass
-# #endregion
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
 
@@ -59,9 +44,6 @@ class MatchingService:
     def match_user_to_jobs(self, user: UserProfile, jobs: list[JobPosting]) -> list[JobMatch]:
         batches = self._batch_strategy.split(jobs)
         log.info("Starting match | user_id=%s | jobs=%d | batches=%d", user.user_id, len(jobs), len(batches))
-        # #region agent log
-        _dbg("matching_service.py:match_user_to_jobs", "entry", {"user_id": user.user_id, "desired_role": user.desired_role, "job_count": len(jobs), "batch_count": len(batches), "job_ids": [j.job_id for j in jobs][:20]}, "H-A")
-        # #endregion
 
         valid_job_ids = {job.job_id for job in jobs}
         all_matches: list[JobMatch] = []
@@ -108,13 +90,7 @@ class MatchingService:
         prompt = self._prompt_builder.build(user, batch)
         response_text = self._llm_client.generate(prompt)
         log.info("Batch %d raw response length=%d | %s", batch_index, len(response_text or ""), (response_text or "")[:400])
-        # #region agent log
-        _dbg("matching_service.py:_process_batch", f"batch {batch_index} raw LLM response", {"length": len(response_text or ""), "response_preview": (response_text or "")[:600]}, "H-C")
-        # #endregion
         matches = self._parse_matches(response_text, valid_job_ids)
-        # #region agent log
-        _dbg("matching_service.py:_process_batch", f"batch {batch_index} parsed matches", {"match_count": len(matches), "details": [{"job_id": m.job_id, "matched": m.matched, "compatibility": m.compatibility, "reason": m.reason[:80]} for m in matches]}, "H-E")
-        # #endregion
         log.info("Batch %d parsed | matches=%d | matched_true=%d | avg_compat=%.0f",
                  batch_index, len(matches),
                  sum(1 for m in matches if m.matched),
@@ -127,21 +103,12 @@ class MatchingService:
             payload = json.loads(cleaned)
         except json.JSONDecodeError:
             log.error("Model did not return valid JSON | raw=%r", (response_text or "")[:500])
-            # #region agent log
-            _dbg("matching_service.py:_parse_matches", "JSON parse FAILED", {"raw_preview": (response_text or "")[:300], "cleaned_preview": cleaned[:300]}, "H-C")
-            # #endregion
             return []
 
         raw_matches = payload.get("matched_jobs", [])
         if not isinstance(raw_matches, list):
             log.error("matched_jobs is not a list | type=%s", type(raw_matches).__name__)
-            # #region agent log
-            _dbg("matching_service.py:_parse_matches", "matched_jobs not a list", {"type": type(raw_matches).__name__, "keys": list(payload.keys())[:10]}, "H-C")
-            # #endregion
             return []
-        # #region agent log
-        _dbg("matching_service.py:_parse_matches", "parsed payload", {"payload_keys": list(payload.keys()), "matched_jobs_count": len(raw_matches), "valid_job_ids": sorted(list(valid_job_ids))[:20] if valid_job_ids else [], "raw_job_ids": [str(item.get("job_id","")) for item in raw_matches if isinstance(item, dict)][:20]}, "H-D")
-        # #endregion
 
         matches: list[JobMatch] = []
         for item in raw_matches:

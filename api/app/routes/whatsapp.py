@@ -82,8 +82,10 @@ def _wa_configured() -> bool:
 def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
     """Verify X-Hub-Signature-256 from Meta."""
     if not settings.META_APP_SECRET:
-        # If secret not set, skip verification (development only).
-        log.warning("META_APP_SECRET not set — skipping signature verification")
+        if settings.APP_ENV == "production":
+            log.error("META_APP_SECRET not set in production — rejecting webhook")
+            return False
+        log.warning("META_APP_SECRET not set — skipping signature verification (dev only)")
         return True
     if not signature_header.startswith("sha256="):
         return False

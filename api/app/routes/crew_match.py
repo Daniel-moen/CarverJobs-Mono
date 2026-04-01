@@ -427,15 +427,15 @@ async def get_session(
         try:
             strengths = json.loads(r.strengths) if r.strengths else []
         except json.JSONDecodeError:
-            pass
+            log.warning("Corrupt strengths JSON | session=%d | job=%d", session_id, r.job_id)
         try:
             gaps = json.loads(r.gaps) if r.gaps else []
         except json.JSONDecodeError:
-            pass
+            log.warning("Corrupt gaps JSON | session=%d | job=%d", session_id, r.job_id)
         try:
             factor_scores = json.loads(r.factor_scores) if r.factor_scores else {}
         except json.JSONDecodeError:
-            pass
+            log.warning("Corrupt factor_scores JSON | session=%d | job=%d", session_id, r.job_id)
 
         result_items.append(MatchSessionResultItem(
             job=_job_to_schema(db_job),

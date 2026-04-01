@@ -44,7 +44,9 @@ def _init_database() -> None:
         ensure_default_user()
         log.info("Database initialised successfully")
     except Exception:
-        log.exception("Database initialisation failed — app will start but DB may be unavailable")
+        log.critical("Database initialisation failed — app will start but ALL DB operations will fail")
+        if settings.APP_ENV == "production":
+            raise
 
 
 async def metrics_loop() -> None:
