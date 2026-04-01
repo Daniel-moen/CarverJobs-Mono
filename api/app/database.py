@@ -117,6 +117,9 @@ def run_migrations() -> None:
     cp_cols = _existing("crew_profiles")
     _add("crew_profiles", "sex", "VARCHAR(20)", cp_cols)
 
+    doc_cols = _existing("documents")
+    _add("documents", "scanned_text", "TEXT", doc_cols)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS match_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

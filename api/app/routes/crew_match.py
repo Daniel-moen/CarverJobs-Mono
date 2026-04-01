@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import metrics
 from app.database import get_db
 from app.logger import get_logger
-from app.models import CrewProfile, Job, JobHistoryEntry, MatchSession, MatchSessionResult
+from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult
 from app.schemas import (
     CrewMatchJob,
     CrewMatchV2Response,
@@ -44,6 +44,7 @@ router = APIRouter(prefix="/matching", tags=["crew-matching"])
 def _profile_to_candidate(
     p: CrewProfile,
     job_history: list[JobHistoryEntry] | None = None,
+    document_summary: str = "",
 ) -> CandidateProfile:
     certs: list[str] = []
     if p.certifications:
@@ -84,6 +85,7 @@ def _profile_to_candidate(
         languages=langs,
         bio=p.bio or "",
         job_history=history,
+        document_summary=document_summary,
     )
 
 
@@ -142,7 +144,20 @@ def _job_to_schema(j: Job) -> CrewMatchJob:
     )
 
 
-def _profile_summary(p: CrewProfile, job_history: list | None = None) -> str:
+def _get_document_summary(db: Session, user_key: str) -> str:
+    """Concatenate all scanned document texts for a user into one summary."""
+    docs = (
+        db.query(Document)
+        .filter(Document.user_key == user_key, Document.scanned_text.isnot(None))
+        .all()
+    )
+    if not docs:
+        return ""
+    parts = [f"[{d.doc_type.upper()}] {d.scanned_text}" for d in docs if d.scanned_text]
+    return "\n\n".join(parts)
+
+
+def _profile_summary(p: CrewProfile, job_history: list | None = None, document_summary: str = "") -> str:
     parts = []
     if p.first_name or p.last_name:
         parts.append(f"Name: {' '.join(filter(None, [p.first_name, p.last_name]))}")
@@ -166,6 +181,8 @@ def _profile_summary(p: CrewProfile, job_history: list | None = None) -> str:
                 line += f" | {e.start_date or '?'} – {e.end_date or 'present'}"
             history_lines.append(line)
         parts.append("Work history:\n" + "\n".join(history_lines))
+    if document_summary:
+        parts.append(f"Document insights:\n{document_summary[:500]}")
     return "\n".join(parts) if parts else "No profile details available."
 
 
@@ -220,7 +237,8 @@ async def find_match(
         .all()
     )
 
-    candidate = _profile_to_candidate(profile, job_history)
+    doc_summary = _get_document_summary(db, user_key)
+    candidate = _profile_to_candidate(profile, job_history, document_summary=doc_summary)
     job_summaries = [_job_to_summary(j) for j in all_jobs]
     jobs_by_id = {j.id: j for j in all_jobs}
     total_job_count = len(all_jobs)
@@ -496,7 +514,8 @@ async def draft_email(
         .all()
     )
 
-    profile_text = _profile_summary(profile, job_history)
+    doc_summary = _get_document_summary(db, user_key)
+    profile_text = _profile_summary(profile, job_history, document_summary=doc_summary)
 
     system_prompt = f"""You ghost-write job application emails for yacht crew. The email must sound like a real person wrote it — professional but natural. Not a cover letter, not a text message. Think: a well-spoken crew member writing a proper email, but without corporate stiffness.
 

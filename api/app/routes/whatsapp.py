@@ -661,6 +661,12 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         for e in job_history_entries
     ]
 
+    doc_parts = []
+    for d in db.query(Document).filter(Document.user_key == phone_number, Document.scanned_text.isnot(None)).all():
+        if d.scanned_text:
+            doc_parts.append(f"[{d.doc_type.upper()}] {d.scanned_text}")
+    doc_summary = "\n\n".join(doc_parts)
+
     candidate = CandidateProfile(
         user_key=phone_number,
         first_name=profile.first_name or "",
@@ -680,6 +686,7 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         languages=langs,
         bio=profile.bio or "",
         job_history=jh,
+        document_summary=doc_summary,
     )
 
     job_summaries = [

@@ -95,6 +95,8 @@ class Document(Base):
   original_name = Column(String(260), nullable=False)
   # UUID-based filename stored on disk — never the original name.
   stored_name = Column(String(80), nullable=False)
+  # AI-extracted summary of the document contents (set once after upload).
+  scanned_text = Column(Text, nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
   __table_args__ = (

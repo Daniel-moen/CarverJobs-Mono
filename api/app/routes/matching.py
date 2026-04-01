@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app import flags, metrics, schemas
 from app.database import get_db
 from app.logger import get_logger
-from app.models import CrewProfile, Job, JobHistoryEntry, User
+from app.models import CrewProfile, Document, Job, JobHistoryEntry, User
 from app.security import require_admin_session
 from app.services.matching_engine import (
     CandidateProfile,
@@ -26,7 +26,7 @@ log = get_logger("carver.matching")
 router = APIRouter(prefix="/matching", tags=["matching"], dependencies=[Depends(require_admin_session)])
 
 
-def _user_to_candidate(user: User, profile: CrewProfile | None = None, job_history: list[JobHistoryEntry] | None = None) -> CandidateProfile:
+def _user_to_candidate(user: User, profile: CrewProfile | None = None, job_history: list[JobHistoryEntry] | None = None, document_summary: str = "") -> CandidateProfile:
     """Build a CandidateProfile from a User row, optionally enriched with CrewProfile data."""
     certs: list[str] = []
     langs: list[str] = []
@@ -70,6 +70,7 @@ def _user_to_candidate(user: User, profile: CrewProfile | None = None, job_histo
         languages=langs,
         bio=bio,
         job_history=history,
+        document_summary=document_summary,
     )
 
 
@@ -132,7 +133,14 @@ async def run_match(request: Request, payload: schemas.MatchingRequest, db: Sess
             .all()
         )
 
-    candidate = _user_to_candidate(user, profile, job_history)
+    user_key = str(user.id)
+    doc_parts = []
+    for d in db.query(Document).filter(Document.user_key == user_key, Document.scanned_text.isnot(None)).all():
+        if d.scanned_text:
+            doc_parts.append(f"[{d.doc_type.upper()}] {d.scanned_text}")
+    doc_summary = "\n\n".join(doc_parts)
+
+    candidate = _user_to_candidate(user, profile, job_history, document_summary=doc_summary)
     job_summaries = [_job_to_summary(j) for j in all_jobs]
 
     log.info("Running match | user_id=%d | jobs=%d", payload.user_id, len(all_jobs))

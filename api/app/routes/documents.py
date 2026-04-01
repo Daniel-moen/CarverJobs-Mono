@@ -1,14 +1,14 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app import metrics
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.logger import get_logger
 from app.models import Document
 from app.security import require_session
@@ -43,6 +43,33 @@ def _get_doc(db: Session, user_key: str, doc_type: str) -> Document | None:
     )
 
 
+def _scan_document_background(doc_id: int, file_path: Path, doc_type: str) -> None:
+    """Run AI document scan in a background task and persist the result."""
+    from app.services.document_scanner import scan_document
+
+    try:
+        summary = scan_document(file_path, doc_type)
+    except Exception:
+        log.exception("Background document scan failed | doc_id=%d | doc_type=%s", doc_id, doc_type)
+        return
+
+    if not summary:
+        return
+
+    db = SessionLocal()
+    try:
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc:
+            doc.scanned_text = summary
+            db.commit()
+            log.info("Document scanned | doc_id=%d | doc_type=%s | len=%d", doc_id, doc_type, len(summary))
+    except Exception:
+        log.exception("Failed to persist scan result | doc_id=%d", doc_id)
+        db.rollback()
+    finally:
+        db.close()
+
+
 @router.get("")
 def list_documents(
     session: dict = Depends(require_session),
@@ -51,7 +78,11 @@ def list_documents(
     user_key = session["sub"]
     docs = db.query(Document).filter(Document.user_key == user_key).all()
     return {
-        d.doc_type: {"original_name": d.original_name, "uploaded_at": d.created_at.isoformat()}
+        d.doc_type: {
+            "original_name": d.original_name,
+            "uploaded_at": d.created_at.isoformat(),
+            "scanned": d.scanned_text is not None,
+        }
         for d in docs
     }
 
@@ -61,6 +92,7 @@ def list_documents(
 async def upload_document(
     request: Request,
     doc_type: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session: dict = Depends(require_session),
     db: Session = Depends(get_db),
@@ -90,11 +122,13 @@ async def upload_document(
         old_file.unlink(missing_ok=True)
         existing.original_name = file.filename or "upload"
         existing.stored_name = f"{uuid.uuid4().hex}{suffix}"
+        existing.scanned_text = None
         (upload_dir / existing.stored_name).write_bytes(contents)
         db.commit()
         db.refresh(existing)
         metrics.increment("doc_uploads")
         log.info("Document replaced | user=%s | doc_type=%s | size=%d", user_key, doc_type, len(contents))
+        background_tasks.add_task(_scan_document_background, existing.id, upload_dir / existing.stored_name, doc_type)
         return {"ok": True, "original_name": existing.original_name}
 
     stored_name = f"{uuid.uuid4().hex}{suffix}"
@@ -110,6 +144,7 @@ async def upload_document(
     db.refresh(doc)
     metrics.increment("doc_uploads")
     log.info("Document uploaded | user=%s | doc_type=%s | size=%d", user_key, doc_type, len(contents))
+    background_tasks.add_task(_scan_document_background, doc.id, upload_dir / stored_name, doc_type)
     return {"ok": True, "original_name": doc.original_name}
 
 

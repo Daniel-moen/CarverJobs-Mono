@@ -49,6 +49,7 @@ class CandidateProfile:
     languages: list[str] = field(default_factory=list)
     bio: str = ""
     job_history: list[dict[str, str]] = field(default_factory=list)
+    document_summary: str = ""
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,7 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
         "languages": candidate.languages,
         "bio": candidate.bio[:500] if candidate.bio else "",
         "job_history": candidate.job_history[:8],
+        "document_summary": candidate.document_summary[:800] if candidate.document_summary else "",
     }
 
     jobs_list = []
@@ -201,7 +203,7 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
                 "Same-department roles at different seniority levels ARE valid matches — score them 30-65 depending on experience gap.",
                 "Dual roles like Deck/Stew should match BOTH Deck and Interior departments.",
                 f"Set matched=true if compatibility >= {MATCH_THRESHOLD}. Be GENEROUS — if the candidate could reasonably apply and have a shot, mark it matched.",
-                "Use the candidate's bio and job_history as the primary evidence of capability. If their history shows they can do the job, score high.",
+                "Use the candidate's bio, job_history, and document_summary as the primary evidence of capability. If their history or documents show they can do the job, score high.",
                 "Do NOT over-penalise for missing certifications unless the job explicitly requires them for safety-critical roles (Captain, Engineer, Officer).",
                 "Location flexibility: yachting is a global industry — location mismatches should only reduce by 3-5 points, not disqualify.",
                 "Pay mismatches: only reduce if the job pay is drastically (>50%) below the candidate's minimum.",
