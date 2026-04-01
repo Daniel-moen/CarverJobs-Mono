@@ -174,13 +174,4 @@ def run_migrations() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_m_payment_id ON subscriptions (m_payment_id)"
     )
 
-    # One-time wipe: reset all WhatsApp sessions so users re-onboard with gender field.
-    # Safe to remove this block after it has run once in production.
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM whatsapp_sessions")
-    if cur.fetchone()[0] > 0:
-      conn.execute("DELETE FROM whatsapp_sessions")
-      conn.execute("DELETE FROM whatsapp_magic_tokens")
-      conn.execute("DELETE FROM crew_profiles WHERE user_key LIKE '+%' OR user_key GLOB '[0-9]*'")
-
     conn.commit()
