@@ -1,8 +1,15 @@
 <script>
+  import { onMount, tick } from 'svelte'
   import { API_BASE_URL, apiFetch } from '../../config/api'
   import { trackClick, trackFunnel } from '../../config/analytics'
 
-  let { onSignUpSuccess = () => {}, onGoToLogin = () => {} } = $props()
+  let {
+    onSignUpSuccess = () => {},
+    onGoToLogin = () => {},
+    googleEnabled = false,
+    googleClientId = '',
+    onGoogleSignIn = () => {},
+  } = $props()
 
   let fullName = $state('')
   let email = $state('')
@@ -11,6 +18,58 @@
   let isSubmitting = $state(false)
   let errorMessage = $state('')
   let fieldErrors = $state({ fullName: '', email: '', password: '', confirmPassword: '' })
+  let isGoogleLoading = $state(false)
+  let googleRenderError = $state('')
+  const browserWindow = /** @type {any} */ (window)
+
+  function loadGoogleScript() {
+    return new Promise((resolve, reject) => {
+      if (browserWindow.google?.accounts?.id) { resolve(); return }
+      const script = document.createElement('script')
+      script.src = 'https://accounts.google.com/gsi/client'
+      script.async = true
+      script.defer = true
+      script.onload = () => resolve()
+      script.onerror = () => reject(new Error('Failed to load Google script'))
+      document.head.appendChild(script)
+    })
+  }
+
+  async function initGoogleButton() {
+    if (!googleEnabled || !googleClientId) return
+    isGoogleLoading = true
+    googleRenderError = ''
+    try {
+      await loadGoogleScript()
+      await tick()
+      const target = document.getElementById('google-signup-button')
+      if (!target || !browserWindow.google?.accounts?.id) return
+      browserWindow.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: async (response) => {
+          if (!response?.credential) {
+            errorMessage = 'Google sign-in did not return a credential.'
+            return
+          }
+          onGoogleSignIn(response.credential)
+        },
+      })
+      target.innerHTML = ''
+      browserWindow.google.accounts.id.renderButton(target, {
+        theme: 'outline',
+        size: 'large',
+        shape: 'pill',
+        text: 'signup_with',
+        width: 280,
+      })
+    } catch {
+      googleRenderError = 'Google sign-in unavailable right now.'
+    } finally {
+      isGoogleLoading = false
+    }
+  }
+
+  onMount(() => { initGoogleButton() })
 
   function validateFields() {
     const errors = { fullName: '', email: '', password: '', confirmPassword: '' }
@@ -161,6 +220,19 @@
         {isSubmitting ? 'Creating account...' : 'Create Account'}
       </button>
     </form>
+
+    {#if googleEnabled && googleClientId}
+      <div class="mt-6 border-t border-white/10 pt-5">
+        <p class="mb-3 text-xs uppercase tracking-wide text-slate-500">Or sign up with Google</p>
+        <div id="google-signup-button"></div>
+        {#if isGoogleLoading}
+          <p class="mt-2 text-xs text-slate-500">Loading Google sign-in...</p>
+        {/if}
+        {#if googleRenderError}
+          <p class="mt-2 text-xs text-rose-300">{googleRenderError}</p>
+        {/if}
+      </div>
+    {/if}
 
     {#if errorMessage}
       <p class="mt-4 text-sm text-rose-300">{errorMessage}</p>

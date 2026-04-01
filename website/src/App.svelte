@@ -446,6 +446,19 @@
     </main>
   {:else if !isAuthenticated && showSignup}
     <SignUpPage
+      {googleEnabled}
+      {googleClientId}
+      onGoogleSignIn={async (token) => {
+        await loginWithGoogleToken(token)
+        if (isAuthenticated) {
+          showSignup = false
+          trackFunnel('signup_complete', { label: 'google' })
+          showOnboarding = checkOnboardingNeeded()
+          if (!showOnboarding) showDocsReminder = checkDocsReminder()
+          currentPage = 'auto-apply'
+          history.replaceState({ page: 'auto-apply' }, '', '/')
+        }
+      }}
       onSignUpSuccess={() => {
         showSignup = false
         isAuthenticated = true
