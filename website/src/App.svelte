@@ -453,6 +453,7 @@
         if (isAuthenticated) {
           showSignup = false
           trackFunnel('signup_complete', { label: 'google' })
+          try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
           showOnboarding = checkOnboardingNeeded()
           if (!showOnboarding) showDocsReminder = checkDocsReminder()
           currentPage = 'auto-apply'
@@ -464,6 +465,7 @@
         isAuthenticated = true
         hasActiveSession = true
         trackFunnel('signup_complete', { label: 'email' })
+        try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
         showOnboarding = checkOnboardingNeeded()
         if (!showOnboarding) showDocsReminder = checkDocsReminder()
         currentPage = 'auto-apply'

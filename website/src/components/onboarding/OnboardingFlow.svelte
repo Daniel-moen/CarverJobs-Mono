@@ -108,7 +108,7 @@
   function mergeUpdates(updates) {
     if (!updates || typeof updates !== 'object') return
     const allowed = [
-      'firstName', 'lastName', 'desiredRole', 'yearsExperience', 'nationality',
+      'firstName', 'lastName', 'sex', 'desiredRole', 'yearsExperience', 'nationality',
       'currentLocation', 'preferredLocations', 'contractType', 'salaryMin',
       'salaryMax', 'certifications', 'languages',
     ]
@@ -150,7 +150,7 @@
 
   // All required fields must be present for the AI to signal done
   const REQUIRED_FIELDS = [
-    'firstName', 'lastName', 'desiredRole', 'yearsExperience',
+    'firstName', 'lastName', 'sex', 'desiredRole', 'yearsExperience',
     'nationality', 'currentLocation', 'preferredLocations',
     'contractType', 'salaryMin', 'salaryMax', 'certifications', 'languages',
   ]

@@ -71,16 +71,18 @@ Current profile:
 Review the conversation history carefully. Do NOT repeat questions or topics already covered.
 
 Return strict JSON only:
-{{"message": "your next question or brief acknowledgment + question", "updates": {{"desiredRole": "", "preferredLocations": "", "contractType": "", "rotationPreference": "", "availableFrom": "", "salaryMin": "", "salaryMax": "", "languages": "", "certifications": "", "bio": ""}}}}
+{{"message": "your next question or brief acknowledgment + question", "updates": {{"sex": "", "desiredRole": "", "preferredLocations": "", "contractType": "", "rotationPreference": "", "availableFrom": "", "salaryMin": "", "salaryMax": "", "languages": "", "certifications": "", "bio": ""}}}}
 
 Rules:
 - Only fill update fields if the user clearly provided that info.
 - Keep values short and clean.
-- Do not invent personal facts."""
+- Do not invent personal facts.
+- For "sex", ONLY use one of: "male", "female", "other", "prefer_not_to_say". Map the user's answer to the closest value.
+- If the user's gender/sex is not yet in their profile, ask about it early in the conversation."""
 
 
 REQUIRED_ONBOARD_FIELDS = [
-    "firstName", "lastName", "desiredRole", "yearsExperience",
+    "firstName", "lastName", "sex", "desiredRole", "yearsExperience",
     "nationality", "currentLocation", "preferredLocations",
     "contractType", "salaryMin", "salaryMax", "certifications", "languages",
 ]
@@ -104,18 +106,19 @@ Still missing: {missing_text}
 Review the conversation history carefully. Do NOT re-ask questions already answered.
 Ask about fields in this order when missing:
   1. firstName + lastName (ask together: "What's your full name?")
-  2. desiredRole (e.g. Chief Stew, Bosun, Engineer, Chef, Captain)
-  3. yearsExperience (years in yachting or maritime)
-  4. nationality
-  5. currentLocation (city / country they're based in now)
-  6. preferredLocations (regions or areas they want to work)
-  7. contractType (Permanent, Seasonal, Rotational, or Temporary)
-  8. salaryMin + salaryMax (ask together: monthly EUR expectations)
-  9. certifications (STCW, ENG1, Yachtmaster, etc. — can say "none" if applicable)
-  10. languages spoken
+  2. sex (Male, Female, Other, or Prefer not to say)
+  3. desiredRole (e.g. Chief Stew, Bosun, Engineer, Chef, Captain)
+  4. yearsExperience (years in yachting or maritime)
+  5. nationality
+  6. currentLocation (city / country they're based in now)
+  7. preferredLocations (regions or areas they want to work)
+  8. contractType (Permanent, Seasonal, Rotational, or Temporary)
+  9. salaryMin + salaryMax (ask together: monthly EUR expectations)
+  10. certifications (STCW, ENG1, Yachtmaster, etc. — can say "none" if applicable)
+  11. languages spoken
 
 Rules:
-- ONLY set "done": true when the missing fields list is empty (all 12 fields collected).
+- ONLY set "done": true when the missing fields list is empty (all 13 fields collected).
 - Do NOT set "done": true if any field is still missing.
 - One question at a time — keep replies short, warm and conversational.
 - Only populate update fields when the user has clearly provided that info.
@@ -125,7 +128,9 @@ Rules:
 - If the user wants to skip a field, set it to "unknown" so it counts as filled.
 
 Return strict JSON only:
-{{"message": "your conversational reply + next question (or warm wrap-up if done)", "done": {str(all_done).lower()}, "updates": {{"firstName": "", "lastName": "", "desiredRole": "", "yearsExperience": "", "nationality": "", "currentLocation": "", "preferredLocations": "", "contractType": "", "salaryMin": "", "salaryMax": "", "certifications": "", "languages": ""}}}}"""
+{{"message": "your conversational reply + next question (or warm wrap-up if done)", "done": {str(all_done).lower()}, "updates": {{"firstName": "", "lastName": "", "sex": "", "desiredRole": "", "yearsExperience": "", "nationality": "", "currentLocation": "", "preferredLocations": "", "contractType": "", "salaryMin": "", "salaryMax": "", "certifications": "", "languages": ""}}}}
+
+For "sex", ONLY use one of: "male", "female", "other", "prefer_not_to_say". Map the user's answer to the closest value."""
 
 
 @router.post("/next", response_model=schemas.InterviewResponse)
@@ -342,6 +347,7 @@ async def interview_onboard(request: Request, payload: schemas.InterviewRequest)
         fallback_map = {
             "firstName": "Could you tell me your full name?",
             "lastName": "Could you tell me your last name?",
+            "sex": "How should we list your gender? (Male, Female, Other, or Prefer not to say)",
             "desiredRole": "What role are you looking for on a yacht?",
             "yearsExperience": "How many years of experience do you have?",
             "nationality": "What's your nationality?",

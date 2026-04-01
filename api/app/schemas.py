@@ -111,6 +111,7 @@ class UserBase(APIModel):
     nationality: OptShort = None
     years_experience: Annotated[Optional[int], Field(default=None, ge=0, le=80)] = None
     current_location: OptShort = None
+    gender: Annotated[Optional[str], Field(default=None, max_length=20)] = None
     is_active: bool = True
     is_subscribed: bool = False
 
@@ -141,6 +142,7 @@ class UserUpdate(APIModel):
     nationality: OptShort = None
     years_experience: Annotated[Optional[int], Field(default=None, ge=0, le=80)] = None
     current_location: OptShort = None
+    gender: Annotated[Optional[str], Field(default=None, max_length=20)] = None
     password: Annotated[Optional[str], Field(default=None, min_length=8, max_length=256)] = None
     is_active: Optional[bool] = None
     is_subscribed: Optional[bool] = None

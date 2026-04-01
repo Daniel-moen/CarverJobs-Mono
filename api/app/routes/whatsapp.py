@@ -259,45 +259,48 @@ def _save_session(session: WhatsAppSession, db: Session, history: list, partial_
 # ── AI helpers ────────────────────────────────────────────────────────────────
 
 REQUIRED_ONBOARD_FIELDS = [
-    "firstName", "lastName", "desiredRole", "yearsExperience",
+    "firstName", "lastName", "sex", "desiredRole", "yearsExperience",
     "nationality", "currentLocation", "preferredLocations",
     "contractType", "salaryMin", "salaryMax", "certifications", "languages",
 ]
 
 _FIELD_LABELS: dict[str, str] = {
-    "firstName": "full name",
-    "lastName": "full name",
-    "desiredRole": "desired role",
-    "yearsExperience": "years of experience",
+    "firstName": "name",
+    "lastName": "name",
+    "sex": "gender",
+    "desiredRole": "dream role",
+    "yearsExperience": "experience",
     "nationality": "nationality",
-    "currentLocation": "current location",
-    "preferredLocations": "preferred work locations",
-    "contractType": "contract type",
-    "salaryMin": "salary expectations",
-    "salaryMax": "salary expectations",
-    "certifications": "certifications",
-    "languages": "languages spoken",
+    "currentLocation": "where you're based",
+    "preferredLocations": "preferred cruising grounds",
+    "contractType": "contract preference",
+    "salaryMin": "salary range",
+    "salaryMax": "salary range",
+    "certifications": "certs & tickets",
+    "languages": "languages",
 }
 
 _FIELD_QUESTIONS: dict[str, str] = {
-    "firstName": "What's your full name?",
-    "lastName": "What's your full name?",
-    "desiredRole": "What role are you looking for? (e.g. Chief Stew, Bosun, Engineer, Chef)",
-    "yearsExperience": "How many years of experience do you have in yachting or maritime?",
-    "nationality": "What's your nationality?",
-    "currentLocation": "Where are you currently based?",
-    "preferredLocations": "Which regions or areas would you prefer to work in?",
-    "contractType": "What contract type suits you — Permanent, Seasonal, Rotational, or Temporary?",
-    "salaryMin": "What are your monthly salary expectations in EUR (min and max)?",
-    "salaryMax": "What are your monthly salary expectations in EUR (min and max)?",
-    "certifications": "What certifications do you hold? (STCW, ENG1, Yachtmaster, etc. — or 'none')",
-    "languages": "What languages do you speak?",
+    "firstName": "First things first — what's your full name? 🪪",
+    "lastName": "And your surname? 🪪",
+    "sex": "How should we list your gender? (Male, Female, Other, or Prefer not to say)",
+    "desiredRole": "What's your dream role on board? ⚓ (e.g. Chief Stew, Bosun, Engineer, Chef, Deckhand…)",
+    "yearsExperience": "How many years have you been in yachting or maritime? Even a rough number works! 🕐",
+    "nationality": "What's your nationality? 🌍",
+    "currentLocation": "Where are you based right now? City & country 📍",
+    "preferredLocations": "Which cruising grounds are you keen on? 🗺️ (Med, Caribbean, PNW, Middle East, etc.)",
+    "contractType": "What kind of contract suits you best — *Permanent*, *Seasonal*, *Rotational*, or *Temporary*? 📋",
+    "salaryMin": "What's your monthly salary range in EUR? 💰 (e.g. 3000–5000)",
+    "salaryMax": "And the top end of your salary range in EUR? 💰",
+    "certifications": "What certs & tickets do you hold? 🏅 (STCW, ENG1, Yachtmaster, PYA, etc. — or just say 'none yet')",
+    "languages": "Last one — what languages do you speak? 🗣️",
 }
 
 
 def _build_onboard_system(profile: dict) -> str:
     missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(profile.get(f, "")).strip()]
     all_done = len(missing) == 0
+    filled = len(REQUIRED_ONBOARD_FIELDS) - len(missing)
     seen_labels: set[str] = set()
     readable_missing: list[str] = []
     for f in missing:
@@ -306,58 +309,76 @@ def _build_onboard_system(profile: dict) -> str:
             seen_labels.add(label)
             readable_missing.append(label)
     missing_text = ", ".join(readable_missing) if readable_missing else "none — all fields collected!"
-    return f"""You are CARVER, a warm and professional onboarding assistant for a superyacht crew platform.
-Your sole job: collect every required profile field through natural conversation via WhatsApp.
+    return f"""You are CARVER — an energetic, knowledgeable crew agent who lives and breathes superyachts.
+You're chatting on WhatsApp to build a new crew member's profile. Think of yourself as a friendly Chief Stew or Bosun welcoming someone to the fleet.
 
-Profile collected so far:
+Your vibe: warm, upbeat, uses maritime lingo naturally (crew, vessel, galley, bridge, charter season, Med, etc.). You celebrate each answer with a short reaction before the next question — keep it genuine, not robotic.
+
+Profile so far ({filled}/{len(REQUIRED_ONBOARD_FIELDS)} fields):
 {json.dumps(profile, ensure_ascii=True)}
 
 Still missing: {missing_text}
 
-Review the conversation history carefully. Do NOT re-ask questions already answered.
+Review the conversation history. NEVER re-ask something already answered.
 Ask about fields in this order when missing:
-  1. firstName + lastName (ask together: "What's your full name?")
-  2. desiredRole (e.g. Chief Stew, Bosun, Engineer, Chef, Captain)
-  3. yearsExperience (years in yachting or maritime)
-  4. nationality
-  5. currentLocation (city / country they're based in now)
-  6. preferredLocations (regions or areas they want to work)
-  7. contractType (Permanent, Seasonal, Rotational, or Temporary)
-  8. salaryMin + salaryMax (ask together: monthly EUR expectations)
-  9. certifications (STCW, ENG1, Yachtmaster, etc. — can say "none" if applicable)
-  10. languages spoken
+  1. firstName + lastName (ask together)
+  2. sex (Male, Female, Other, or Prefer not to say)
+  3. desiredRole (e.g. Chief Stew, Bosun, Engineer, Chef, Captain, Deckhand)
+  4. yearsExperience (years in yachting or maritime)
+  5. nationality
+  6. currentLocation (city / country)
+  7. preferredLocations (cruising grounds: Med, Caribbean, etc.)
+  8. contractType (Permanent, Seasonal, Rotational, or Temporary)
+  9. salaryMin + salaryMax (ask together: monthly EUR)
+  10. certifications (STCW, ENG1, Yachtmaster, PYA, etc.)
+  11. languages spoken
 
-Rules:
-- ONLY set "done": true when the missing fields list is empty (all 12 fields collected).
-- One question at a time — keep replies short, warm and conversational.
-- Use yachting/maritime language where natural (crew, vessel, yacht, deck, etc).
-- Only populate update fields when the user has clearly provided that info.
+Style rules for WhatsApp:
+- Use *bold* for emphasis (WhatsApp markdown).
+- Use emojis naturally but don't overdo it — 1-2 per message max.
+- Keep messages punchy (2-4 sentences). WhatsApp is a chat, not an email.
+- React to their answer first ("Nice!", "Solid experience!", "Love the Med!") then ask the next thing.
+- When nearly done, build excitement ("Almost there!", "One more and you're set!").
+- When all done, celebrate big — they just joined the fleet.
+
+Data rules:
+- ONLY set "done": true when ALL 13 fields are collected (missing list is empty).
+- Only populate update fields when the user clearly provided that info.
 - Do not invent or assume any facts.
 - Keep values short and clean (e.g. nationality: "British", contractType: "Seasonal").
 - For salaryMin/salaryMax use numeric strings only (e.g. "4000", "6000").
 - If the user wants to skip a field, set it to "unknown" so it counts as filled.
 
 Return strict JSON only:
-{{"message": "your conversational reply + next question (or warm wrap-up if done)", "done": {str(all_done).lower()}, "updates": {{"firstName": "", "lastName": "", "desiredRole": "", "yearsExperience": "", "nationality": "", "currentLocation": "", "preferredLocations": "", "contractType": "", "salaryMin": "", "salaryMax": "", "certifications": "", "languages": ""}}}}"""
+{{"message": "your reply", "done": {str(all_done).lower()}, "updates": {{"firstName": "", "lastName": "", "sex": "", "desiredRole": "", "yearsExperience": "", "nationality": "", "currentLocation": "", "preferredLocations": "", "contractType": "", "salaryMin": "", "salaryMax": "", "certifications": "", "languages": ""}}}}
+
+For "sex", ONLY use one of: "male", "female", "other", "prefer_not_to_say". Map the user's answer to the closest value."""
 
 
 def _build_interview_system(profile: dict) -> str:
-    return f"""You are CARVER Interview AI. Ask one concise, practical question at a time.
-Your goal: learn candidate preferences for superyacht jobs and suggest profile updates.
+    return f"""You are CARVER — a sharp, friendly crew agent on WhatsApp who knows the superyacht industry inside out.
+You're doing a quick interview to fine-tune this crew member's preferences so the matching engine can find them the best gigs.
 
 Current profile:
 {json.dumps(profile, ensure_ascii=True)}
 
-Review conversation history carefully. Do NOT repeat questions already covered.
+Review conversation history carefully. NEVER repeat questions already covered.
+
+Style:
+- WhatsApp-native: punchy messages, *bold* for emphasis, 1-2 emojis per message.
+- React to answers naturally ("Love it!", "Good to know.") before your next question.
+- Use yachting lingo (charter season, cruising grounds, rotation, vessel, galley, bridge, etc.).
+- Keep it conversational — 2-3 sentences max.
 
 Return strict JSON only:
-{{"message": "your next question or brief acknowledgment + question", "updates": {{"desiredRole": "", "preferredLocations": "", "contractType": "", "rotationPreference": "", "availableFrom": "", "salaryMin": "", "salaryMax": "", "languages": "", "certifications": "", "bio": ""}}}}
+{{"message": "your reply", "updates": {{"sex": "", "desiredRole": "", "preferredLocations": "", "contractType": "", "rotationPreference": "", "availableFrom": "", "salaryMin": "", "salaryMax": "", "languages": "", "certifications": "", "bio": ""}}}}
 
 Rules:
 - Only fill update fields if the user clearly provided that info.
 - Keep values short and clean.
-- Use yachting/maritime language where natural.
-- Do not invent personal facts."""
+- Do not invent personal facts.
+- For "sex", ONLY use one of: "male", "female", "other", "prefer_not_to_say". Map the user's answer to the closest value.
+- If the user's gender/sex is not yet in their profile, ask about it early in the conversation."""
 
 
 def _extract_json(text: str) -> dict:
@@ -398,6 +419,15 @@ def _fallback_extract(partial: dict, user_message: str) -> dict:
             updates["firstName"] = parts[0].title()
             if len(parts) > 1:
                 updates["lastName"] = " ".join(parts[1:]).title()
+
+    elif first_missing == "sex":
+        low = text.lower().strip()
+        for val in ("male", "female", "other"):
+            if val in low:
+                updates["sex"] = val
+                break
+        if not updates and ("prefer" in low or "skip" in low or "rather not" in low):
+            updates["sex"] = "prefer_not_to_say"
 
     elif first_missing == "yearsExperience":
         m = re.search(r"(\d{1,2})", text)
@@ -504,7 +534,7 @@ def _save_profile_to_db(phone_number: str, partial: dict, db: Session) -> None:
     """Upsert CrewProfile from the WhatsApp partial profile dict."""
     existing = db.query(CrewProfile).filter(CrewProfile.user_key == phone_number).first()
     field_map = {
-        "firstName": "first_name", "lastName": "last_name",
+        "firstName": "first_name", "lastName": "last_name", "sex": "sex",
         "desiredRole": "desired_role", "yearsExperience": "years_experience",
         "nationality": "nationality", "currentLocation": "current_location",
         "preferredLocations": "preferred_locations", "contractType": "contract_type",
@@ -780,8 +810,10 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
 # ── Onboarding flow ───────────────────────────────────────────────────────────
 
 _FALLBACK_GREETING = (
-    "Ahoy! 👋 Welcome aboard CARVER — your superyacht crew platform. "
-    "Let's build your crew profile in a few quick questions. What's your full name?"
+    "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
+    "I'm going to build your crew profile in a quick chat — takes about 2 minutes "
+    "and gets you in front of recruiters and vessels straight away.\n\n"
+    "Let's start with the basics — what's your *full name*? 🪪"
 )
 
 
@@ -821,14 +853,20 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
 
     if not message:
         missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(partial.get(f, "")).strip()]
+        filled = len(REQUIRED_ONBOARD_FIELDS) - len(missing)
         if missing:
             question = _FIELD_QUESTIONS.get(missing[0], f"Could you tell me your {_FIELD_LABELS.get(missing[0], missing[0])}?")
             if clean_updates:
-                message = f"Got it, thanks! {question}"
+                _acks = ["Nice one! ✅", "Got it, thanks! 👍", "Solid — noted! ✅", "Great stuff! 🙌"]
+                ack = _acks[filled % len(_acks)]
+                if filled >= 9:
+                    message = f"{ack} Almost there — just a couple more! {question}"
+                else:
+                    message = f"{ack} {question}"
             else:
-                message = f"Hmm, I didn't quite catch that. {question}"
+                message = f"Hmm, didn't quite catch that — no worries! {question}"
         else:
-            message = "Perfect — we've got everything we need for your crew profile!"
+            message = "That's a wrap — your crew profile is *complete*! 🎉"
             done = True
 
     history.append({"role": "user", "content": user_message})
@@ -839,12 +877,13 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
         _save_session(wa_session, db, history, partial, mode="chat")
         metrics.increment("onboard_completed")
         link = _make_magic_link(wa_session.phone_number, db)
+        name = partial.get("firstName", "crew")
         message += (
-            f"\n\n🎉 *You're all set!*\n\n"
-            f"Your crew profile is saved. Tap below to upload your CV, passport, STCW & certs — "
-            f"recruiters love a complete file and it helps you stand out:\n\n"
+            f"\n\n🎉 *Welcome to the fleet, {name}!*\n\n"
+            f"Your crew profile is live and ready to match with vessels. "
+            f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
-            f"_Link expires in 30 minutes._"
+            f"_Link expires in 30 min. Type *help* anytime to see what I can do for you._ ⚡"
         )
     else:
         _save_session(wa_session, db, history, partial)

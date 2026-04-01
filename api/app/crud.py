@@ -59,6 +59,7 @@ def create_user(db: Session, payload: schemas.UserCreate):
     nationality=payload.nationality,
     years_experience=payload.years_experience,
     current_location=payload.current_location,
+    gender=payload.gender,
     is_active=payload.is_active,
     password_hash=hash_password(payload.password),
   )

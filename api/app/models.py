@@ -72,6 +72,7 @@ class User(Base):
   nationality = Column(String(80), nullable=True)
   years_experience = Column(Integer, nullable=True)
   current_location = Column(String(120), nullable=True)
+  gender = Column(String(20), nullable=True)
   password_hash = Column(String(256), nullable=False)
   is_active = Column(Boolean, nullable=False, default=True)
   is_subscribed = Column(Boolean, nullable=False, default=False)
