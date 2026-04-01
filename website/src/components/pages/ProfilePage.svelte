@@ -14,7 +14,7 @@
   let uploadError = $state('')
 
   let profile = $state({
-    firstName: '', lastName: '', phone: '',
+    firstName: '', lastName: '', sex: '', phone: '',
     nationality: '', currentLocation: '', desiredRole: '',
     contractType: '', preferredLocations: '', rotationPreference: '',
     yearsExperience: '', availableFrom: '', salaryMin: '', salaryMax: '',
@@ -53,7 +53,7 @@
       if (saved) {
         const parsed = JSON.parse(saved)
         const stringFields = [
-          'firstName','lastName','nationality','currentLocation','desiredRole',
+          'firstName','lastName','sex','nationality','currentLocation','desiredRole',
           'contractType','preferredLocations','rotationPreference','yearsExperience',
           'availableFrom','salaryMin','salaryMax','certifications','languages','bio',
         ]
@@ -75,7 +75,7 @@
       if (!data.profile) return
       profileSlug = data.profile.profile_slug ?? ''
       const fieldMap = {
-        first_name: 'firstName', last_name: 'lastName', phone: 'phone',
+        first_name: 'firstName', last_name: 'lastName', sex: 'sex', phone: 'phone',
         nationality: 'nationality', current_location: 'currentLocation',
         desired_role: 'desiredRole', contract_type: 'contractType',
         preferred_locations: 'preferredLocations', rotation_preference: 'rotationPreference',
@@ -196,6 +196,7 @@
       const body = {
         first_name: profile.firstName || null,
         last_name: profile.lastName || null,
+        sex: profile.sex || null,
         phone: profile.phone || null,
         nationality: profile.nationality || null,
         current_location: profile.currentLocation || null,
@@ -296,7 +297,7 @@
   // ── AI Interview ──
   function buildInterviewProfilePayload() {
     return {
-      desiredRole: profile.desiredRole, contractType: profile.contractType,
+      sex: profile.sex, desiredRole: profile.desiredRole, contractType: profile.contractType,
       preferredLocations: profile.preferredLocations, rotationPreference: profile.rotationPreference,
       availableFrom: profile.availableFrom, salaryMin: profile.salaryMin, salaryMax: profile.salaryMax,
       yearsExperience: profile.yearsExperience, languages: profile.languages,
@@ -306,7 +307,7 @@
 
   function mergeSuggestedUpdates(updates) {
     if (!updates || typeof updates !== 'object') return
-    const allowedKeys = ['desiredRole','preferredLocations','contractType','rotationPreference','availableFrom','salaryMin','salaryMax','languages','certifications','bio']
+    const allowedKeys = ['sex','desiredRole','preferredLocations','contractType','rotationPreference','availableFrom','salaryMin','salaryMax','languages','certifications','bio']
     const clean = {}
     for (const key of allowedKeys) {
       const value = updates[key]
@@ -491,6 +492,16 @@
         <label class="field-group">
           <span class="field-lbl">Last name</span>
           <input class="field-inp" bind:value={profile.lastName} placeholder="Carter" />
+        </label>
+        <label class="field-group">
+          <span class="field-lbl">Gender</span>
+          <select class="field-inp" bind:value={profile.sex}>
+            <option value="">Select...</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
         </label>
         <label class="field-group">
           <span class="field-lbl">Phone</span>
