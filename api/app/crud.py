@@ -1,3 +1,5 @@
+import secrets
+
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -59,6 +61,21 @@ def create_user(db: Session, payload: schemas.UserCreate):
     current_location=payload.current_location,
     is_active=payload.is_active,
     password_hash=hash_password(payload.password),
+  )
+  db.add(user)
+  db.commit()
+  db.refresh(user)
+  return user
+
+
+def create_google_user(db: Session, email: str, full_name: str):
+  """Create a crew user for Google login with an unusable random password."""
+  user = models.User(
+    email=email.lower().strip(),
+    full_name=full_name.strip() or email.split("@")[0],
+    role="crew",
+    is_active=True,
+    password_hash=hash_password(secrets.token_urlsafe(32)),
   )
   db.add(user)
   db.commit()

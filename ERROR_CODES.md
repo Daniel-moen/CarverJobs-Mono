@@ -54,7 +54,7 @@ CRV-XYYY
 | `CRV-2005` | Admin access required | Your session does not have admin privileges. |
 | `CRV-2006` | CSRF validation failed | The CSRF token is missing or does not match. Reload the page and try again. |
 | `CRV-2007` | Google login unavailable / token invalid | Google OAuth is not configured or the token could not be verified. Check `GOOGLE_OAUTH_CLIENT_ID` in your `.env`. |
-| `CRV-2008` | Google account not in allowlist | The Google email is not in `GOOGLE_ALLOWED_EMAILS` or does not match `GOOGLE_ALLOWED_DOMAIN`. |
+| `CRV-2008` | Google account not allowed | The Google email is unverified, or it does not match `GOOGLE_ALLOWED_EMAILS` / `GOOGLE_ALLOWED_DOMAIN` when those restrictions are configured. |
 
 ---
 

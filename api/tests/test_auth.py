@@ -53,6 +53,31 @@ def test_google_login_disabled(auth_client):
     assert resp.status_code == 503
 
 
+def test_google_login_success_creates_crew_user(auth_client, monkeypatch):
+    monkeypatch.setattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "google-client-id.apps.googleusercontent.com")
+    monkeypatch.setattr(settings, "GOOGLE_REQUIRE_VERIFIED_EMAIL", True)
+    monkeypatch.setattr(settings, "GOOGLE_ALLOWED_EMAILS", [])
+    monkeypatch.setattr(settings, "GOOGLE_ALLOWED_DOMAIN", "")
+
+    def _fake_verify(_token, _request, _aud, **_kwargs):
+        return {
+            "email": "crew@example.com",
+            "email_verified": True,
+            "name": "Crew User",
+        }
+
+    monkeypatch.setattr("app.routes.auth.id_token.verify_oauth2_token", _fake_verify)
+
+    resp = auth_client.post("/auth/google", json={"id_token": "valid-token"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["user"]["email"] == "crew@example.com"
+    assert body["user"]["role"] == "crew"
+    assert body["user"]["provider"] == "google"
+    assert settings.SESSION_COOKIE_NAME in resp.cookies
+
+
 def test_logout(auth_client):
     # Log in first to get a cookie.
     login = auth_client.post(

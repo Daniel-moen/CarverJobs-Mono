@@ -69,10 +69,7 @@ def _check_database() -> dict:
 
 
 def _check_google() -> dict:
-    configured = bool(
-        settings.GOOGLE_OAUTH_CLIENT_ID
-        and (settings.GOOGLE_ALLOWED_EMAILS or settings.GOOGLE_ALLOWED_DOMAIN)
-    )
+    configured = bool(settings.GOOGLE_OAUTH_CLIENT_ID)
     if configured:
         return _ok("Configured")
     return {"connected": False, "detail": "Not configured", "checked_at": _ts()}

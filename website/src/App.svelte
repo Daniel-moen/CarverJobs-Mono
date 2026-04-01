@@ -487,7 +487,7 @@
         <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Secure Access</p>
         <h1 class="mt-3 text-3xl font-semibold text-white">Sign in to CARVER</h1>
         <p class="mt-3 text-sm text-slate-300">
-          Use Google sign-in or your admin credentials.
+          Use Google sign-in or your email/password credentials.
         </p>
 
         <form class="mt-6 grid gap-3" onsubmit={loginWithPassword}>

@@ -26,9 +26,7 @@ SESSION_SAMESITE = "none" if settings.SESSION_SECURE_COOKIE else "lax"
 
 
 def _google_auth_enabled() -> bool:
-  if not settings.GOOGLE_OAUTH_CLIENT_ID:
-    return False
-  return bool(settings.GOOGLE_ALLOWED_EMAILS or settings.GOOGLE_ALLOWED_DOMAIN)
+  return bool(settings.GOOGLE_OAUTH_CLIENT_ID)
 
 
 def _google_email_allowed(email: str, verified: bool) -> bool:
@@ -38,11 +36,14 @@ def _google_email_allowed(email: str, verified: bool) -> bool:
   email_lc = email.lower().strip()
   if not email_lc:
     return False
-  if email_lc in settings.GOOGLE_ALLOWED_EMAILS:
-    return True
-  if settings.GOOGLE_ALLOWED_DOMAIN and email_lc.endswith(f"@{settings.GOOGLE_ALLOWED_DOMAIN}"):
-    return True
-  return False
+  if settings.GOOGLE_ALLOWED_EMAILS or settings.GOOGLE_ALLOWED_DOMAIN:
+    if email_lc in settings.GOOGLE_ALLOWED_EMAILS:
+      return True
+    if settings.GOOGLE_ALLOWED_DOMAIN and email_lc.endswith(f"@{settings.GOOGLE_ALLOWED_DOMAIN}"):
+      return True
+    return False
+  # No allowlist/domain configured: allow any verified Google account.
+  return True
 
 
 @router.get("/providers")
@@ -155,7 +156,7 @@ def login(request: Request, payload: LoginRequest, response: Response):
 
 @router.post("/google")
 @_limiter.limit("10/minute")
-def login_google(request: Request, payload: GoogleLoginRequest, response: Response):
+def login_google(request: Request, payload: GoogleLoginRequest, response: Response, db: Session = Depends(get_db)):
   if not _google_auth_enabled():
     log.warning("Google login attempt but not configured")
     raise HTTPException(
@@ -189,7 +190,18 @@ def login_google(request: Request, payload: GoogleLoginRequest, response: Respon
       headers={"X-Error-Code": CRV_2008},
     )
 
-  token = issue_session_token({"sub": email, "role": "admin", "provider": "google"})
+  user = crud.get_user_by_email(db, email)
+  if user is None:
+    full_name = str(token_info.get("name") or token_info.get("given_name") or "").strip()
+    user = crud.create_google_user(db, email=email, full_name=full_name)
+    log.info("Google login created new user | id=%d | email=%s", user.id, email)
+
+  token = issue_session_token({
+    "sub": email,
+    "role": user.role,
+    "user_id": user.id,
+    "provider": "google",
+  })
   response.set_cookie(
     key=settings.SESSION_COOKIE_NAME,
     value=token,
@@ -201,7 +213,10 @@ def login_google(request: Request, payload: GoogleLoginRequest, response: Respon
   )
   metrics.increment("logins_success")
   log.info("Google login success | email=%s", email)
-  return {"ok": True, "user": {"username": email, "role": "admin", "provider": "google"}}
+  return {
+    "ok": True,
+    "user": {"id": user.id, "email": email, "role": user.role, "provider": "google"},
+  }
 
 
 @router.post("/logout")

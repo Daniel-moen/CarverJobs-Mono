@@ -29,9 +29,9 @@ Modular FastAPI service for CARVER v3 using a local SQLite3 database.
 - `SESSION_SECURE_COOKIE=true` in HTTPS production
 - `CORS_ORIGINS` and `ALLOWED_HOSTS`
 - `GOOGLE_OAUTH_CLIENT_ID` (Google Web OAuth client ID)
-- `GOOGLE_ALLOWED_EMAILS` (comma-separated allowlist)
-- `GOOGLE_ALLOWED_DOMAIN` (optional domain allowlist, e.g. `company.com`)
 - `GOOGLE_REQUIRE_VERIFIED_EMAIL=true` (recommended)
+- `GOOGLE_ALLOWED_EMAILS` (optional comma-separated allowlist)
+- `GOOGLE_ALLOWED_DOMAIN` (optional domain allowlist, e.g. `company.com`)
 ## Run locally
 - `python -m venv .venv && source .venv/bin/activate`
 - `pip install -r requirements.txt`

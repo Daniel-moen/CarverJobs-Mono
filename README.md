@@ -22,10 +22,10 @@ Project workspace with multiple components.
 1. Copy `.env.example` to `.env` and set strong values for `SECRET_KEY` and `ADMIN_PASSWORD`.
 2. In Google Cloud Console, create a Web OAuth client and set:
    - Authorized JavaScript origins: `http://localhost:8080`
-3. Set at least one allowlist control:
+3. Set `GOOGLE_OAUTH_CLIENT_ID` in `.env`.
+4. Optional hardening: restrict login to specific users or domain:
    - `GOOGLE_ALLOWED_EMAILS` (comma-separated), or
    - `GOOGLE_ALLOWED_DOMAIN` (e.g. `company.com`)
-4. Set `GOOGLE_OAUTH_CLIENT_ID` in `.env`.
 5. Restart: `docker compose up -d --build`.
 ## Standards in this repo
 - Separate Dockerfile per service
