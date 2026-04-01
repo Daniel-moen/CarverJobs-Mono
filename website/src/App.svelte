@@ -426,7 +426,7 @@
     await initGoogleButton()
   })
 
-  $: if (!isAuthenticated && googleEnabled && googleClientId) {
+  $: if (!isAuthenticated && showLogin && googleEnabled && googleClientId) {
     initGoogleButton()
   }
 </script>
