@@ -118,18 +118,12 @@
       </div>
     </section>
 
-    <section class="mt-10 border-y border-white/5 bg-zinc-950/60">
-      <div class="flex flex-col items-center gap-4 px-4 py-8 text-center">
-        <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10">
-          <svg class="h-5 w-5 text-cyan-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-        </div>
-        <div>
-          <h3 class="text-lg font-bold text-white">See one we missed?</h3>
-          <p class="mt-1 text-sm leading-relaxed text-slate-400">
-            Screenshot any job from a WhatsApp group and send it to CARVER. We'll add it, match you, and give you credit.
-          </p>
-        </div>
-      </div>
+    <section class="mt-14 text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-cyan-400/70">Community-powered</p>
+      <h2 class="mt-3 text-3xl font-black text-white">See one we missed?</h2>
+      <p class="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-400">
+        Screenshot any job from a WhatsApp group and send it to CARVER. We'll add it to the board and give you credit to match to jobs that fit your profile.
+      </p>
     </section>
 
     <section class="mt-14">
