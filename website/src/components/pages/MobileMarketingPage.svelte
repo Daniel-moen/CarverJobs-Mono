@@ -87,14 +87,18 @@
       </div>
 
       <h1 class="mt-6 text-[clamp(2rem,10vw,3rem)] font-black leading-[1.02] tracking-tight text-white">
-        Your next<br />
-        <span class="gradient-text">superyacht</span><br />
-        job, automated.
+        Screenshot it.<br />
+        <span class="gradient-text">We'll match</span><br />
+        you.
       </h1>
 
       <p class="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-400">
-        CARVER discovers open positions, matches them to your profile, and submits your application automatically.
-        No more refreshing job boards at midnight.
+        Spotted a job in a WhatsApp group? Screenshot it. CARVER matches you instantly and gives you credit.
+        No more scrolling for hours.
+      </p>
+
+      <p class="mt-4 text-sm font-medium text-cyan-300/70">
+        Already helping crew in Med &amp; Caribbean groups
       </p>
 
       <div class="mt-8 flex flex-col items-center gap-3">
@@ -103,7 +107,7 @@
           onclick={() => onSignIn('hero')}
           class="cta-primary group w-full rounded-xl px-7 py-3.5 text-sm font-bold text-black transition-all duration-200 hover:shadow-[0_0_40px_rgba(34,211,238,0.25)]"
         >
-          Get Access →
+          Join the Beta — Free for First 500 Crew
         </button>
         <a
           href="#how-it-works"
@@ -252,7 +256,7 @@
         onclick={() => onSignIn('cta_bottom')}
         class="mt-6 rounded-xl border border-white/20 bg-white px-8 py-3.5 text-sm font-bold text-black transition-all duration-200 hover:bg-slate-100"
       >
-        Get Access →
+        Join the Beta — Free for First 500 Crew
       </button>
     </section>
   </main>
