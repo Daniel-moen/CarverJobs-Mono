@@ -30,6 +30,7 @@ from app.logger import get_logger
 from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppSession
 from app.security import issue_session_token
 from app.settings import settings
+from app.services.ai_client import AIClientError
 
 log = get_logger("carver.whatsapp")
 
@@ -172,6 +173,7 @@ async def _send_help_menu(to: str) -> None:
                         "rows": [
                             {"id": "cmd_match", "title": "Find Matches", "description": "Match to superyacht roles"},
                             {"id": "cmd_jobs", "title": "Browse Job Board", "description": "View open yacht positions"},
+                            {"id": "cmd_submit_job", "title": "Submit a Job", "description": "Post a job via screenshot or text"},
                         ],
                     },
                 ],
@@ -187,6 +189,169 @@ async def _send_help_menu(to: str) -> None:
         log.exception("WhatsApp list send error | to=%s | %s", to, exc)
 
 
+# ── WhatsApp media download ───────────────────────────────────────────────────
+
+_WA_IMAGE_MAX_BYTES = 8 * 1024 * 1024  # 8 MB — same limit as admin screenshot import
+_WA_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
+
+
+async def _download_whatsapp_media(media_id: str) -> tuple[bytes, str]:
+    """Download a media file from Meta Cloud API by media ID.
+
+    Returns (file_bytes, mime_type).  Raises ValueError on failure.
+    """
+    meta_url = f"{_GRAPH_URL}/{media_id}"
+    headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+
+    resp = await _http.get(meta_url, headers=headers)
+    if resp.status_code >= 400:
+        raise ValueError(f"Meta media lookup failed: HTTP {resp.status_code}")
+
+    info = resp.json()
+    download_url = info.get("url")
+    mime_type = info.get("mime_type", "image/jpeg")
+    if not download_url:
+        raise ValueError("No download URL in Meta media response")
+
+    dl_resp = await _http.get(download_url, headers=headers, timeout=30.0)
+    if dl_resp.status_code >= 400:
+        raise ValueError(f"Media download failed: HTTP {dl_resp.status_code}")
+
+    return dl_resp.content, mime_type
+
+
+# ── Job submission via WhatsApp ───────────────────────────────────────────────
+
+async def _process_job_text_submission(phone_number: str, text: str, db: Session) -> None:
+    """AI-review a text message as a potential job posting and save to the board."""
+    import asyncio
+    from app.services.ai_job_reviewer import review_post
+    from app.services.job_sync import _build_job_fields, _content_hash
+
+    ai_fields = await asyncio.to_thread(
+        review_post,
+        post_text=text,
+        post_url="whatsapp",
+        api_key=settings.OPENAI_API_KEY,
+        model=settings.OPENAI_MODEL,
+    )
+    if ai_fields is None:
+        await _send_whatsapp(
+            phone_number,
+            "🤔 That doesn't look like a yacht crew job posting — could you try again with the full listing text or a screenshot?",
+        )
+        return
+
+    fields = _build_job_fields(ai_fields, {"url": "", "text": text}, "manual")
+    fields["source"] = "whatsapp_submit"
+    h = _content_hash(text)
+    fields["content_hash"] = h
+
+    if h:
+        existing = db.query(Job.id).filter(Job.content_hash == h).first()
+        if existing:
+            await _send_whatsapp(phone_number, "⚠️ This job is already on the board — no duplicate created.")
+            return
+
+    if fields.get("application_url"):
+        existing = db.query(Job.id).filter(Job.application_url == fields["application_url"]).first()
+        if existing:
+            await _send_whatsapp(phone_number, "⚠️ This job is already on the board — no duplicate created.")
+            return
+
+    job = Job(**fields)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    metrics.increment("whatsapp_job_submissions")
+    title = job.title or "Yacht Crew Position"
+    role = job.role or "Crew"
+    location = job.location or "Unknown"
+    await _send_whatsapp(
+        phone_number,
+        f"✅ *Job posted to the board!*\n\n"
+        f"⚓ *{title}*\n"
+        f"🧑‍✈️ Role: {role}\n"
+        f"📍 Location: {location}\n\n"
+        f"_The listing is now live for crew to see._",
+    )
+
+
+async def _process_job_image_submission(phone_number: str, media_id: str, db: Session) -> None:
+    """Download a WhatsApp image, AI-scan it for a job posting, and save to the board."""
+    import asyncio
+    import json as _json
+    from app.services.ai_client import review_job_image
+    from app.services.ai_job_reviewer import _SYSTEM_PROMPT
+    from app.services.job_sync import _build_job_fields
+
+    try:
+        image_bytes, mime_type = await _download_whatsapp_media(media_id)
+    except (ValueError, httpx.HTTPError) as exc:
+        log.error("WhatsApp job image download failed | phone=%s | %s", phone_number[:6] + "****", exc)
+        await _send_whatsapp(phone_number, "⚠️ Couldn't download the image — please try sending it again.")
+        return
+
+    if mime_type not in _WA_IMAGE_MIME_TYPES:
+        await _send_whatsapp(phone_number, "⚠️ Please send a PNG, JPEG, or WebP screenshot of the job posting.")
+        return
+
+    if len(image_bytes) > _WA_IMAGE_MAX_BYTES:
+        await _send_whatsapp(phone_number, "⚠️ Image is too large (max 8 MB). Try cropping or compressing it.")
+        return
+
+    try:
+        raw_json = await asyncio.to_thread(
+            review_job_image,
+            api_key=settings.OPENAI_API_KEY,
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            model=settings.OPENAI_MODEL,
+            system_prompt=_SYSTEM_PROMPT,
+        )
+        parsed = _json.loads(raw_json)
+    except (AIClientError, _json.JSONDecodeError, TypeError) as exc:
+        log.error("WhatsApp job image AI review failed | phone=%s | %s", phone_number[:6] + "****", exc)
+        await _send_whatsapp(phone_number, "⚠️ Couldn't read the screenshot — try a clearer image or paste the text instead.")
+        return
+
+    if not parsed.get("is_job"):
+        await _send_whatsapp(
+            phone_number,
+            "🤔 The AI couldn't identify a yacht crew job in that image — try a clearer screenshot or paste the text.",
+        )
+        return
+
+    parsed.pop("is_job", None)
+    fields = _build_job_fields(parsed, {"url": ""}, "manual")
+    fields["source"] = "whatsapp_submit"
+
+    if fields.get("application_url"):
+        existing = db.query(Job.id).filter(Job.application_url == fields["application_url"]).first()
+        if existing:
+            await _send_whatsapp(phone_number, "⚠️ This job is already on the board — no duplicate created.")
+            return
+
+    job = Job(**fields)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    metrics.increment("whatsapp_job_submissions")
+    title = job.title or "Yacht Crew Position"
+    role = job.role or "Crew"
+    location = job.location or "Unknown"
+    await _send_whatsapp(
+        phone_number,
+        f"✅ *Job posted to the board!*\n\n"
+        f"⚓ *{title}*\n"
+        f"🧑‍✈️ Role: {role}\n"
+        f"📍 Location: {location}\n\n"
+        f"_The listing is now live for crew to see._",
+    )
+
+
 # Maps interactive button/list reply IDs to plain-text command strings
 _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_profile": "profile",
@@ -195,11 +360,13 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_edit": "edit",
     "cmd_match": "match",
     "cmd_jobs": "jobs",
+    "cmd_submit_job": "submit job",
     "cmd_help": "help",
     "btn_find_matches": "match",
     "btn_edit_profile": "edit",
     "btn_upload_docs": "upload",
     "btn_view_profile": "profile",
+    "btn_submit_job": "submit job",
     "btn_help": "help",
     "btn_menu": "help",
 }
@@ -965,6 +1132,19 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         await _handle_match_command(phone, wa_session, db)
         return None
 
+    if cmd in ("submit job", "post job", "add job", "submit a job", "post a job"):
+        wa_session.mode = "job_submit"
+        db.commit()
+        await _send_whatsapp(
+            phone,
+            "📸 *Submit a Job to the Board*\n\n"
+            "Send me either:\n"
+            "• A *screenshot* of the job posting\n"
+            "• The *text* of the job listing (copy-paste or type it)\n\n"
+            "_I'll scan it with AI and post it to the job board if it's a valid yacht crew position._",
+        )
+        return None
+
     # Unrecognised input → show the menu
     await _send_help_menu(phone)
     return None
@@ -988,6 +1168,22 @@ async def _process_whatsapp_message(phone_number: str, user_text: str) -> None:
     db = SessionLocal()
     try:
         wa_session = _get_or_create_session(phone_number, db)
+
+        if wa_session.mode == "job_submit":
+            wa_session.mode = "chat"
+            db.commit()
+            if not settings.OPENAI_API_KEY:
+                await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
+            else:
+                await _process_job_text_submission(phone_number, user_text, db)
+            await _send_whatsapp_buttons(
+                phone_number,
+                "What's next?",
+                [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Find Matches"), ("btn_menu", "Menu")],
+            )
+            metrics.increment("whatsapp_messages")
+            return
+
         if wa_session.mode == "onboarding":
             reply = await _run_onboarding(wa_session, user_text, db)
         else:
@@ -1001,17 +1197,40 @@ async def _process_whatsapp_message(phone_number: str, user_text: str) -> None:
         db.close()
 
 
-async def _process_media_upload(phone_number: str) -> None:
-    """Send an upload magic link in response to a received media file."""
+async def _process_media_message(phone_number: str, media_id: str) -> None:
+    """Handle an incoming media file — either as a job submission or crew doc upload."""
     db = SessionLocal()
     try:
+        wa_session = _get_or_create_session(phone_number, db)
+
+        if wa_session.mode == "job_submit":
+            if not media_id:
+                await _send_whatsapp(
+                    phone_number,
+                    "⚠️ Please send a *screenshot image* (PNG, JPEG, WebP) or paste the *job text* instead.",
+                )
+                return
+            wa_session.mode = "chat"
+            db.commit()
+            if not settings.OPENAI_API_KEY:
+                await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
+            else:
+                await _process_job_image_submission(phone_number, media_id, db)
+            await _send_whatsapp_buttons(
+                phone_number,
+                "What's next?",
+                [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Find Matches"), ("btn_menu", "Menu")],
+            )
+            return
+
         link = _make_magic_link(phone_number, db)
         await _send_whatsapp(
             phone_number,
             "📎 *Upload Crew Documents*\n\n"
             "To upload your CV, passport, STCW, certs etc. use the link below:\n\n"
             f"👉 {link}\n\n"
-            "_Link expires in 30 minutes._",
+            "_Link expires in 30 minutes._\n\n"
+            "_💡 Tip: Want to submit a job posting? Type *submit job* first, then send the screenshot._",
         )
     except Exception as exc:
         log.exception("WhatsApp media handler error | phone=%s | %s", phone_number[:6] + "****", exc)
@@ -1081,8 +1300,13 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
             else:
                 return {"ok": True}
             user_text = _INTERACTIVE_CMD_MAP.get(bid, "help")
-        elif msg_type in ("image", "document", "audio", "video"):
-            background_tasks.add_task(_process_media_upload, phone_number)
+        elif msg_type == "image":
+            media_id = (msg.get("image") or {}).get("id", "")
+            if media_id:
+                background_tasks.add_task(_process_media_message, phone_number, media_id)
+            return {"ok": True}
+        elif msg_type in ("document", "audio", "video"):
+            background_tasks.add_task(_process_media_message, phone_number, "")
             return {"ok": True}
         else:
             return {"ok": True}
