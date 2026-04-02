@@ -76,6 +76,7 @@ class User(Base):
   password_hash = Column(String(256), nullable=False)
   is_active = Column(Boolean, nullable=False, default=True)
   is_subscribed = Column(Boolean, nullable=False, default=False)
+  early_bird = Column(Boolean, nullable=False, default=False)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),

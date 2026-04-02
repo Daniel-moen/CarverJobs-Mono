@@ -48,6 +48,7 @@ def run_migrations() -> None:
     users_cols = _existing("users")
     _add("users", "is_subscribed", "BOOLEAN NOT NULL DEFAULT 0", users_cols)
     _add("users", "gender", "VARCHAR(20)", users_cols)
+    _add("users", "early_bird", "BOOLEAN NOT NULL DEFAULT 0", users_cols)
 
     ae_cols = _existing("analytics_events")
     _add("analytics_events", "error_code", "VARCHAR(20)", ae_cols)

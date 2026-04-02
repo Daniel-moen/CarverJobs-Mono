@@ -107,7 +107,7 @@
           onclick={() => onSignIn('hero')}
           class="cta-primary group w-full rounded-xl px-7 py-3.5 text-sm font-bold text-black transition-all duration-200 hover:shadow-[0_0_40px_rgba(34,211,238,0.25)]"
         >
-          Join the Beta — Free for First 500 Crew
+          Join the Beta — Discount for First 100 Crew
         </button>
         <a
           href="#how-it-works"
@@ -241,7 +241,7 @@
         onclick={() => onSignIn('cta_bottom')}
         class="mt-6 rounded-xl border border-white/20 bg-white px-8 py-3.5 text-sm font-bold text-black transition-all duration-200 hover:bg-slate-100"
       >
-        Join the Beta — Free for First 500 Crew
+        Join the Beta — Discount for First 100 Crew
       </button>
     </section>
   </main>

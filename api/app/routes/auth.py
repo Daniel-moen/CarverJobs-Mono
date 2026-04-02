@@ -248,4 +248,8 @@ def get_session(session: dict | None = Depends(optional_session), db: Session = 
         .first()
     )
     is_subscribed = active_sub is not None
-  return {"ok": True, "authenticated": True, "session": {**session, "is_subscribed": is_subscribed}}
+  early_bird = False
+  user_obj = db.query(models.User).filter(models.User.email == session.get("sub")).first()
+  if user_obj:
+    early_bird = bool(user_obj.early_bird)
+  return {"ok": True, "authenticated": True, "session": {**session, "is_subscribed": is_subscribed, "early_bird": early_bird}}

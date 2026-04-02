@@ -50,6 +50,13 @@ def get_user_by_email(db: Session, email: str):
   return db.query(models.User).filter(models.User.email == email).first()
 
 
+EARLY_BIRD_LIMIT = 100
+
+
+def _is_early_bird(db: Session) -> bool:
+  return db.query(models.User).count() < EARLY_BIRD_LIMIT
+
+
 def create_user(db: Session, payload: schemas.UserCreate):
   user = models.User(
     email=payload.email.lower().strip(),
@@ -62,6 +69,7 @@ def create_user(db: Session, payload: schemas.UserCreate):
     gender=payload.gender,
     is_active=payload.is_active,
     password_hash=hash_password(payload.password),
+    early_bird=_is_early_bird(db),
   )
   db.add(user)
   db.commit()
@@ -77,6 +85,7 @@ def create_google_user(db: Session, email: str, full_name: str):
     role="crew",
     is_active=True,
     password_hash=hash_password(secrets.token_urlsafe(32)),
+    early_bird=_is_early_bird(db),
   )
   db.add(user)
   db.commit()
