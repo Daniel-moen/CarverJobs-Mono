@@ -87,14 +87,14 @@
       </div>
 
       <h1 class="mt-6 text-[clamp(2rem,10vw,3rem)] font-black leading-[1.02] tracking-tight text-white">
-        Screenshot it.<br />
-        <span class="gradient-text">We'll match</span><br />
-        you.
+        Every yacht job.<br />
+        <span class="gradient-text">One place.</span><br />
+        Auto-matched.
       </h1>
 
       <p class="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-400">
-        Spotted a job in a WhatsApp group? Screenshot it. CARVER matches you instantly and gives you credit.
-        No more scrolling for hours.
+        We collect jobs from 50+ WhatsApp groups and crew agencies so you don't have to scroll for hours.
+        Spotted one we missed? Screenshot it — CARVER matches you instantly and gives you credit.
       </p>
 
       <p class="mt-4 text-sm font-medium text-cyan-300/70">
