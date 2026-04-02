@@ -93,8 +93,8 @@
       </h1>
 
       <p class="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-400">
-        We collect jobs from 50+ WhatsApp groups and crew agencies so you don't have to scroll for hours.
-        Spotted one we missed? Screenshot it — CARVER matches you instantly and gives you credit.
+        We collect jobs from 50+ groups, crew agencies, and any listing with a contact email — so you don't have to scroll for hours.
+        Captains hiring? Post your own jobs directly.
       </p>
 
       <p class="mt-4 text-sm font-medium text-cyan-300/70">
@@ -122,7 +122,7 @@
       <p class="text-xs uppercase tracking-[0.3em] text-cyan-400/70">Community-powered</p>
       <h2 class="mt-3 text-3xl font-black text-white">See one we missed?</h2>
       <p class="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-400">
-        Screenshot any job from a WhatsApp group and send it to CARVER. We'll add it to the board and give you credit to match to jobs that fit your profile.
+        Screenshot any job post and send it to CARVER. We'll add it to the board and give you credit to match to jobs that fit your profile. Captains and hiring managers can also upload positions directly.
       </p>
     </section>
 
