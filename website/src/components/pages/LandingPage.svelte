@@ -19,23 +19,6 @@
     my = ((e.clientY - rect.top) / rect.height) * 100
   }
 
-  // Animated counters
-  let countersStarted = $state(false)
-  let count1 = $state(0)
-  let count2 = $state(0)
-  let count3 = $state(0)
-
-  function animateCounter(setter, target, duration = 1800) {
-    const start = performance.now()
-    function tick(now) {
-      const p = Math.min((now - start) / duration, 1)
-      const eased = 1 - Math.pow(1 - p, 3)
-      setter(Math.floor(eased * target))
-      if (p < 1) requestAnimationFrame(tick)
-    }
-    requestAnimationFrame(tick)
-  }
-
   onMount(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -43,12 +26,6 @@
           const target = /** @type {HTMLElement} */ (entry.target)
           if (entry.isIntersecting) {
             target.dataset.visible = 'true'
-            if (target.dataset.counters && !countersStarted) {
-              countersStarted = true
-              animateCounter((v) => (count1 = v), 2400)
-              animateCounter((v) => (count2 = v), 98, 1200)
-              animateCounter((v) => (count3 = v), 340, 2000)
-            }
           }
         })
       },
@@ -265,26 +242,17 @@
     </div>
   </section>
 
-  <!-- ── STATS ──────────────────────────────────────────────────────── -->
-  <div class="border-y border-white/5 bg-zinc-950/60" data-animate data-counters>
-    <div class="mx-auto grid max-w-4xl grid-cols-3 divide-x divide-white/5 px-4 py-8 text-center sm:px-6 sm:py-14">
-      <div class="px-2 sm:px-4">
-        <p class="text-3xl font-black tabular-nums text-white sm:text-4xl lg:text-5xl">
-          {count1.toLocaleString()}<span class="text-cyan-400">+</span>
-        </p>
-        <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 sm:text-xs sm:tracking-widest">Job listings tracked</p>
+  <!-- ── SEE ONE WE MISSED? ─────────────────────────────────────────── -->
+  <div class="border-y border-white/5 bg-zinc-950/60" data-animate>
+    <div class="mx-auto flex max-w-3xl flex-col items-center gap-4 px-4 py-10 text-center sm:flex-row sm:gap-8 sm:px-6 sm:py-14 sm:text-left">
+      <div class="flex h-14 w-14 flex-none items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10">
+        <svg class="h-6 w-6 text-cyan-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
       </div>
-      <div class="px-2 sm:px-4">
-        <p class="text-3xl font-black tabular-nums text-white sm:text-4xl lg:text-5xl">
-          {count2}<span class="text-cyan-400">%</span>
+      <div>
+        <h3 class="text-lg font-bold text-white">See one we missed?</h3>
+        <p class="mt-1 text-sm leading-relaxed text-slate-400">
+          Screenshot any job from a WhatsApp group and send it to CARVER. We'll add it to the board, match you instantly, and give you credit for the find.
         </p>
-        <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 sm:text-xs sm:tracking-widest">Match accuracy</p>
-      </div>
-      <div class="px-2 sm:px-4">
-        <p class="text-3xl font-black tabular-nums text-white sm:text-4xl lg:text-5xl">
-          {count3}<span class="text-cyan-400">+</span>
-        </p>
-        <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500 sm:text-xs sm:tracking-widest">Applications sent</p>
       </div>
     </div>
   </div>

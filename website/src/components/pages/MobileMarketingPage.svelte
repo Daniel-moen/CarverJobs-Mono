@@ -119,24 +119,15 @@
     </section>
 
     <section class="mt-10 border-y border-white/5 bg-zinc-950/60">
-      <div class="grid grid-cols-3 divide-x divide-white/5 px-3 py-8 text-center">
-        <div class="px-2">
-          <p class="text-2xl font-black tabular-nums text-white sm:text-3xl">
-            2400<span class="text-cyan-400">+</span>
-          </p>
-          <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500">Jobs tracked</p>
+      <div class="flex flex-col items-center gap-4 px-4 py-8 text-center">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10">
+          <svg class="h-5 w-5 text-cyan-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
         </div>
-        <div class="px-2">
-          <p class="text-2xl font-black tabular-nums text-white sm:text-3xl">
-            98<span class="text-cyan-400">%</span>
+        <div>
+          <h3 class="text-lg font-bold text-white">See one we missed?</h3>
+          <p class="mt-1 text-sm leading-relaxed text-slate-400">
+            Screenshot any job from a WhatsApp group and send it to CARVER. We'll add it, match you, and give you credit.
           </p>
-          <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500">Match accuracy</p>
-        </div>
-        <div class="px-2">
-          <p class="text-2xl font-black tabular-nums text-white sm:text-3xl">
-            340<span class="text-cyan-400">+</span>
-          </p>
-          <p class="mt-2 text-[10px] uppercase tracking-wider text-slate-500">Applications sent</p>
         </div>
       </div>
     </section>
