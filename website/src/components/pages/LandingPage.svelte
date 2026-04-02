@@ -332,8 +332,8 @@
 
             <div class="mt-6 grid grid-cols-3 gap-3">
               <div class="rounded-xl border border-white/6 bg-black/30 px-4 py-3 text-center">
-                <p class="text-lg font-black text-cyan-300">30+</p>
-                <p class="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Jobs scanned</p>
+                <p class="text-lg font-black text-cyan-300">All</p>
+                <p class="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Recent posts</p>
               </div>
               <div class="rounded-xl border border-white/6 bg-black/30 px-4 py-3 text-center">
                 <p class="text-lg font-black text-cyan-300">~1s</p>
