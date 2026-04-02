@@ -336,8 +336,8 @@
                 <p class="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Jobs scanned</p>
               </div>
               <div class="rounded-xl border border-white/6 bg-black/30 px-4 py-3 text-center">
-                <p class="text-lg font-black text-cyan-300">&lt;10s</p>
-                <p class="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Match time</p>
+                <p class="text-lg font-black text-cyan-300">~1s</p>
+                <p class="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Per job</p>
               </div>
               <div class="rounded-xl border border-white/6 bg-black/30 px-4 py-3 text-center">
                 <p class="text-lg font-black text-cyan-300">6</p>
