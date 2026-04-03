@@ -109,9 +109,9 @@ class Settings:
   FASTSTREAM_ENABLED: bool = os.getenv("FASTSTREAM_ENABLED", "true").lower() == "true"
   SUPERYACHTTIMES_ENABLED: bool = os.getenv("SUPERYACHTTIMES_ENABLED", "true").lower() == "true"
 
-  # Telnyx — inbound SMS
+  # Telnyx — inbound SMS (Ed25519 public key from Mission Control → API keys → Public key)
   TELNYX_API_KEY: str = os.getenv("TELNYX_API_KEY", "").strip()
-  TELNYX_WEBHOOK_SECRET: str = os.getenv("TELNYX_WEBHOOK_SECRET", "").strip()
+  TELNYX_PUBLIC_KEY: str = os.getenv("TELNYX_PUBLIC_KEY", "").strip()
   TELNYX_PHONE_NUMBER: str = os.getenv("TELNYX_PHONE_NUMBER", "").strip()
 
   # PayFast — recurring subscription billing

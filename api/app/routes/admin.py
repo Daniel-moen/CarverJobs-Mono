@@ -8,7 +8,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import analytics, flags, metrics
+from app import analytics, flags, metrics, telnyx_inbound_buffer
 from app.database import get_db
 from app.error_codes import CRV_1005, CRV_5001, CRV_5002, CRV_5003, CRV_5004
 from app.logger import get_logger
@@ -79,6 +79,12 @@ def get_stats(request: Request, db: Session = Depends(get_db)):
         "errors_by_module": metrics.errors_by_module_snapshot(),
         "time_series": metrics.history(),
     }
+
+
+@router.get("/telnyx-inbound")
+def get_telnyx_inbound_recent():
+    """Recent inbound SMS captured by POST /telnyx/webhook (for OTP / debugging)."""
+    return {"ok": True, "messages": telnyx_inbound_buffer.recent()}
 
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
