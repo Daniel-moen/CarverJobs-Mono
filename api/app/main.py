@@ -19,7 +19,7 @@ from app import metrics, models
 from app.error_codes import CRV_1003, CRV_1004, CRV_1006, STATUS_CODE_TO_CRV
 from app.health_checker import health_check_loop
 from app.logger import get_logger, setup_logging
-from app.routes import admin, auth, crew_match, documents, health, interview, job_history, jobs, matching, profile, scraper, subscription, users, whatsapp
+from app.routes import admin, auth, crew_match, documents, health, interview, job_history, jobs, matching, profile, scraper, subscription, telnyx, users, whatsapp
 from app.scheduler import scraper_loop
 from app.seed_users import ensure_default_user
 from app.settings import settings, validate_database_not_configured_for_postgres, validate_production_settings
@@ -322,6 +322,7 @@ app.include_router(job_history.router)
 app.include_router(crew_match.router)
 app.include_router(scraper.router)
 app.include_router(subscription.router)
+app.include_router(telnyx.router)
 app.include_router(whatsapp.router)
 
 log.info("CARVER API ready | env=%s | auto_login=%s", settings.APP_ENV, settings.AUTO_LOGIN_AS_ADMIN)

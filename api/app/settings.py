@@ -109,6 +109,11 @@ class Settings:
   FASTSTREAM_ENABLED: bool = os.getenv("FASTSTREAM_ENABLED", "true").lower() == "true"
   SUPERYACHTTIMES_ENABLED: bool = os.getenv("SUPERYACHTTIMES_ENABLED", "true").lower() == "true"
 
+  # Telnyx — inbound SMS
+  TELNYX_API_KEY: str = os.getenv("TELNYX_API_KEY", "").strip()
+  TELNYX_WEBHOOK_SECRET: str = os.getenv("TELNYX_WEBHOOK_SECRET", "").strip()
+  TELNYX_PHONE_NUMBER: str = os.getenv("TELNYX_PHONE_NUMBER", "").strip()
+
   # PayFast — recurring subscription billing
   PAYFAST_MERCHANT_ID: str = os.getenv("PAYFAST_MERCHANT_ID", "").strip()
   PAYFAST_MERCHANT_KEY: str = os.getenv("PAYFAST_MERCHANT_KEY", "").strip()
