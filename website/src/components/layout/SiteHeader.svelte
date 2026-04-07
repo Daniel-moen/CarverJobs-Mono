@@ -41,7 +41,7 @@
       <div class="flex items-center justify-end gap-3">
         {#if userRole === 'crew'}
           <div class="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold text-cyan-100">
-            {creditsBalance} Credit{creditsBalance === 1 ? '' : 's'}
+            {creditsBalance} Token{creditsBalance === 1 ? '' : 's'}
           </div>
         {/if}
         {#if onLogout}
@@ -79,7 +79,7 @@
         <div class="flex items-center gap-2">
           {#if userRole === 'crew'}
             <div class="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold text-cyan-100">
-              {creditsBalance}
+              {creditsBalance} token{creditsBalance === 1 ? '' : 's'}
             </div>
           {/if}
           <button

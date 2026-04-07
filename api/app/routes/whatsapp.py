@@ -145,8 +145,28 @@ async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, st
         log.exception("WhatsApp buttons send error | to=%s | %s", to, exc)
 
 
-async def _send_help_menu(to: str) -> None:
+def _credits_summary_for_menu(balance: int) -> str:
+    w = "credit" if balance == 1 else "credits"
+    return (
+        f"💳 *Your balance: {balance} {w}.*\n"
+        "Each *Find Matches* run uses 1 credit. "
+        "Submit a valid job to the board to earn 1 credit."
+    )
+
+
+def _credits_standalone_message(balance: int) -> str:
+    """Full explainer for *credits* / *balance* text commands."""
+    return (
+        _credits_summary_for_menu(balance)
+        + "\n\n"
+        + "_Type *help* for the full menu._"
+    )
+
+
+async def _send_help_menu(to: str, db: Session) -> None:
     """Send interactive list menu with all available commands."""
+    balance = get_credit_balance(db, to)
+    body_text = f"What would you like to do?\n\n{_credits_summary_for_menu(balance)}"
     url = f"{_GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
     payload = {
         "messaging_product": "whatsapp",
@@ -155,7 +175,7 @@ async def _send_help_menu(to: str) -> None:
         "interactive": {
             "type": "list",
             "header": {"type": "text", "text": "CARVER 🛥️"},
-            "body": {"text": "What would you like to do?"},
+            "body": {"text": body_text},
             "footer": {"text": "Superyacht crew jobs & job board"},
             "action": {
                 "button": "Show Menu",
@@ -175,6 +195,16 @@ async def _send_help_menu(to: str) -> None:
                             {"id": "cmd_match", "title": "Find Matches", "description": "Match to superyacht roles"},
                             {"id": "cmd_jobs", "title": "Browse Job Board", "description": "View open yacht positions"},
                             {"id": "cmd_submit_job", "title": "Submit a Job", "description": "Post a job via screenshot or text"},
+                        ],
+                    },
+                    {
+                        "title": "Account",
+                        "rows": [
+                            {
+                                "id": "cmd_credits",
+                                "title": "My balance",
+                                "description": "Credits & how matching works",
+                            },
                         ],
                     },
                 ],
@@ -368,6 +398,7 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_match": "match",
     "cmd_jobs": "jobs",
     "cmd_submit_job": "submit job",
+    "cmd_credits": "credits",
     "cmd_help": "help",
     "btn_find_matches": "match",
     "btn_edit_profile": "edit",
@@ -737,11 +768,15 @@ def _save_profile_to_db(phone_number: str, partial: dict, db: Session) -> None:
 
 async def _handle_profile_command(phone_number: str, db: Session) -> str:
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone_number).first()
+    bal = get_credit_balance(db, phone_number)
+    cred_w = "credit" if bal == 1 else "credits"
+    credit_line = f"\n\n💳 *Credits:* {bal} {cred_w} — each *Find Matches* uses 1; submit a job to earn 1."
     if not profile:
         return (
             "👋 *Welcome aboard CARVER!*\n\n"
             "You don't have a crew profile yet. Tap *Edit Profile* to set one up — "
             "quick and easy, then you're ready to match with superyacht roles."
+            + credit_line
         )
     name = f"{profile.first_name or ''} {profile.last_name or ''}".strip()
     lines = [f"🪪 *{name or 'Your Crew Profile'}*\n"]
@@ -767,6 +802,7 @@ async def _handle_profile_command(phone_number: str, db: Session) -> str:
         lines.append(f"💰 *Salary:* {salary_str}/mo")
     if profile.available_from:
         lines.append(f"📅 *Available:* {profile.available_from}")
+    lines.append(credit_line.strip())
     return "\n".join(lines)
 
 
@@ -1075,6 +1111,8 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
             f"Your crew profile is live and ready to match with vessels. "
             f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
+            f"💳 *Credits:* You start with *0*. Each *Find Matches* run uses *1* credit — "
+            f"submit a valid job to the board to earn *1* credit.\n\n"
             f"_Link expires in 30 min. Type *help* anytime to see what I can do for you._ ⚡"
         )
     else:
@@ -1091,7 +1129,12 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
     phone = wa_session.phone_number
 
     if cmd in ("help", "commands", "menu", "hi", "hello"):
-        await _send_help_menu(phone)
+        await _send_help_menu(phone, db)
+        return None
+
+    if cmd in ("credits", "balance", "my credits"):
+        bal = get_credit_balance(db, phone)
+        await _send_whatsapp(phone, _credits_standalone_message(bal))
         return None
 
     if cmd in ("profile", "my profile", "show profile"):
@@ -1171,7 +1214,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         return None
 
     # Unrecognised input → show the menu
-    await _send_help_menu(phone)
+    await _send_help_menu(phone, db)
     return None
 
 
