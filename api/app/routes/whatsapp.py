@@ -47,17 +47,20 @@ _SEEN_MSG_MAX = 500
 _STALE_MSG_SECONDS = 300  # ignore messages older than 5 minutes
 
 
-def _is_duplicate_or_stale(msg_id: str, timestamp_str: str) -> bool:
+def _is_duplicate_or_stale(msg_id: str, timestamp_str: str | None) -> bool:
     """Return True (and skip processing) if the message was already handled or is too old."""
-    # Stale check — Meta timestamp is a Unix epoch string
-    try:
-        msg_ts = int(timestamp_str)
-        age = time.time() - msg_ts
-        if age > _STALE_MSG_SECONDS:
-            log.warning("WhatsApp stale message skipped | id=%s | age=%.0fs", msg_id, age)
-            return True
-    except (ValueError, TypeError):
-        pass
+    # Stale check — only when Meta sends a real Unix epoch (seconds). Missing or "0"
+    # default would make age ≈ time.time() and incorrectly drop every message.
+    if timestamp_str not in (None, ""):
+        try:
+            msg_ts = int(str(timestamp_str).strip())
+            if msg_ts > 0:
+                age = time.time() - msg_ts
+                if age > _STALE_MSG_SECONDS:
+                    log.warning("WhatsApp stale message skipped | id=%s | age=%.0fs", msg_id, age)
+                    return True
+        except (ValueError, TypeError):
+            pass
 
     # Duplicate check
     if msg_id in _SEEN_MSG_IDS:
@@ -1371,7 +1374,7 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
         msg_type = msg.get("type", "")
         phone_number = msg.get("from", "")
         msg_id = msg.get("id", "")
-        msg_timestamp = msg.get("timestamp", "0")
+        msg_timestamp = msg.get("timestamp")
 
         if not phone_number:
             return {"ok": True}
