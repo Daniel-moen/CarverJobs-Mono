@@ -311,7 +311,7 @@
         {creditsBalance} token{creditsBalance === 1 ? '' : 's'} available
       </div>
       <p class="mx-auto mt-2 max-w-md text-xs text-slate-500">
-        Running the matching engine costs 1 token. Submitting a job earns 1 token.
+        Matching costs 1 token. Spot a job in a group or post? Submit it (paste or screenshot) to earn 1 token.
       </p>
       <button
         type="button"
@@ -472,7 +472,7 @@
         <p class="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-400/80">Community</p>
         <h2 class="mt-1 text-lg font-bold tracking-tight text-white sm:text-xl">Share a job</h2>
         <p class="mt-1 max-w-xl text-sm text-slate-400">
-          Spot a yacht crew vacancy? Paste the listing or drop a screenshot. We verify it with AI, add it to the board, and you get <span class="text-amber-200/90">1 token</span> for matching.
+          Saw a role in a crew group, page, or feed? Submit it easily—paste the text or drop a screenshot. We check it with AI, put it on the board, and you get <span class="text-amber-200/90">1 token</span> for matching.
         </p>
       </div>
     </div>

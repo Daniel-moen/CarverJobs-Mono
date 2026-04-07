@@ -122,7 +122,7 @@
       <p class="text-xs uppercase tracking-[0.3em] text-cyan-400/70">Community-powered</p>
       <h2 class="mt-3 text-3xl font-black text-white">See one we missed?</h2>
       <p class="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-400">
-        Screenshot any job post and send it to CARVER. We'll add it to the board and give you credit to match to jobs that fit your profile. Captains and hiring managers can also upload positions directly.
+        Saw a job in a crew group or social post? Submit it easily with a screenshot or pasted text—we add it to the board and you get a token to match roles that fit your profile. Hiring managers can post positions directly too.
       </p>
     </section>
 

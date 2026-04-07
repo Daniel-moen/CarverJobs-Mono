@@ -347,7 +347,19 @@
         interviewMessages = [...interviewMessages, { role: 'assistant', content: message }]
         trackChat('receive')
       }
+      const wasInterviewChecked = profile.interviewCompleted
       mergeSuggestedUpdates(data?.updates)
+      if (!wasInterviewChecked && profile.interviewCompleted) {
+        interviewMessages = [
+          ...interviewMessages,
+          {
+            role: 'assistant',
+            content:
+              "That’s saved to your profile. This interview helps CARVER tune your preferences for matching — you can edit anything on this page anytime. When you’re ready, use Find matches or the job board from the nav to discover roles.",
+          },
+        ]
+        trackChat('receive')
+      }
     } catch { interviewError = 'Could not reach interview service.' }
     finally {
       interviewLoading = false

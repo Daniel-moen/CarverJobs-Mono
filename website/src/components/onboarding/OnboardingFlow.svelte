@@ -293,6 +293,19 @@
               </button>
             </div>
           {/if}
+
+          {#if isDone || allFieldsFilled}
+            <div class="rounded-xl border border-emerald-400/25 bg-emerald-400/8 px-4 py-3 text-left">
+              <p class="text-xs font-bold uppercase tracking-wide text-emerald-300/90">Interview complete</p>
+              <p class="mt-2 text-sm leading-relaxed text-slate-200">
+                We saved everything you shared into your <strong class="text-white">crew profile</strong>. Tap
+                <strong class="text-cyan-200">Continue</strong> for a short tour, then you’re in the app.
+              </p>
+              <p class="mt-2 text-xs leading-relaxed text-slate-400">
+                Next you can run <strong class="text-slate-300">matching</strong>, browse the <strong class="text-slate-300">job board</strong>, upload <strong class="text-slate-300">documents</strong>, and change any detail anytime under <strong class="text-slate-300">Profile</strong>.
+              </p>
+            </div>
+          {/if}
         </div>
 
         <!-- Input row -->

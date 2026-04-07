@@ -206,7 +206,11 @@ async def _send_help_menu(to: str, db: Session) -> None:
                                 "description": "Uses 1 token per run · Match to superyacht roles",
                             },
                             {"id": "cmd_jobs", "title": "Browse Job Board", "description": "View open yacht positions"},
-                            {"id": "cmd_submit_job", "title": "Submit a Job", "description": "Post a job via screenshot or text"},
+                            {
+                                "id": "cmd_submit_job",
+                                "title": "Submit a Job",
+                                "description": "From groups or posts—screenshot or paste",
+                            },
                         ],
                     },
                     {
@@ -1125,8 +1129,9 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
         link = _make_magic_link(wa_session.phone_number, db)
         name = partial.get("firstName", "crew")
         message += (
-            f"\n\n🎉 *Welcome to the fleet, {name}!*\n\n"
-            f"Your crew profile is live and ready to match with vessels. "
+            f"\n\n✅ *Interview complete* — we saved your answers as your crew profile.\n\n"
+            f"🎉 *Welcome to the fleet, {name}!*\n\n"
+            f"Your profile is live and ready to match with vessels. "
             f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
             f"💳 *Tokens:* You start with *0*. Each *Find Matches* run uses *1* token — "
@@ -1223,11 +1228,11 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         db.commit()
         await _send_whatsapp(
             phone,
-            "📸 *Submit a Job to the Board*\n\n"
-            "Send me either:\n"
-            "• A *screenshot* of the job posting\n"
-            "• The *text* of the job listing (copy-paste or type it)\n\n"
-            "_I'll scan it with AI and post it to the job board if it's a valid yacht crew position._",
+            "📸 *Submit a job to the board*\n\n"
+            "Saw something in a crew *group*, *page*, or *post*? Share it easily:\n"
+            "• Send a *screenshot* of the listing, or\n"
+            "• *Paste* the job text here\n\n"
+            "_I'll read it with AI and add it to the board if it's a real yacht crew role._",
         )
         return None
 
