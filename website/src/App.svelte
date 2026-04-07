@@ -17,6 +17,9 @@
   import LaunchSignupPage from './components/pages/LaunchSignupPage.svelte'
   import SignUpPage from './components/pages/SignUpPage.svelte'
   import AdminJobIngestPage from './components/pages/AdminJobIngestPage.svelte'
+  import PrivacyPolicyPage from './components/pages/PrivacyPolicyPage.svelte'
+  import TermsOfServicePage from './components/pages/TermsOfServicePage.svelte'
+  import DataDeletionPage from './components/pages/DataDeletionPage.svelte'
   import { API_BASE_URL, apiFetch } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
 
@@ -33,6 +36,9 @@
     '/dashboard':    'dashboard',
     '/dashboard/job-ingest': 'admin-job-ingest',
     '/subscription': 'subscription',
+    '/privacy':      'privacy',
+    '/terms':        'terms',
+    '/data-deletion': 'data-deletion',
   }
   const PAGE_TO_PATH = Object.fromEntries(
     Object.entries(PATH_TO_PAGE).map(([p, k]) => [k, p])
@@ -53,7 +59,14 @@
     return match ? parseInt(match[1], 10) : 0
   }
 
+  function isLegalDocumentPage(key) {
+    return key === 'privacy' || key === 'terms' || key === 'data-deletion'
+  }
+
   function pageFromPath(pathname) {
+    if (pathname === '/privacy') return 'privacy'
+    if (pathname === '/terms') return 'terms'
+    if (pathname === '/data-deletion') return 'data-deletion'
     if (!SITE_LAUNCHED) return 'launch-signup'
     if (pathname.startsWith('/crew/')) return 'public-profile'
     if (pathname.startsWith('/wa/')) return 'whatsapp-auth'
@@ -63,7 +76,7 @@
   }
 
   function navigate(pageKey) {
-    if (!SITE_LAUNCHED) return
+    if (!SITE_LAUNCHED && !isLegalDocumentPage(pageKey)) return
     if (currentPage === pageKey) return
     currentPage = pageKey
     publicSlug = ''
@@ -379,10 +392,15 @@
   }
 
   function enforceLaunchGate() {
+    const path = window.location.pathname
+    if (path === '/privacy' || path === '/terms' || path === '/data-deletion') {
+      currentPage = pageFromPath(path)
+      return
+    }
     currentPage = 'launch-signup'
     publicSlug = ''
     waToken = ''
-    if (window.location.pathname !== '/launch') {
+    if (path !== '/launch') {
       history.replaceState({ page: 'launch-signup' }, '', '/launch')
     }
   }
@@ -395,7 +413,33 @@
       try { mobileMediaQuery.addListener(handleMobileViewportChange) } catch { /* ignore */ }
     }
 
+    window.addEventListener('popstate', (e) => {
+      if (!SITE_LAUNCHED) {
+        const next = e.state?.page ?? pageFromPath(window.location.pathname)
+        if (isLegalDocumentPage(next)) {
+          currentPage = next
+          trackPageView(next)
+          return
+        }
+        enforceLaunchGate()
+        trackPageView('launch-signup')
+        return
+      }
+      publicSlug = extractCrewSlug(window.location.pathname)
+      waToken = extractWaToken(window.location.pathname)
+      matchSessionId = extractMatchSessionId(window.location.pathname)
+      currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
+      enforceAdminOnlyPageAccess()
+      showSignup = currentPage === 'signup'
+      showLogin = false
+      trackPageView(currentPage)
+    })
+
     if (!SITE_LAUNCHED) {
+      if (isLegalDocumentPage(currentPage)) {
+        trackPageView(currentPage)
+        return
+      }
       enforceLaunchGate()
       trackPageView('launch-signup')
       return
@@ -412,22 +456,6 @@
     window.onerror = (msg) => {
       trackError('uncaught', String(msg), { page: currentPage })
     }
-
-    window.addEventListener('popstate', (e) => {
-      if (!SITE_LAUNCHED) {
-        enforceLaunchGate()
-        trackPageView('launch-signup')
-        return
-      }
-      publicSlug = extractCrewSlug(window.location.pathname)
-      waToken = extractWaToken(window.location.pathname)
-      matchSessionId = extractMatchSessionId(window.location.pathname)
-      currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
-      enforceAdminOnlyPageAccess()
-      showSignup = currentPage === 'signup'
-      showLogin = false
-      trackPageView(currentPage)
-    })
     window.addEventListener('beforeunload', () => { flush(); stopAutoFlush() })
     window.addEventListener('carver:unauthorized', handleUnauthorizedEvent)
 
@@ -444,6 +472,14 @@
 <div class="min-h-screen bg-black text-slate-100 relative">
   {#if currentPage === 'launch-signup'}
     <LaunchSignupPage />
+  {:else if isLegalDocumentPage(currentPage)}
+    {#if currentPage === 'privacy'}
+      <PrivacyPolicyPage />
+    {:else if currentPage === 'terms'}
+      <TermsOfServicePage />
+    {:else}
+      <DataDeletionPage />
+    {/if}
   {:else if waToken}
     <WhatsAppAuthPage token={waToken} />
   {:else if publicSlug}

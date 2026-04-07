@@ -1,3 +1,9 @@
+/** Shown on legal pages; override with VITE_SUPPORT_EMAIL in production. */
+export const supportEmail =
+  typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPPORT_EMAIL
+    ? String(import.meta.env.VITE_SUPPORT_EMAIL)
+    : 'support@example.com'
+
 export const site = {
   name: 'CARVER v3',
   tagline: 'Automated superyacht job applications.',
