@@ -13,6 +13,7 @@ from app.database import get_db
 from app.logger import get_logger
 from app.models import CrewProfile, Document, Job, JobHistoryEntry, User
 from app.security import require_admin_session
+from app.services.credits import add_credits, spend_credits
 from app.services.matching_engine import (
     CandidateProfile,
     JobSummary,
@@ -122,6 +123,13 @@ async def run_match(request: Request, payload: schemas.MatchingRequest, db: Sess
     if not all_jobs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No jobs found")
 
+    credits_remaining = spend_credits(db, user.email, amount=1)
+    if credits_remaining is None:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="User does not have enough credits to run matching.",
+        )
+
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == str(user.id)).first()
     job_history = None
     if profile:
@@ -156,6 +164,7 @@ async def run_match(request: Request, payload: schemas.MatchingRequest, db: Sess
         )
     except Exception as exc:
         log.error("Match engine error | user_id=%d | %s", payload.user_id, exc)
+        add_credits(db, user.email, amount=1)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Matching failed. Please try again.")
     finally:
         metrics.record_ai_response_time(round((time.perf_counter() - t0) * 1000))
@@ -166,6 +175,7 @@ async def run_match(request: Request, payload: schemas.MatchingRequest, db: Sess
 
     return schemas.MatchingRunResponse(
         request_id=f"match-{payload.user_id}-{int(time.time())}",
+        credits_remaining=credits_remaining,
         matches=[
             schemas.MatchResultItem(
                 job_id=str(r.job_id),

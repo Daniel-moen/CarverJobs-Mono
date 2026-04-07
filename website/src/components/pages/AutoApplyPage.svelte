@@ -3,7 +3,7 @@
   import { API_BASE_URL, apiFetch } from '../../config/api'
   import { trackClick } from '../../config/analytics'
 
-  let { isSubscribed = false, onNavigate = () => {}, autoStartMatch = false, onMatchStarted = () => {} } = $props()
+  let { isSubscribed = false, creditsBalance = 0, onCreditsChanged = () => {}, onNavigate = () => {}, autoStartMatch = false, onMatchStarted = () => {} } = $props()
 
   let mounted = $state(false)
   let state = $state('idle')
@@ -76,6 +76,9 @@
             if (currentEvent === 'complete') {
               gotComplete = true
               totalScanned = parsed.total_jobs_scanned ?? 0
+              if (typeof parsed.credits_remaining === 'number') {
+                onCreditsChanged(parsed.credits_remaining)
+              }
               if (parsed.matched && parsed.matches?.length) {
                 matches = parsed.matches
                 state = 'done'
@@ -212,12 +215,19 @@
       <p class="mx-auto mt-2 max-w-md text-sm text-slate-400">
         AI scans every open position against your crew profile and returns all matches.
       </p>
+      <div class="mx-auto mt-4 inline-flex rounded-full border border-cyan-300/25 bg-cyan-300/10 px-4 py-1.5 text-xs font-semibold text-cyan-100">
+        {creditsBalance} credit{creditsBalance === 1 ? '' : 's'} available
+      </div>
+      <p class="mx-auto mt-2 max-w-md text-xs text-slate-500">
+        Running the matching engine costs 1 credit. Submitting a job earns 1 credit.
+      </p>
       <button
         type="button"
+        disabled={creditsBalance < 1}
         onclick={() => runMatch()}
-        class="mt-6 rounded-lg border border-cyan-300/35 bg-cyan-300/8 px-8 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/55 hover:bg-cyan-300/18 hover:text-white active:scale-95"
+        class="mt-6 rounded-lg border border-cyan-300/35 bg-cyan-300/8 px-8 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/55 hover:bg-cyan-300/18 hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
       >
-        Start Matching
+        {creditsBalance < 1 ? 'Need 1 Credit' : 'Start Matching'}
       </button>
     </div>
 
@@ -269,6 +279,7 @@
       <div>
         <h1 class="text-xl font-bold text-white">{matches.length} Match{matches.length !== 1 ? 'es' : ''} Found</h1>
         <p class="text-xs text-slate-500">Scanned {totalScanned} positions</p>
+        <p class="mt-1 text-xs text-cyan-200">{creditsBalance} credit{creditsBalance === 1 ? '' : 's'} remaining</p>
       </div>
       <button
         type="button"

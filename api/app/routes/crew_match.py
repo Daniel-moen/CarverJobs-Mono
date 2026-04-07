@@ -26,6 +26,7 @@ from app.schemas import (
 )
 from app.security import require_session
 from app.services.ai_client import AIClientError, call_openai
+from app.services.credits import add_credits, get_credit_balance, spend_credits
 from app.services.matching_engine import (
     CandidateProfile,
     JobSummary,
@@ -218,10 +219,25 @@ async def find_match(
         .all()
     )
     if not all_jobs:
+        current_credits = get_credit_balance(db, user_key)
         async def empty_stream():
-            data = json.dumps({"session_id": 0, "matched": False, "total_jobs_scanned": 0, "total_matched": 0, "matches": []})
+            data = json.dumps({
+                "session_id": 0,
+                "matched": False,
+                "total_jobs_scanned": 0,
+                "total_matched": 0,
+                "credits_remaining": current_credits,
+                "matches": [],
+            })
             yield f"event: complete\ndata: {data}\n\n"
         return StreamingResponse(empty_stream(), media_type="text/event-stream")
+
+    credits_remaining = spend_credits(db, user_key, amount=1)
+    if credits_remaining is None:
+        raise HTTPException(
+            status_code=402,
+            detail="You need at least 1 credit to run matching. Submit a job to earn one.",
+        )
 
     match_session = MatchSession(user_key=user_key, status="running", total_jobs_scanned=len(all_jobs))
     db.add(match_session)
@@ -300,7 +316,8 @@ async def find_match(
                 s = stream_db.query(MatchSession).get(session_id)
                 if s:
                     s.status = "failed"
-                    stream_db.commit()
+                add_credits(stream_db, user_key, amount=1)
+                stream_db.commit()
             finally:
                 stream_db.close()
             log.error("Match session %d failed | user=%s | %s", session_id, user_key, exc)
@@ -368,6 +385,7 @@ async def find_match(
             matched=len(response_matches) > 0,
             total_jobs_scanned=total_job_count,
             total_matched=len(matched_results),
+            credits_remaining=credits_remaining,
             matches=response_matches,
         )
         yield f"event: complete\ndata: {final.model_dump_json()}\n\n"

@@ -175,4 +175,17 @@ def run_migrations() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_m_payment_id ON subscriptions (m_payment_id)"
     )
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS credit_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_key VARCHAR(160) NOT NULL UNIQUE,
+            balance INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+            updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_credit_accounts_user_key ON credit_accounts (user_key)"
+    )
+
     conn.commit()

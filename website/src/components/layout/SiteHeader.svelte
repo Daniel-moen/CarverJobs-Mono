@@ -1,6 +1,6 @@
 <script>
   import { site } from '../../config/site'
-  let { currentPage = 'auto-apply', userRole = '', isSubscribed = false, onNavigate = () => {}, onLogout = null } = $props()
+  let { currentPage = 'auto-apply', userRole = '', isSubscribed = false, creditsBalance = 0, onNavigate = () => {}, onLogout = null } = $props()
 
   const visibleNav = $derived(
     site.nav.filter(item =>
@@ -38,7 +38,12 @@
         {/each}
       </nav>
       <p class="text-center text-sm font-semibold tracking-[0.2em] text-slate-100">CARVER</p>
-      <div class="flex justify-end">
+      <div class="flex items-center justify-end gap-3">
+        {#if userRole === 'crew'}
+          <div class="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold text-cyan-100">
+            {creditsBalance} Credit{creditsBalance === 1 ? '' : 's'}
+          </div>
+        {/if}
         {#if onLogout}
           <button
             type="button"
@@ -71,13 +76,20 @@
       </button>
       <p class="text-sm font-semibold tracking-[0.2em] text-slate-100">CARVER</p>
       {#if onLogout}
-        <button
-          type="button"
-          class="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/30 hover:text-white"
-          onclick={onLogout}
-        >
-          Logout
-        </button>
+        <div class="flex items-center gap-2">
+          {#if userRole === 'crew'}
+            <div class="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold text-cyan-100">
+              {creditsBalance}
+            </div>
+          {/if}
+          <button
+            type="button"
+            class="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/30 hover:text-white"
+            onclick={onLogout}
+          >
+            Logout
+          </button>
+        </div>
       {:else}
         <div class="w-16"></div>
       {/if}

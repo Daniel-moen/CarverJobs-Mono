@@ -403,6 +403,7 @@ class MatchingEnqueueResponse(APIModel):
 
 class MatchingRunResponse(APIModel):
     request_id: str
+    credits_remaining: int = 0
     matches:    list[MatchResultItem]
 
 
@@ -511,4 +512,5 @@ class CrewMatchV2Response(APIModel):
     matched: bool
     total_jobs_scanned: int
     total_matched: int
+    credits_remaining: int = 0
     matches: Annotated[list[MatchSessionResultItem], Field(default_factory=list)]

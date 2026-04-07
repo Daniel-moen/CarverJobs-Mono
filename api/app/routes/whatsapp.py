@@ -31,6 +31,7 @@ from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession
 from app.security import issue_session_token
 from app.settings import settings
 from app.services.ai_client import AIClientError
+from app.services.credits import add_credits, get_credit_balance, spend_credits
 
 log = get_logger("carver.whatsapp")
 
@@ -263,6 +264,7 @@ async def _process_job_text_submission(phone_number: str, text: str, db: Session
     db.add(job)
     db.commit()
     db.refresh(job)
+    credits_balance = add_credits(db, phone_number, amount=1)
 
     metrics.increment("whatsapp_job_submissions")
     title = job.title or "Yacht Crew Position"
@@ -274,6 +276,8 @@ async def _process_job_text_submission(phone_number: str, text: str, db: Session
         f"⚓ *{title}*\n"
         f"🧑‍✈️ Role: {role}\n"
         f"📍 Location: {location}\n\n"
+        f"You earned *1 credit* for sharing this job.\n"
+        f"Current balance: *{credits_balance}* credit{'s' if credits_balance != 1 else ''}.\n\n"
         f"_The listing is now live for crew to see._",
     )
 
@@ -337,6 +341,7 @@ async def _process_job_image_submission(phone_number: str, media_id: str, db: Se
     db.add(job)
     db.commit()
     db.refresh(job)
+    credits_balance = add_credits(db, phone_number, amount=1)
 
     metrics.increment("whatsapp_job_submissions")
     title = job.title or "Yacht Crew Position"
@@ -348,6 +353,8 @@ async def _process_job_image_submission(phone_number: str, media_id: str, db: Se
         f"⚓ *{title}*\n"
         f"🧑‍✈️ Role: {role}\n"
         f"📍 Location: {location}\n\n"
+        f"You earned *1 credit* for sharing this job.\n"
+        f"Current balance: *{credits_balance}* credit{'s' if credits_balance != 1 else ''}.\n\n"
         f"_The listing is now live for crew to see._",
     )
 
@@ -830,6 +837,22 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         await _send_whatsapp(phone_number, "No open yacht positions right now — check back soon!")
         return
 
+    credits_remaining = spend_credits(db, phone_number, amount=1)
+    if credits_remaining is None:
+        current_credits = get_credit_balance(db, phone_number)
+        await _send_whatsapp(
+            phone_number,
+            "⚠️ You need *1 credit* to run matching.\n\n"
+            "Submit a job posting first and you'll earn one credit for it.\n"
+            f"Current balance: *{current_credits}* credit{'s' if current_credits != 1 else ''}.",
+        )
+        await _send_whatsapp_buttons(
+            phone_number,
+            "Want to earn a credit?",
+            [("btn_submit_job", "Submit Job"), ("cmd_jobs", "Browse Jobs"), ("btn_menu", "Menu")],
+        )
+        return
+
     _BATCH_SIZE = 10
     _AVG_SECS_PER_BATCH = 8
     num_batches = _math.ceil(len(all_jobs) / _BATCH_SIZE)
@@ -913,6 +936,7 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         )
     except Exception as exc:
         log.error("WhatsApp match engine error | %s", exc)
+        credits_remaining = add_credits(db, phone_number, amount=1)
         await _send_whatsapp(phone_number, "⚠️ Matching hit a snag — try again in a moment.")
         return
 
@@ -969,6 +993,7 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
     link = _make_magic_link(phone_number, db, redirect_to=f"/matches/{match_session.id}")
     lines.append(f"\nView all matches & draft applications:\n👉 {link}")
     lines.append("_Link expires in 30 min._")
+    lines.append(f"\nCredits remaining: *{credits_remaining}*")
 
     await _send_whatsapp(phone_number, "\n".join(lines))
 

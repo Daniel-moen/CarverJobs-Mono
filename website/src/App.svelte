@@ -90,6 +90,7 @@
   let hasActiveSession = false
   let userRole = ''
   let isSubscribed = false
+  let creditsBalance = 0
   let showOnboarding = false
   let showDocsReminder = false
   let showLogin = false
@@ -118,6 +119,7 @@
     hasActiveSession = false
     userRole = ''
     isSubscribed = false
+    creditsBalance = 0
     showOnboarding = false
     showDocsReminder = false
     showLogin = true
@@ -211,15 +213,23 @@
         hasActiveSession = true
         userRole = data?.session?.role ?? ''
         isSubscribed = Boolean(data?.session?.is_subscribed)
+        creditsBalance = Number(data?.session?.credits_balance ?? 0)
         // Keep the page that matches the current URL; don't override with a default.
         currentPage = pageFromPath(window.location.pathname)
         enforceAdminOnlyPageAccess()
         showOnboarding = checkOnboardingNeeded()
         if (!showOnboarding) showDocsReminder = checkDocsReminder()
+      } else {
+        hasActiveSession = false
+        userRole = ''
+        isSubscribed = false
+        creditsBalance = 0
       }
     } catch (error) {
       isAuthenticated = false
       userRole = ''
+      isSubscribed = false
+      creditsBalance = 0
     } finally {
       isCheckingSession = false
     }
@@ -265,8 +275,7 @@
         return
       }
       loginPassword = ''
-      isAuthenticated = true
-      hasActiveSession = true
+      await checkSession()
       trackFunnel('login_success', { label: 'password' })
       showOnboarding = checkOnboardingNeeded()
       if (!showOnboarding) showDocsReminder = checkDocsReminder()
@@ -292,8 +301,7 @@
         authError = 'Google sign-in failed or account is not allowed.'
         return
       }
-      isAuthenticated = true
-      hasActiveSession = true
+      await checkSession()
       trackFunnel('login_success', { label: 'google' })
       showOnboarding = checkOnboardingNeeded()
       if (!showOnboarding) showDocsReminder = checkDocsReminder()
@@ -365,6 +373,8 @@
     isAuthenticated = false
     hasActiveSession = false
     userRole = ''
+    isSubscribed = false
+    creditsBalance = 0
     authError = ''
   }
 
@@ -460,10 +470,9 @@
           history.replaceState({ page: 'auto-apply' }, '', '/')
         }
       }}
-      onSignUpSuccess={() => {
+      onSignUpSuccess={async () => {
+        await checkSession()
         showSignup = false
-        isAuthenticated = true
-        hasActiveSession = true
         trackFunnel('signup_complete', { label: 'email' })
         try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
         showOnboarding = checkOnboardingNeeded()
@@ -584,7 +593,7 @@
       <div class="app-scan"></div>
     </div>
 
-    <SiteHeader currentPage={currentPage} userRole={userRole} isSubscribed={isSubscribed} onNavigate={navigate} onLogout={logout} />
+    <SiteHeader currentPage={currentPage} userRole={userRole} isSubscribed={isSubscribed} creditsBalance={creditsBalance} onNavigate={navigate} onLogout={logout} />
 
     {#if showDocsReminder}
       <div class="border-b border-amber-400/20 bg-amber-400/10 px-4 py-2.5 sm:px-6">
@@ -613,7 +622,7 @@
     {/if}
 
     <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
-      <svelte:component this={ActivePage} isSubscribed={isSubscribed} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} sessionId={matchSessionId} />
+      <svelte:component this={ActivePage} isSubscribed={isSubscribed} creditsBalance={creditsBalance} onCreditsChanged={(value) => (creditsBalance = Math.max(0, Number(value) || 0))} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} sessionId={matchSessionId} />
     </main>
     <SiteFooter />
   {/if}

@@ -14,6 +14,7 @@ from app.database import get_db
 from app.logger import get_logger
 from app.schemas import GoogleLoginRequest, LoginRequest, SignupRequest, UserCreate, WaitlistSignupRequest
 from app.security import issue_session_token, optional_session, require_session
+from app.services.credits import get_credit_balance
 from app.settings import settings
 
 log = get_logger("carver.auth")
@@ -237,11 +238,11 @@ def get_session(session: dict | None = Depends(optional_session), db: Session = 
   if session is None:
     return {"ok": True, "authenticated": False}
   log.debug("Session check | sub=%s", session.get("sub"))
+  user_key = session.get("sub", "")
   # Admins always have full access; crew users check active subscription
   if session.get("role") == "admin":
     is_subscribed = True
   else:
-    user_key = session.get("sub", "")
     active_sub = (
         db.query(models.Subscription)
         .filter(models.Subscription.user_key == user_key, models.Subscription.status == "active")
@@ -249,7 +250,17 @@ def get_session(session: dict | None = Depends(optional_session), db: Session = 
     )
     is_subscribed = active_sub is not None
   early_bird = False
+  credits_balance = get_credit_balance(db, user_key) if user_key else 0
   user_obj = db.query(models.User).filter(models.User.email == session.get("sub")).first()
   if user_obj:
     early_bird = bool(user_obj.early_bird)
-  return {"ok": True, "authenticated": True, "session": {**session, "is_subscribed": is_subscribed, "early_bird": early_bird}}
+  return {
+    "ok": True,
+    "authenticated": True,
+    "session": {
+      **session,
+      "is_subscribed": is_subscribed,
+      "early_bird": early_bird,
+      "credits_balance": credits_balance,
+    },
+  }

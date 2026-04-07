@@ -12,6 +12,7 @@ from app.logger import get_logger
 from app.models import CrewProfile, Document, JobHistoryEntry
 from app.schemas import CrewProfileRead, CrewProfileSave, PublicProfileResponse, JobHistoryRead
 from app.security import require_session
+from app.services.credits import get_credit_balance
 from app.settings import settings
 
 log = get_logger("carver.profile")
@@ -66,10 +67,11 @@ def get_my_profile(
     db: Session = Depends(get_db),
 ):
     user_key = session["sub"]
+    credits_balance = get_credit_balance(db, user_key)
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == user_key).first()
     if not profile:
-        return {"profile": None}
-    return {"profile": CrewProfileRead.model_validate(profile)}
+        return {"profile": None, "credits_balance": credits_balance}
+    return {"profile": CrewProfileRead.model_validate(profile), "credits_balance": credits_balance}
 
 
 @public_router.get("/p/{slug}")
