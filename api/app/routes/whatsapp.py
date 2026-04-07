@@ -1394,6 +1394,19 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
         entry = (data.get("entry") or [{}])[0]
         change = (entry.get("changes") or [{}])[0]
         value = change.get("value") or {}
+        metadata = value.get("metadata") or {}
+        recipient_phone_number_id = str(metadata.get("phone_number_id") or "").strip()
+        recipient_display_number = str(metadata.get("display_phone_number") or "").strip()
+
+        if recipient_phone_number_id and recipient_phone_number_id != settings.WHATSAPP_PHONE_NUMBER_ID:
+            log.warning(
+                "WhatsApp webhook ignored for different recipient | configured_id=%s | recipient_id=%s | recipient=%s",
+                settings.WHATSAPP_PHONE_NUMBER_ID,
+                recipient_phone_number_id,
+                recipient_display_number or "?",
+            )
+            return {"ok": True}
+
         messages = value.get("messages") or []
         if not messages:
             return {"ok": True}
