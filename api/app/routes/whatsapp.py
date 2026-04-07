@@ -47,20 +47,48 @@ _SEEN_MSG_MAX = 500
 _STALE_MSG_SECONDS = 300  # ignore messages older than 5 minutes
 
 
+def _parse_meta_timestamp(timestamp_str: str | None) -> int | None:
+    """Best-effort parse of Meta webhook timestamps to Unix seconds.
+
+    Meta timestamps are expected to be Unix seconds, but in practice we may see
+    malformed values or alternate units. Only return a value when it lands in a
+    sane range near the current epoch; otherwise skip stale filtering and let
+    message ID dedupe protect us.
+    """
+    if timestamp_str in (None, ""):
+        return None
+
+    try:
+        raw_ts = int(str(timestamp_str).strip())
+    except (ValueError, TypeError):
+        return None
+
+    if raw_ts <= 0:
+        return None
+
+    now = int(time.time())
+
+    # Normal Unix seconds.
+    if 946684800 <= raw_ts <= now + 86400:
+        return raw_ts
+
+    # Milliseconds since epoch.
+    if 946684800000 <= raw_ts <= (now + 86400) * 1000:
+        return raw_ts // 1000
+
+    return None
+
+
 def _is_duplicate_or_stale(msg_id: str, timestamp_str: str | None) -> bool:
     """Return True (and skip processing) if the message was already handled or is too old."""
-    # Stale check — only when Meta sends a real Unix epoch (seconds). Missing or "0"
-    # default would make age ≈ time.time() and incorrectly drop every message.
-    if timestamp_str not in (None, ""):
-        try:
-            msg_ts = int(str(timestamp_str).strip())
-            if msg_ts > 0:
-                age = time.time() - msg_ts
-                if age > _STALE_MSG_SECONDS:
-                    log.warning("WhatsApp stale message skipped | id=%s | age=%.0fs", msg_id, age)
-                    return True
-        except (ValueError, TypeError):
-            pass
+    # Only stale-drop messages when the timestamp clearly maps to a real Unix
+    # epoch. If Meta sends an unexpected format, process it normally.
+    msg_ts = _parse_meta_timestamp(timestamp_str)
+    if msg_ts is not None:
+        age = time.time() - msg_ts
+        if age > _STALE_MSG_SECONDS:
+            log.warning("WhatsApp stale message skipped | id=%s | age=%.0fs", msg_id, age)
+            return True
 
     # Duplicate check
     if msg_id in _SEEN_MSG_IDS:
