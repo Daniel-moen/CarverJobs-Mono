@@ -105,3 +105,16 @@ def require_admin_session(session: SessionPayload = Depends(require_session)) ->
       headers={"X-Error-Code": CRV_2005},
     )
   return session
+
+
+def require_crew_or_admin_session(session: SessionPayload = Depends(require_session)) -> SessionPayload:
+  """Allow website crew (or admin) for job submission and similar crew-facing tools."""
+  role = session.get("role")
+  if role not in ("crew", "admin"):
+    log.warning("Crew/admin access denied | sub=%s | role=%s", session.get("sub"), role)
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Sign in as crew to use this feature.",
+      headers={"X-Error-Code": CRV_2005},
+    )
+  return session

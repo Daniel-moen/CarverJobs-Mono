@@ -21,6 +21,17 @@
   let draftPrompt = $state('')
   let copiedEmail = $state(false)
 
+  /** Crew job share (same pipeline as dashboard ingest) */
+  const JOB_IMG_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+  let jobPasteText = $state('')
+  let jobSourceUrl = $state('')
+  let jobSubmitBusy = $state(false)
+  let jobSubmitMsg = $state('')
+  let jobSubmitErr = $state('')
+  let jobDragOver = $state(false)
+
+  const jobTextOk = $derived(jobPasteText.trim().length >= 10)
+
   const MAX_RETRIES = 2
   const MAX_DRAFT_PROMPT_LEN = 500
 
@@ -205,6 +216,87 @@
     }
     return null
   }
+
+  async function submitSharedJobText() {
+    if (!jobTextOk || jobSubmitBusy) return
+    trackClick('crew_submit_job_text')
+    jobSubmitBusy = true
+    jobSubmitErr = ''
+    jobSubmitMsg = ''
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/jobs/submit/text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ text: jobPasteText.trim(), url: jobSourceUrl.trim() }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        jobSubmitErr = typeof data.detail === 'string' ? data.detail : `Request failed (${res.status})`
+        return
+      }
+      if (typeof data.credits_balance === 'number') onCreditsChanged(data.credits_balance)
+      const t = data.title || 'the role'
+      jobSubmitMsg = `“${t}” is live on the job board. +1 token.`
+      jobPasteText = ''
+    } catch {
+      jobSubmitErr = 'Could not reach the server.'
+    } finally {
+      jobSubmitBusy = false
+    }
+  }
+
+  async function submitSharedJobImage(file) {
+    if (!file || !JOB_IMG_TYPES.includes(file.type) || file.size > 8 * 1024 * 1024) {
+      jobSubmitErr = 'Use a PNG, JPG, or WebP under 8 MB.'
+      return
+    }
+    trackClick('crew_submit_job_image')
+    jobSubmitBusy = true
+    jobSubmitErr = ''
+    jobSubmitMsg = ''
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('url', jobSourceUrl.trim())
+      const res = await apiFetch(`${API_BASE_URL}/jobs/submit/image`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        jobSubmitErr = typeof data.detail === 'string' ? data.detail : `Request failed (${res.status})`
+        return
+      }
+      if (typeof data.credits_balance === 'number') onCreditsChanged(data.credits_balance)
+      const j = data.job || {}
+      const t = j.title || 'the role'
+      jobSubmitMsg = `“${t}” is live on the job board. +1 token.`
+    } catch {
+      jobSubmitErr = 'Could not reach the server.'
+    } finally {
+      jobSubmitBusy = false
+    }
+  }
+
+  function onJobShareDrop(e) {
+    e.preventDefault()
+    jobDragOver = false
+    const f = e.dataTransfer?.files?.[0]
+    if (f) submitSharedJobImage(f)
+  }
+
+  function onJobShareDragOver(e) {
+    e.preventDefault()
+    jobDragOver = true
+  }
+
+  function onJobShareFilePick(e) {
+    const f = e.currentTarget.files?.[0]
+    e.currentTarget.value = ''
+    if (f) submitSharedJobImage(f)
+  }
 </script>
 
 <section class="grid gap-5 overflow-hidden" class:visible={mounted}>
@@ -372,6 +464,88 @@
       </article>
     {/each}
   {/if}
+
+  <!-- Share a job — public crew flow (earn token when AI accepts) -->
+  <article class="rounded-2xl border border-amber-400/20 bg-gradient-to-b from-zinc-950 to-zinc-950/95 p-5 sm:p-6">
+    <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <p class="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-400/80">Community</p>
+        <h2 class="mt-1 text-lg font-bold tracking-tight text-white sm:text-xl">Share a job</h2>
+        <p class="mt-1 max-w-xl text-sm text-slate-400">
+          Spot a yacht crew vacancy? Paste the listing or drop a screenshot. We verify it with AI, add it to the board, and you get <span class="text-amber-200/90">1 token</span> for matching.
+        </p>
+      </div>
+    </div>
+
+    <label class="mt-4 block">
+      <span class="text-[11px] font-medium text-slate-500">Original link <span class="text-slate-600">(optional)</span></span>
+      <input
+        type="url"
+        bind:value={jobSourceUrl}
+        placeholder="https://…"
+        disabled={jobSubmitBusy}
+        class="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder-slate-600 outline-none transition focus:border-amber-400/35 focus:ring-1 focus:ring-amber-400/25 disabled:opacity-50"
+      />
+    </label>
+
+    <div class="mt-5 grid gap-5 lg:grid-cols-2">
+      <div class="rounded-xl border border-white/8 bg-black/25 p-4">
+        <p class="text-xs font-semibold text-slate-300">Paste text</p>
+        <p class="mt-0.5 text-[11px] text-slate-600">Full job ad copy works best (min. 10 characters).</p>
+        <textarea
+          bind:value={jobPasteText}
+          rows="6"
+          maxlength="5000"
+          disabled={jobSubmitBusy}
+          placeholder="Paste the job listing here…"
+          class="mt-3 w-full resize-y rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-amber-400/35 focus:ring-1 focus:ring-amber-400/20 disabled:opacity-50"
+        ></textarea>
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <span class="text-[11px] text-slate-600">{jobPasteText.trim().length} / 5000</span>
+          <button
+            type="button"
+            disabled={!jobTextOk || jobSubmitBusy}
+            onclick={submitSharedJobText}
+            class="rounded-lg border border-amber-400/35 bg-amber-400/10 px-4 py-2 text-xs font-semibold text-amber-100 transition hover:border-amber-400/50 hover:bg-amber-400/18 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {jobSubmitBusy ? 'Checking…' : 'Submit text'}
+          </button>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-white/8 bg-black/25 p-4">
+        <p class="text-xs font-semibold text-slate-300">Screenshot</p>
+        <p class="mt-0.5 text-[11px] text-slate-600">PNG, JPG, or WebP · max 8 MB</p>
+        <div
+          class="drop-share mt-3 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors
+            {jobDragOver ? 'border-amber-400/50 bg-amber-400/10' : 'border-white/12 bg-black/20 hover:border-white/20'}"
+          ondrop={onJobShareDrop}
+          ondragover={onJobShareDragOver}
+          ondragleave={() => (jobDragOver = false)}
+          role="presentation"
+        >
+          <p class="text-sm text-slate-400">{jobDragOver ? 'Drop to upload' : 'Drag an image here'}</p>
+          <label class="mt-3 cursor-pointer rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-400/18">
+            Choose file
+            <input
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+              class="hidden"
+              disabled={jobSubmitBusy}
+              onchange={onJobShareFilePick}
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+
+    {#if jobSubmitMsg}
+      <p class="mt-4 rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-200">{jobSubmitMsg}</p>
+    {/if}
+    {#if jobSubmitErr}
+      <p class="mt-4 rounded-lg border border-rose-400/25 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">{jobSubmitErr}</p>
+    {/if}
+  </article>
 </section>
 
 {#if draftingJob}

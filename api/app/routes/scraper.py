@@ -133,7 +133,7 @@ _IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 _MAX_IMPORT_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
-def _run_import_pipeline(*, text: str, url: str):
+def _run_import_pipeline(*, text: str, url: str, source: str = "manual"):
     from app.models import Job
     from app.services.ai_job_reviewer import review_post
     from app.services.job_sync import _build_job_fields, _content_hash
@@ -148,7 +148,7 @@ def _run_import_pipeline(*, text: str, url: str):
         return None
 
     fields = _build_job_fields(ai_fields, {"url": url, "text": text}, "manual")
-    fields["source"] = "manual"
+    fields["source"] = source
 
     h = _content_hash(text) if text else None
     fields["content_hash"] = h
@@ -224,13 +224,13 @@ async def import_job(request: Request, payload: ImportJobRequest):
     return _shape_import_response(result)
 
 
-def _save_job_from_ai_fields(*, ai_fields: dict, url: str):
+def _save_job_from_ai_fields(*, ai_fields: dict, url: str, source: str = "manual_screenshot"):
     """Build Job row from AI-extracted fields and save to DB (dedup-aware)."""
     from app.models import Job
     from app.services.job_sync import _build_job_fields
 
     fields = _build_job_fields(ai_fields, {"url": url}, "manual")
-    fields["source"] = "manual_screenshot"
+    fields["source"] = source
 
     db = SessionLocal()
     try:
@@ -319,6 +319,7 @@ async def import_job_image(
         _save_job_from_ai_fields,
         ai_fields=parsed,
         url=url.strip(),
+        source="manual_screenshot",
     )
 
     if result is None:

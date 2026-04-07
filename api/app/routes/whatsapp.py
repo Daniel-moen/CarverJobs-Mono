@@ -145,17 +145,25 @@ async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, st
         log.exception("WhatsApp buttons send error | to=%s | %s", to, exc)
 
 
+async def _send_job_review_wait(to: str) -> None:
+    """Interim message while AI reviews a job submission (text or image)."""
+    await _send_whatsapp(
+        to,
+        "⏳ Reading your posting… this can take a moment.",
+    )
+
+
 def _credits_summary_for_menu(balance: int) -> str:
-    w = "credit" if balance == 1 else "credits"
+    w = "token" if balance == 1 else "tokens"
     return (
         f"💳 *Your balance: {balance} {w}.*\n"
-        "Each *Find Matches* run uses 1 credit. "
-        "Submit a valid job to the board to earn 1 credit."
+        "Each *Find Matches* run uses 1 token. "
+        "Submit a valid job to the board to earn 1 token."
     )
 
 
 def _credits_standalone_message(balance: int) -> str:
-    """Full explainer for *credits* / *balance* text commands."""
+    """Full explainer for *balance* / *tokens* text commands."""
     return (
         _credits_summary_for_menu(balance)
         + "\n\n"
@@ -192,7 +200,11 @@ async def _send_help_menu(to: str, db: Session) -> None:
                     {
                         "title": "Jobs",
                         "rows": [
-                            {"id": "cmd_match", "title": "Find Matches", "description": "Match to superyacht roles"},
+                            {
+                                "id": "cmd_match",
+                                "title": "Find Matches",
+                                "description": "Uses 1 token per run · Match to superyacht roles",
+                            },
                             {"id": "cmd_jobs", "title": "Browse Job Board", "description": "View open yacht positions"},
                             {"id": "cmd_submit_job", "title": "Submit a Job", "description": "Post a job via screenshot or text"},
                         ],
@@ -203,7 +215,7 @@ async def _send_help_menu(to: str, db: Session) -> None:
                             {
                                 "id": "cmd_credits",
                                 "title": "My balance",
-                                "description": "Credits & how matching works",
+                                "description": "Tokens & how matching works",
                             },
                         ],
                     },
@@ -306,8 +318,8 @@ async def _process_job_text_submission(phone_number: str, text: str, db: Session
         f"⚓ *{title}*\n"
         f"🧑‍✈️ Role: {role}\n"
         f"📍 Location: {location}\n\n"
-        f"You earned *1 credit* for sharing this job.\n"
-        f"Current balance: *{credits_balance}* credit{'s' if credits_balance != 1 else ''}.\n\n"
+        f"You earned *1 token* for sharing this job.\n"
+        f"Current balance: *{credits_balance}* token{'s' if credits_balance != 1 else ''}.\n\n"
         f"_The listing is now live for crew to see._",
     )
 
@@ -383,8 +395,8 @@ async def _process_job_image_submission(phone_number: str, media_id: str, db: Se
         f"⚓ *{title}*\n"
         f"🧑‍✈️ Role: {role}\n"
         f"📍 Location: {location}\n\n"
-        f"You earned *1 credit* for sharing this job.\n"
-        f"Current balance: *{credits_balance}* credit{'s' if credits_balance != 1 else ''}.\n\n"
+        f"You earned *1 token* for sharing this job.\n"
+        f"Current balance: *{credits_balance}* token{'s' if credits_balance != 1 else ''}.\n\n"
         f"_The listing is now live for crew to see._",
     )
 
@@ -545,6 +557,9 @@ Style rules for WhatsApp:
 - React to their answer first ("Nice!", "Solid experience!", "Love the Med!") then ask the next thing.
 - When nearly done, build excitement ("Almost there!", "One more and you're set!").
 - When all done, celebrate big — they just joined the fleet.
+
+First reply only (empty conversation history in the messages you receive):
+- Include exactly one brief sentence explaining tokens: *Find Matches* uses 1 token per run; balance starts at 0; submitting a valid job to the board earns 1 token.
 
 Data rules:
 - ONLY set "done": true when ALL 13 fields are collected (missing list is empty).
@@ -769,14 +784,14 @@ def _save_profile_to_db(phone_number: str, partial: dict, db: Session) -> None:
 async def _handle_profile_command(phone_number: str, db: Session) -> str:
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone_number).first()
     bal = get_credit_balance(db, phone_number)
-    cred_w = "credit" if bal == 1 else "credits"
-    credit_line = f"\n\n💳 *Credits:* {bal} {cred_w} — each *Find Matches* uses 1; submit a job to earn 1."
+    tok_w = "token" if bal == 1 else "tokens"
+    token_line = f"\n\n💳 *Tokens:* {bal} {tok_w} — each *Find Matches* uses 1; submit a job to earn 1."
     if not profile:
         return (
             "👋 *Welcome aboard CARVER!*\n\n"
             "You don't have a crew profile yet. Tap *Edit Profile* to set one up — "
             "quick and easy, then you're ready to match with superyacht roles."
-            + credit_line
+            + token_line
         )
     name = f"{profile.first_name or ''} {profile.last_name or ''}".strip()
     lines = [f"🪪 *{name or 'Your Crew Profile'}*\n"]
@@ -802,7 +817,7 @@ async def _handle_profile_command(phone_number: str, db: Session) -> str:
         lines.append(f"💰 *Salary:* {salary_str}/mo")
     if profile.available_from:
         lines.append(f"📅 *Available:* {profile.available_from}")
-    lines.append(credit_line.strip())
+    lines.append(token_line.strip())
     return "\n".join(lines)
 
 
@@ -878,13 +893,13 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
         current_credits = get_credit_balance(db, phone_number)
         await _send_whatsapp(
             phone_number,
-            "⚠️ You need *1 credit* to run matching.\n\n"
-            "Submit a job posting first and you'll earn one credit for it.\n"
-            f"Current balance: *{current_credits}* credit{'s' if current_credits != 1 else ''}.",
+            "⚠️ You need *1 token* to run matching.\n\n"
+            "Submit a job posting first and you'll earn one token for it.\n"
+            f"Current balance: *{current_credits}* token{'s' if current_credits != 1 else ''}.",
         )
         await _send_whatsapp_buttons(
             phone_number,
-            "Want to earn a credit?",
+            "Want to earn a token?\n\n_Reply *balance* anytime._",
             [("btn_submit_job", "Submit Job"), ("cmd_jobs", "Browse Jobs"), ("btn_menu", "Menu")],
         )
         return
@@ -895,8 +910,10 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
     est_secs = num_batches * _AVG_SECS_PER_BATCH
     est_str = f"~{est_secs}s" if est_secs < 60 else f"~{round(est_secs / 60)} min"
 
+    tok_left = "token" if credits_remaining == 1 else "tokens"
     await _send_whatsapp(
         phone_number,
+        f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
         f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
     )
 
@@ -1029,7 +1046,7 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
     link = _make_magic_link(phone_number, db, redirect_to=f"/matches/{match_session.id}")
     lines.append(f"\nView all matches & draft applications:\n👉 {link}")
     lines.append("_Link expires in 30 min._")
-    lines.append(f"\nCredits remaining: *{credits_remaining}*")
+    lines.append(f"\nTokens remaining: *{credits_remaining}*")
 
     await _send_whatsapp(phone_number, "\n".join(lines))
 
@@ -1041,6 +1058,7 @@ _FALLBACK_GREETING = (
     "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
     "I'm going to build your crew profile in a quick chat — takes about 2 minutes "
     "and gets you in front of recruiters and vessels straight away.\n\n"
+    "💳 *Tokens:* you start at *0*; each *Find Matches* uses *1* token; submit a valid job to earn *1*.\n\n"
     "Let's start with the basics — what's your *full name*? 🪪"
 )
 
@@ -1111,8 +1129,8 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
             f"Your crew profile is live and ready to match with vessels. "
             f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
-            f"💳 *Credits:* You start with *0*. Each *Find Matches* run uses *1* credit — "
-            f"submit a valid job to the board to earn *1* credit.\n\n"
+            f"💳 *Tokens:* You start with *0*. Each *Find Matches* run uses *1* token — "
+            f"submit a valid job to the board to earn *1* token.\n\n"
             f"_Link expires in 30 min. Type *help* anytime to see what I can do for you._ ⚡"
         )
     else:
@@ -1132,7 +1150,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         await _send_help_menu(phone, db)
         return None
 
-    if cmd in ("credits", "balance", "my credits"):
+    if cmd in ("credits", "balance", "my credits", "tokens", "my tokens"):
         bal = get_credit_balance(db, phone)
         await _send_whatsapp(phone, _credits_standalone_message(bal))
         return None
@@ -1143,7 +1161,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         await _send_whatsapp_buttons(
             phone,
             "What's next?",
-            [("btn_edit_profile", "Edit Profile"), ("btn_find_matches", "Find Matches"), ("btn_menu", "Main Menu")],
+            [("btn_edit_profile", "Edit Profile"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Main Menu")],
         )
         return None
 
@@ -1157,7 +1175,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         await _send_whatsapp_buttons(
             phone,
             "Need anything else?",
-            [("btn_upload_docs", "Upload Docs"), ("btn_find_matches", "Find Matches"), ("btn_menu", "Main Menu")],
+            [("btn_upload_docs", "Upload Docs"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Main Menu")],
         )
         return None
 
@@ -1173,7 +1191,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         await _send_whatsapp_buttons(
             phone,
             "Anything else?",
-            [("btn_view_profile", "View Profile"), ("btn_find_matches", "Find Matches"), ("btn_menu", "Main Menu")],
+            [("btn_view_profile", "View Profile"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Main Menu")],
         )
         return None
 
@@ -1189,7 +1207,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         await _send_whatsapp_buttons(
             phone,
             "Anything else?",
-            [("btn_view_profile", "View Profile"), ("btn_find_matches", "Find Matches"), ("btn_menu", "Main Menu")],
+            [("btn_view_profile", "View Profile"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Main Menu")],
         )
         return None
 
@@ -1243,11 +1261,12 @@ async def _process_whatsapp_message(phone_number: str, user_text: str) -> None:
             if not settings.OPENAI_API_KEY:
                 await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
             else:
+                await _send_job_review_wait(phone_number)
                 await _process_job_text_submission(phone_number, user_text, db)
             await _send_whatsapp_buttons(
                 phone_number,
-                "What's next?",
-                [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Find Matches"), ("btn_menu", "Menu")],
+                "What's next?\n\n_Reply *balance* anytime._",
+                [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Menu")],
             )
             metrics.increment("whatsapp_messages")
             return
@@ -1283,11 +1302,12 @@ async def _process_media_message(phone_number: str, media_id: str) -> None:
             if not settings.OPENAI_API_KEY:
                 await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
             else:
+                await _send_job_review_wait(phone_number)
                 await _process_job_image_submission(phone_number, media_id, db)
             await _send_whatsapp_buttons(
                 phone_number,
-                "What's next?",
-                [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Find Matches"), ("btn_menu", "Menu")],
+                "What's next?\n\n_Reply *balance* anytime._",
+                [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Menu")],
             )
             return
 
