@@ -15,7 +15,7 @@ _flags: dict[str, bool] = {
     "user_registration": True,   # Creating new user accounts (POST /users)
     "scraper":           True,   # Apify Facebook scraper — costs money per run
     "scraper_web":       True,   # Web scrapers (Dockwalk, Yotspot) — free, runs every cycle
-    "whatsapp":          True,   # WhatsApp bot (/whatsapp/webhook)
+    "whatsapp":          True,   # WhatsApp bot (/webhooks/whatsapp)
 }
 
 # Human-readable label for the dashboard toggle UI.

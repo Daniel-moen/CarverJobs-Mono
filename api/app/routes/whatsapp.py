@@ -1,8 +1,8 @@
 """
 WhatsApp bot via Meta Cloud API.
 
-Incoming messages → POST /whatsapp/webhook
-Webhook verification → GET /whatsapp/webhook
+Incoming messages → POST /webhooks/whatsapp
+Webhook verification → GET /webhooks/whatsapp
 Magic link auth → GET /wa/auth/{token}
 
 Identity: phone number is the user_key used for CrewProfile, Document, JobHistoryEntry.
@@ -1274,7 +1274,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@router.get("/whatsapp/webhook", response_class=PlainTextResponse)
+@router.get("/webhooks/whatsapp", response_class=PlainTextResponse)
 async def whatsapp_verify(request: Request):
     """Meta webhook verification handshake."""
     params = request.query_params
@@ -1362,7 +1362,7 @@ async def _process_media_message(phone_number: str, media_id: str) -> None:
         db.close()
 
 
-@router.post("/whatsapp/webhook", status_code=status.HTTP_200_OK)
+@router.post("/webhooks/whatsapp", status_code=status.HTTP_200_OK)
 async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
     """Receive incoming WhatsApp messages from Meta.
 
