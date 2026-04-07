@@ -1,8 +1,6 @@
 """
 Crew-facing job submission — same AI review as admin ingest, earns 1 token on success.
 """
-from __future__ import annotations
-
 import asyncio
 import json as _json
 from pathlib import Path

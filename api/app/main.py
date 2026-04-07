@@ -1,4 +1,5 @@
 import asyncio
+import os
 import traceback as _traceback
 import uuid
 from contextlib import asynccontextmanager
@@ -57,18 +58,36 @@ async def metrics_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _init_database()
-    log.info("Starting background health checker (interval=5m)")
-    health_task = asyncio.create_task(health_check_loop())
-    log.info("Starting background metrics recorder (interval=1m)")
-    metrics_task = asyncio.create_task(metrics_loop())
-    log.info("Starting APIFY scraper scheduler (interval=6h)")
-    scraper_task = asyncio.create_task(scraper_loop())
+    """Start accepting HTTP immediately so platform healthchecks (e.g. Railway) see /health.
+
+    DB init and background workers run after bind; other routes return 503 until DB is ready.
+    """
+    app.state.db_ready = False
+    background_tasks: list[asyncio.Task] = []
+
+    async def _run_init_and_workers() -> None:
+        try:
+            await asyncio.to_thread(_init_database)
+        except Exception:
+            log.critical("Database initialisation failed — exiting process")
+            log.exception("DB init traceback")
+            os._exit(1)
+        app.state.db_ready = True
+        log.info("Database ready — accepting full traffic")
+        log.info("Starting background health checker (interval=5m)")
+        background_tasks.append(asyncio.create_task(health_check_loop()))
+        log.info("Starting background metrics recorder (interval=1m)")
+        background_tasks.append(asyncio.create_task(metrics_loop()))
+        log.info("Starting APIFY scraper scheduler (interval=6h)")
+        background_tasks.append(asyncio.create_task(scraper_loop()))
+
+    init_task = asyncio.create_task(_run_init_and_workers())
     yield
     log.info("Shutting down background tasks…")
-    for task in (health_task, metrics_task, scraper_task):
+    init_task.cancel()
+    for task in background_tasks:
         task.cancel()
-    await asyncio.gather(health_task, metrics_task, scraper_task, return_exceptions=True)
+    await asyncio.gather(init_task, *background_tasks, return_exceptions=True)
     log.info("Background tasks stopped")
 
 
@@ -201,6 +220,24 @@ async def request_id_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Request-ID"] = req_id
     return response
+
+
+# Liveness paths only — must stay fast so load balancers mark the instance up while DB init runs.
+_STARTUP_READY_EXEMPT_PATHS = frozenset({"/health", "/"})
+
+
+@app.middleware("http")
+async def startup_ready_gate(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if request.url.path in _STARTUP_READY_EXEMPT_PATHS:
+        return await call_next(request)
+    if not getattr(request.app.state, "db_ready", False):
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "detail": "Service starting up, try again shortly."},
+        )
+    return await call_next(request)
 
 
 _MODULE_PREFIXES = [
