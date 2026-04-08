@@ -5,7 +5,7 @@ import asyncio
 import json as _json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
@@ -29,6 +29,10 @@ from app.routes.scraper import (
 
 log = get_logger("carver.job_submit")
 _limiter = Limiter(key_func=get_remote_address)
+
+# Vision submit: several screenshots of one long listing (website); cap size/count for safety.
+_MAX_SUBMIT_IMAGE_COUNT = 6
+_MAX_SUBMIT_TOTAL_BYTES = 24 * 1024 * 1024
 
 router = APIRouter(prefix="/jobs/submit", tags=["job-submit"])
 
@@ -80,12 +84,11 @@ async def crew_submit_text(
 @_limiter.limit("10/minute")
 async def crew_submit_image(
     request: Request,
-    file: UploadFile = File(...),
     url: str = Form(""),
     session: dict = Depends(require_crew_or_admin_session),
     db: Session = Depends(get_db),
 ):
-    from app.services.ai_client import review_job_image
+    from app.services.ai_client import review_job_images
     from app.services.ai_job_reviewer import _SYSTEM_PROMPT
 
     if not settings.OPENAI_API_KEY:
@@ -94,32 +97,59 @@ async def crew_submit_image(
             detail="OPENAI_API_KEY is not configured.",
         )
 
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in _IMAGE_EXTENSIONS:
+    form = await request.form()
+    raw_list = form.getlist("files")
+    if not raw_list:
+        single = form.get("file")
+        raw_list = [single] if single is not None else []
+
+    uploadables = [f for f in raw_list if isinstance(f, UploadFile)]
+    if not uploadables:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported image file extension.",
+            detail="No image file(s). Send one or more images as form field 'files', or a single 'file'.",
         )
-    if file.content_type and file.content_type not in _IMAGE_MIME_TYPES:
+    if len(uploadables) > _MAX_SUBMIT_IMAGE_COUNT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported image MIME type.",
+            detail=f"Too many images (max {_MAX_SUBMIT_IMAGE_COUNT}).",
         )
 
-    contents = await file.read()
-    if not contents:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty image upload.")
-    if len(contents) > _MAX_IMPORT_IMAGE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Image exceeds 8 MB limit.",
-        )
+    image_payloads: list[tuple[bytes, str]] = []
+    total = 0
+    for uf in uploadables:
+        suffix = Path(uf.filename or "").suffix.lower()
+        if suffix not in _IMAGE_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported image file extension on one of the uploads.",
+            )
+        if uf.content_type and uf.content_type not in _IMAGE_MIME_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported image MIME type on one of the uploads.",
+            )
+        contents = await uf.read()
+        if not contents:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One of the uploads was empty.")
+        if len(contents) > _MAX_IMPORT_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Each image must be 8 MB or less.",
+            )
+        total += len(contents)
+        if total > _MAX_SUBMIT_TOTAL_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Combined image size is too large (max 24 MB total).",
+            )
+        mime = uf.content_type or "image/png"
+        image_payloads.append((contents, mime))
 
     raw_json = await asyncio.to_thread(
-        review_job_image,
+        review_job_images,
         api_key=settings.OPENAI_API_KEY,
-        image_bytes=contents,
-        mime_type=file.content_type or "image/png",
+        images=image_payloads,
         model=settings.OPENAI_MODEL,
         system_prompt=_SYSTEM_PROMPT,
     )

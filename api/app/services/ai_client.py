@@ -196,6 +196,53 @@ def call_openai(
             ) from exc
 
 
+def review_job_images(
+    *,
+    api_key: str,
+    images: list[tuple[bytes, str]],
+    model: str = "gpt-4o-mini",
+    system_prompt: str,
+) -> str:
+    """Read one or more screenshots with AI vision; return raw JSON (same schema as text reviewer)."""
+    if not images:
+        raise AIResponseError("No images provided.", crv_code="CRV-3006")
+    for image_bytes, _mime in images:
+        if not image_bytes:
+            raise AIResponseError("Image bytes are empty.", crv_code="CRV-3006")
+
+    if len(images) == 1:
+        intro = (
+            "Read this screenshot of a yacht crew job posting. "
+            "Analyse the visible content and return the JSON result."
+        )
+    else:
+        intro = (
+            "Read these screenshots of a yacht crew job posting. "
+            "They may be separate parts of the same listing — combine details across all images. "
+            "Analyse the visible content and return a single JSON result."
+        )
+
+    content: list[dict[str, Any]] = [{"type": "text", "text": intro}]
+    for image_bytes, mime_type in images:
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        data_url = f"data:{mime_type};base64,{b64}"
+        content.append({"type": "image_url", "image_url": {"url": data_url}})
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": content},
+    ]
+    max_tokens = 1800 if len(images) > 1 else 1500
+    return call_openai(
+        api_key=api_key,
+        messages=messages,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=0.1,
+        response_format={"type": "json_object"},
+    )
+
+
 def review_job_image(
     *,
     api_key: str,
@@ -204,34 +251,10 @@ def review_job_image(
     model: str = "gpt-4o-mini",
     system_prompt: str,
 ) -> str:
-    """Read a screenshot with AI vision and return the raw JSON string (same
-    schema as the text-based job reviewer).  One API call instead of two."""
-    if not image_bytes:
-        raise AIResponseError("Image bytes are empty.", crv_code="CRV-3006")
-
-    b64 = base64.b64encode(image_bytes).decode("ascii")
-    data_url = f"data:{mime_type};base64,{b64}"
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "Read this screenshot of a yacht crew job posting. "
-                        "Analyse the visible content and return the JSON result."
-                    ),
-                },
-                {"type": "image_url", "image_url": {"url": data_url}},
-            ],
-        },
-    ]
-    return call_openai(
+    """Read a single screenshot (convenience wrapper around review_job_images)."""
+    return review_job_images(
         api_key=api_key,
-        messages=messages,
+        images=[(image_bytes, mime_type)],
         model=model,
-        max_tokens=1500,
-        temperature=0.1,
-        response_format={"type": "json_object"},
+        system_prompt=system_prompt,
     )

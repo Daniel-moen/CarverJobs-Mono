@@ -246,18 +246,45 @@
     }
   }
 
-  async function submitSharedJobImage(file) {
-    if (!file || !JOB_IMG_TYPES.includes(file.type) || file.size > 8 * 1024 * 1024) {
-      jobSubmitErr = 'Use a PNG, JPG, or WebP under 8 MB.'
-      return
+  function validateJobShareFiles(fileList) {
+    const files = Array.from(fileList || []).filter((f) => f && f.size > 0)
+    if (!files.length) {
+      jobSubmitErr = 'Choose at least one image.'
+      return null
     }
+    if (files.length > 6) {
+      jobSubmitErr = 'Use at most 6 images per submit.'
+      return null
+    }
+    let total = 0
+    for (const f of files) {
+      if (!JOB_IMG_TYPES.includes(f.type)) {
+        jobSubmitErr = 'Use only PNG, JPG, or WebP images.'
+        return null
+      }
+      if (f.size > 8 * 1024 * 1024) {
+        jobSubmitErr = 'Each image must be under 8 MB.'
+        return null
+      }
+      total += f.size
+    }
+    if (total > 24 * 1024 * 1024) {
+      jobSubmitErr = 'Combined images must be under 24 MB.'
+      return null
+    }
+    return files
+  }
+
+  async function submitSharedJobImages(fileList) {
+    const files = validateJobShareFiles(fileList)
+    if (!files) return
     trackClick('crew_submit_job_image')
     jobSubmitBusy = true
     jobSubmitErr = ''
     jobSubmitMsg = ''
     try {
       const form = new FormData()
-      form.append('file', file)
+      for (const f of files) form.append('files', f)
       form.append('url', jobSourceUrl.trim())
       const res = await apiFetch(`${API_BASE_URL}/jobs/submit/image`, {
         method: 'POST',
@@ -283,8 +310,8 @@
   function onJobShareDrop(e) {
     e.preventDefault()
     jobDragOver = false
-    const f = e.dataTransfer?.files?.[0]
-    if (f) submitSharedJobImage(f)
+    const dt = e.dataTransfer?.files
+    if (dt?.length) submitSharedJobImages(dt)
   }
 
   function onJobShareDragOver(e) {
@@ -293,9 +320,9 @@
   }
 
   function onJobShareFilePick(e) {
-    const f = e.currentTarget.files?.[0]
+    const list = e.currentTarget.files
     e.currentTarget.value = ''
-    if (f) submitSharedJobImage(f)
+    if (list?.length) submitSharedJobImages(list)
   }
 </script>
 
@@ -515,7 +542,7 @@
 
       <div class="rounded-xl border border-white/8 bg-black/25 p-4">
         <p class="text-xs font-semibold text-slate-300">Screenshot</p>
-        <p class="mt-0.5 text-[11px] text-slate-600">PNG, JPG, or WebP · max 8 MB</p>
+        <p class="mt-0.5 text-[11px] text-slate-600">PNG, JPG, or WebP · up to 6 images · 8 MB each · 24 MB total</p>
         <div
           class="drop-share mt-3 flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors
             {jobDragOver ? 'border-amber-400/50 bg-amber-400/10' : 'border-white/12 bg-black/20 hover:border-white/20'}"
@@ -524,11 +551,12 @@
           ondragleave={() => (jobDragOver = false)}
           role="presentation"
         >
-          <p class="text-sm text-slate-400">{jobDragOver ? 'Drop to upload' : 'Drag an image here'}</p>
+          <p class="text-sm text-slate-400">{jobDragOver ? 'Drop to upload' : 'Drag image(s) here'}</p>
           <label class="mt-3 cursor-pointer rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-400/18">
-            Choose file
+            Choose files
             <input
               type="file"
+              multiple
               accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
               class="hidden"
               disabled={jobSubmitBusy}

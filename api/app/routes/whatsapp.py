@@ -1277,7 +1277,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
             phone,
             "📸 *Submit a job to the board*\n\n"
             "Saw something in a crew *group*, *page*, or *post*? Share it easily:\n"
-            "• Send a *screenshot* of the listing, or\n"
+            "• Send *screenshot(s)* of the listing (several photos in a row are fine), or\n"
             "• *Paste* the job text here\n\n"
             "_I'll read it with AI and add it to the board if it's a real yacht crew role._",
         )
@@ -1309,18 +1309,22 @@ async def _process_whatsapp_message(phone_number: str, user_text: str, graph_pho
         wa_session = _get_or_create_session(phone_number, db)
 
         if wa_session.mode == "job_submit":
-            wa_session.mode = "chat"
-            db.commit()
-            if not settings.OPENAI_API_KEY:
-                await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
-            else:
-                await _send_job_review_wait(phone_number)
-                await _process_job_text_submission(phone_number, user_text, db)
-            await _send_whatsapp_buttons(
-                phone_number,
-                "What's next?\n\n_Reply *balance* anytime._",
-                [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Menu")],
-            )
+            # Keep mode until we're done so concurrent image webhooks still see job_submit
+            # (otherwise a second photo triggers the crew document upload flow).
+            try:
+                if not settings.OPENAI_API_KEY:
+                    await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
+                else:
+                    await _send_job_review_wait(phone_number)
+                    await _process_job_text_submission(phone_number, user_text, db)
+                await _send_whatsapp_buttons(
+                    phone_number,
+                    "What's next?\n\n_Reply *balance* anytime._",
+                    [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Menu")],
+                )
+            finally:
+                wa_session.mode = "chat"
+                db.commit()
             metrics.increment("whatsapp_messages")
             return
 
@@ -1353,18 +1357,20 @@ async def _process_media_message(phone_number: str, media_id: str, graph_phone_n
                     "⚠️ Please send a *screenshot image* (PNG, JPEG, WebP) or paste the *job text* instead.",
                 )
                 return
-            wa_session.mode = "chat"
-            db.commit()
-            if not settings.OPENAI_API_KEY:
-                await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
-            else:
-                await _send_job_review_wait(phone_number)
-                await _process_job_image_submission(phone_number, media_id, db)
-            await _send_whatsapp_buttons(
-                phone_number,
-                "What's next?\n\n_Reply *balance* anytime._",
-                [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Menu")],
-            )
+            try:
+                if not settings.OPENAI_API_KEY:
+                    await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
+                else:
+                    await _send_job_review_wait(phone_number)
+                    await _process_job_image_submission(phone_number, media_id, db)
+                await _send_whatsapp_buttons(
+                    phone_number,
+                    "What's next?\n\n_Reply *balance* anytime._",
+                    [("btn_submit_job", "Submit Another"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Menu")],
+                )
+            finally:
+                wa_session.mode = "chat"
+                db.commit()
             return
 
         link = _make_magic_link(phone_number, db)
