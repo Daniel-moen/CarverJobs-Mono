@@ -91,7 +91,10 @@ class Settings:
   # WhatsApp bot — Meta Cloud API
   META_APP_ID: str = os.getenv("META_APP_ID", "").strip()
   META_APP_SECRET: str = os.getenv("META_APP_SECRET", "").strip()
-  WHATSAPP_PHONE_NUMBER_ID: str = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+  # One Graph phone number id, or comma-separated ids if this app receives webhooks for multiple numbers.
+  _WHATSAPP_PHONE_NUMBER_RAW: str = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+  WHATSAPP_PHONE_NUMBER_IDS: list[str] = [p.strip() for p in _WHATSAPP_PHONE_NUMBER_RAW.split(",") if p.strip()]
+  WHATSAPP_PHONE_NUMBER_ID: str = WHATSAPP_PHONE_NUMBER_IDS[0] if WHATSAPP_PHONE_NUMBER_IDS else ""
   WHATSAPP_BUSINESS_ACCOUNT_ID: str = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "").strip()
   WHATSAPP_ACCESS_TOKEN: str = os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
   # Arbitrary string you set in the Meta webhook dashboard to verify ownership

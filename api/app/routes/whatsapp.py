@@ -17,6 +17,7 @@ import hmac
 import json
 import secrets
 import time
+from contextvars import ContextVar
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -107,6 +108,21 @@ def _is_duplicate_or_stale(msg_id: str, timestamp_str: str | None) -> bool:
 
 _GRAPH_URL = "https://graph.facebook.com/v19.0"
 
+# Inbound webhook sets this so outbound /messages calls use the same Graph phone id.
+_wa_graph_phone_id: ContextVar[str | None] = ContextVar("wa_graph_phone_id", default=None)
+
+
+def _active_wa_phone_number_id() -> str:
+    cid = _wa_graph_phone_id.get()
+    if cid:
+        return cid
+    ids = settings.WHATSAPP_PHONE_NUMBER_IDS
+    return ids[0] if ids else ""
+
+
+def _messages_url() -> str:
+    return f"{_GRAPH_URL}/{_active_wa_phone_number_id()}/messages"
+
 
 def _wa_configured() -> bool:
     return bool(settings.WHATSAPP_PHONE_NUMBER_ID and settings.WHATSAPP_ACCESS_TOKEN)
@@ -132,7 +148,7 @@ def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
 
 async def _send_whatsapp(to: str, text: str) -> None:
     """Send a text message via Meta Cloud API."""
-    url = f"{_GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = _messages_url()
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -152,7 +168,7 @@ async def _send_whatsapp(to: str, text: str) -> None:
 
 async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, str]]) -> None:
     """Send an interactive quick-reply button message (up to 3 buttons)."""
-    url = f"{_GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = _messages_url()
     btn_list = [
         {"type": "reply", "reply": {"id": bid, "title": title[:20]}}
         for bid, title in buttons[:3]
@@ -206,7 +222,7 @@ async def _send_help_menu(to: str, db: Session) -> None:
     """Send interactive list menu with all available commands."""
     balance = get_credit_balance(db, to)
     body_text = f"What would you like to do?\n\n{_credits_summary_for_menu(balance)}"
-    url = f"{_GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = _messages_url()
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -1285,8 +1301,9 @@ async def whatsapp_verify(request: Request):
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
-async def _process_whatsapp_message(phone_number: str, user_text: str) -> None:
+async def _process_whatsapp_message(phone_number: str, user_text: str, graph_phone_number_id: str = "") -> None:
     """Handle a parsed WhatsApp message in the background (owns its own DB session)."""
+    ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
     db = SessionLocal()
     try:
         wa_session = _get_or_create_session(phone_number, db)
@@ -1318,10 +1335,13 @@ async def _process_whatsapp_message(phone_number: str, user_text: str) -> None:
         log.exception("WhatsApp message processing error | phone=%s | %s", phone_number[:6] + "****", exc)
     finally:
         db.close()
+        if ctx_token is not None:
+            _wa_graph_phone_id.reset(ctx_token)
 
 
-async def _process_media_message(phone_number: str, media_id: str) -> None:
+async def _process_media_message(phone_number: str, media_id: str, graph_phone_number_id: str = "") -> None:
     """Handle an incoming media file — either as a job submission or crew doc upload."""
+    ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
     db = SessionLocal()
     try:
         wa_session = _get_or_create_session(phone_number, db)
@@ -1360,6 +1380,8 @@ async def _process_media_message(phone_number: str, media_id: str) -> None:
         log.exception("WhatsApp media handler error | phone=%s | %s", phone_number[:6] + "****", exc)
     finally:
         db.close()
+        if ctx_token is not None:
+            _wa_graph_phone_id.reset(ctx_token)
 
 
 @router.post("/webhooks/whatsapp", status_code=status.HTTP_200_OK)
@@ -1398,14 +1420,17 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
         recipient_phone_number_id = str(metadata.get("phone_number_id") or "").strip()
         recipient_display_number = str(metadata.get("display_phone_number") or "").strip()
 
-        if recipient_phone_number_id and recipient_phone_number_id != settings.WHATSAPP_PHONE_NUMBER_ID:
+        allowed_ids = settings.WHATSAPP_PHONE_NUMBER_IDS
+        if recipient_phone_number_id and allowed_ids and recipient_phone_number_id not in allowed_ids:
             log.warning(
-                "WhatsApp webhook ignored for different recipient | configured_id=%s | recipient_id=%s | recipient=%s",
-                settings.WHATSAPP_PHONE_NUMBER_ID,
+                "WhatsApp webhook ignored for different recipient | allowed=%s | recipient_id=%s | recipient=%s",
+                ",".join(allowed_ids),
                 recipient_phone_number_id,
                 recipient_display_number or "?",
             )
             return {"ok": True}
+
+        graph_phone_number_id = recipient_phone_number_id or (allowed_ids[0] if allowed_ids else "")
 
         messages = value.get("messages") or []
         if not messages:
@@ -1440,15 +1465,15 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
         elif msg_type == "image":
             media_id = (msg.get("image") or {}).get("id", "")
             if media_id:
-                background_tasks.add_task(_process_media_message, phone_number, media_id)
+                background_tasks.add_task(_process_media_message, phone_number, media_id, graph_phone_number_id)
             return {"ok": True}
         elif msg_type in ("document", "audio", "video"):
-            background_tasks.add_task(_process_media_message, phone_number, "")
+            background_tasks.add_task(_process_media_message, phone_number, "", graph_phone_number_id)
             return {"ok": True}
         else:
             return {"ok": True}
 
-        background_tasks.add_task(_process_whatsapp_message, phone_number, user_text)
+        background_tasks.add_task(_process_whatsapp_message, phone_number, user_text, graph_phone_number_id)
 
     except Exception as exc:
         log.exception("WhatsApp webhook parse error | %s", exc)
