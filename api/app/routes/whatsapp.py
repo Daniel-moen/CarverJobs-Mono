@@ -11,11 +11,13 @@ Complex actions (doc uploads, full profile edit) are handled via a short-lived m
 that sets a session cookie and lands the user on the existing web profile page.
 """
 from __future__ import annotations
+import asyncio
 
 import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
 from contextvars import ContextVar
 from datetime import datetime, timezone, timedelta
@@ -46,6 +48,8 @@ _SEEN_MSG_IDS: set[str] = set()
 _SEEN_MSG_IDS_ORDER: list[str] = []
 _SEEN_MSG_MAX = 500
 _STALE_MSG_SECONDS = 300  # ignore messages older than 5 minutes
+_ACTIVE_MATCH_RUNS: set[str] = set()
+_ACTIVE_MATCH_RUNS_LOCK = threading.Lock()
 
 
 def _parse_meta_timestamp(timestamp_str: str | None) -> int | None:
@@ -103,6 +107,19 @@ def _is_duplicate_or_stale(msg_id: str, timestamp_str: str | None) -> bool:
         _SEEN_MSG_IDS.discard(oldest)
 
     return False
+
+
+def _try_start_match_run(phone_number: str) -> bool:
+    with _ACTIVE_MATCH_RUNS_LOCK:
+        if phone_number in _ACTIVE_MATCH_RUNS:
+            return False
+        _ACTIVE_MATCH_RUNS.add(phone_number)
+        return True
+
+
+def _finish_match_run(phone_number: str) -> None:
+    with _ACTIVE_MATCH_RUNS_LOCK:
+        _ACTIVE_MATCH_RUNS.discard(phone_number)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -897,13 +914,12 @@ async def _handle_jobs_command(phone_number: str, db: Session) -> str:
     )
 
 
-async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, db: Session) -> None:
+async def _handle_match_command(phone_number: str, db: Session) -> None:
     """Run the AI matching engine, save results, and send a website link.
 
     Results are persisted as a MatchSession so the user can view all matches
     and draft application emails on the website.
     """
-    import asyncio
     import math as _math
 
     from app.services.matching_engine import (
@@ -1101,6 +1117,20 @@ async def _handle_match_command(phone_number: str, wa_session: WhatsAppSession, 
 
     await _send_whatsapp(phone_number, "\n".join(lines))
 
+async def _run_match_command_background(phone_number: str, graph_phone_number_id: str = "") -> None:
+    """Run matching in a detached task with its own DB session/context."""
+    ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
+    db = SessionLocal()
+    try:
+        await _handle_match_command(phone_number, db)
+    except Exception as exc:
+        log.exception("WhatsApp background match error | phone=%s | %s", phone_number[:6] + "****", exc)
+    finally:
+        db.close()
+        _finish_match_run(phone_number)
+        if ctx_token is not None:
+            _wa_graph_phone_id.reset(ctx_token)
+
 
 
 # ── Onboarding flow ───────────────────────────────────────────────────────────
@@ -1267,7 +1297,15 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         return await _handle_jobs_command(phone, db)
 
     if cmd in ("match", "find jobs", "find matches", "matching", "find me jobs", "job match"):
-        await _handle_match_command(phone, wa_session, db)
+        if not _try_start_match_run(phone):
+            await _send_whatsapp(
+                phone,
+                "⏳ A *Find Matches* run is already in progress. I'll send your results here as soon as it's done.",
+            )
+            return None
+        graph_phone_number_id = _wa_graph_phone_id.get() or ""
+        asyncio.create_task(_run_match_command_background(phone, graph_phone_number_id))
+        await _send_whatsapp(phone, "🚀 Starting your *Find Matches* run now — you'll get updates here shortly.")
         return None
 
     if cmd in ("submit job", "post job", "add job", "submit a job", "post a job"):
