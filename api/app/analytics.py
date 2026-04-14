@@ -6,6 +6,7 @@ Events are written to the `analytics_events` table (survives restarts) and
 also aggregated into in-memory counters that power the real-time dashboard.
 On startup the in-memory counters are rebuilt from the DB.
 """
+import logging
 import threading
 from collections import Counter
 from datetime import datetime, timezone
@@ -23,13 +24,24 @@ _button_clicks: Counter = Counter()
 _chat_events: Counter = Counter()
 _event_types: Counter = Counter()
 _total_events: int = 0
+log = logging.getLogger("carver.analytics")
+
+
+def _reset_counters_locked() -> None:
+    global _total_events
+    _page_views.clear()
+    _button_clicks.clear()
+    _chat_events.clear()
+    _event_types.clear()
+    _total_events = 0
 
 
 def _rebuild_counters() -> None:
     """Rebuild in-memory counters from the database on startup."""
     global _total_events
+    rows = []
+    db: Session = SessionLocal()
     try:
-        db: Session = SessionLocal()
         rows = db.query(
             AnalyticsEvent.event_type,
             AnalyticsEvent.page,
@@ -40,7 +52,13 @@ def _rebuild_counters() -> None:
             AnalyticsEvent.page,
             AnalyticsEvent.label,
         ).all()
+    except Exception:
+        log.exception("Failed rebuilding analytics counters from DB")
+        return
+    finally:
         db.close()
+    with _lock:
+        _reset_counters_locked()
 
         for event_type, page, label, count in rows:
             _event_types[event_type] += count
@@ -51,8 +69,6 @@ def _rebuild_counters() -> None:
                 _button_clicks[label] += count
             elif event_type in ("chat_send", "chat_receive"):
                 _chat_events[event_type] += count
-    except Exception:
-        pass
 
 
 _rebuild_counters()
@@ -92,6 +108,7 @@ def record_events(events: list[dict], db: Session | None = None) -> int:
                 added += 1
         db.commit()
     except Exception:
+        log.exception("Failed to record analytics events batch")
         db.rollback()
     finally:
         if own_db:
