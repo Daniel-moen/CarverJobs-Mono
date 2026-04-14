@@ -30,7 +30,7 @@ _VALID_JOB_STATUSES = {"open", "closed", "priority", "filled", "draft"}
 # ── Auth schemas ──────────────────────────────────────────────────────────────
 
 class LoginRequest(APIModel):
-    username: Annotated[str, Field(min_length=1, max_length=80)]
+    username: Annotated[str, Field(min_length=1, max_length=160)]  # supports both usernames and email addresses
     password: Annotated[str, Field(min_length=1, max_length=256)]
 
 

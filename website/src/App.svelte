@@ -552,12 +552,12 @@
 
         <form class="mt-6 grid gap-3" onsubmit={loginWithPassword}>
           <label class="grid gap-1.5">
-            <span class="text-xs text-slate-400">Username</span>
+            <span class="text-xs text-slate-400">Email</span>
             <input
               class="rounded-md border border-white/15 bg-black px-3 py-2 text-sm text-white outline-none ring-cyan-300/70 transition focus:border-cyan-200/40 focus:ring"
-              type="text"
+              type="email"
               bind:value={loginUsername}
-              autocomplete="username"
+              autocomplete="email"
               required
             />
           </label>

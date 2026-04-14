@@ -13,7 +13,7 @@ from app.error_codes import CRV_2002, CRV_2007, CRV_2008, CRV_2009
 from app.database import get_db
 from app.logger import get_logger
 from app.schemas import GoogleLoginRequest, LoginRequest, SignupRequest, UserCreate, WaitlistSignupRequest
-from app.security import issue_session_token, optional_session, require_session
+from app.security import issue_session_token, optional_session, require_session, verify_password
 from app.services.credits import get_credit_balance
 from app.settings import settings
 
@@ -24,6 +24,17 @@ _limiter = Limiter(key_func=get_remote_address)
 # Safari/iOS can be strict about cross-site cookies; SameSite=None must
 # be paired with Secure=true or browsers will ignore the cookie.
 SESSION_SAMESITE = "none" if settings.SESSION_SECURE_COOKIE else "lax"
+
+def _set_session_cookie(response: Response, token: str) -> None:
+  response.set_cookie(
+    key=settings.SESSION_COOKIE_NAME,
+    value=token,
+    httponly=True,
+    secure=settings.SESSION_SECURE_COOKIE,
+    samesite=SESSION_SAMESITE,
+    max_age=settings.SESSION_TTL_SECONDS,
+    path="/",
+  )
 
 
 def _google_auth_enabled() -> bool:
@@ -109,15 +120,7 @@ def signup(request: Request, payload: SignupRequest, response: Response, db: Ses
   ))
 
   token = issue_session_token({"sub": email, "role": "crew", "user_id": user.id})
-  response.set_cookie(
-    key=settings.SESSION_COOKIE_NAME,
-    value=token,
-    httponly=True,
-    secure=settings.SESSION_SECURE_COOKIE,
-    samesite=SESSION_SAMESITE,
-    max_age=settings.SESSION_TTL_SECONDS,
-    path="/",
-  )
+  _set_session_cookie(response, token)
   metrics.increment("signups_success")
   log.info("Signup success | id=%d | email=%s", user.id, email)
   return {"ok": True, "user": {"id": user.id, "email": email, "role": "crew"}}
@@ -125,34 +128,37 @@ def signup(request: Request, payload: SignupRequest, response: Response, db: Ses
 
 @router.post("/login")
 @_limiter.limit("10/minute")
-def login(request: Request, payload: LoginRequest, response: Response):
+def login(request: Request, payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
   username = payload.username.strip()
   log.info("Login attempt | username=%s", username)
-  # Use constant-time comparison for both fields to prevent timing attacks.
+
+  # ── Admin login (constant-time comparison to prevent timing attacks) ──
   username_ok = hmac.compare_digest(username, settings.ADMIN_USERNAME)
   password_ok = hmac.compare_digest(payload.password, settings.ADMIN_PASSWORD)
-  if not username_ok or not password_ok:
-    log.warning("Login failed | username=%s", username)
-    metrics.increment("logins_failed")
-    raise HTTPException(
-      status_code=status.HTTP_401_UNAUTHORIZED,
-      detail="Invalid credentials",
-      headers={"X-Error-Code": CRV_2002},
-    )
+  if username_ok and password_ok:
+    token = issue_session_token({"sub": username, "role": "admin"})
+    _set_session_cookie(response, token)
+    metrics.increment("logins_success")
+    log.info("Login success | username=%s", username)
+    return {"ok": True, "user": {"username": username, "role": "admin"}}
 
-  token = issue_session_token({"sub": username, "role": "admin"})
-  response.set_cookie(
-    key=settings.SESSION_COOKIE_NAME,
-    value=token,
-    httponly=True,
-    secure=settings.SESSION_SECURE_COOKIE,
-    samesite=SESSION_SAMESITE,
-    max_age=settings.SESSION_TTL_SECONDS,
-    path="/",
+  # ── Crew user login by email/password ──
+  email = username.lower()
+  user = crud.get_user_by_email(db, email)
+  if user is not None and user.password_hash and verify_password(payload.password, user.password_hash):
+    token = issue_session_token({"sub": user.email, "role": user.role, "user_id": user.id})
+    _set_session_cookie(response, token)
+    metrics.increment("logins_success")
+    log.info("Login success | email=%s", user.email)
+    return {"ok": True, "user": {"email": user.email, "role": user.role}}
+
+  log.warning("Login failed | username=%s", username)
+  metrics.increment("logins_failed")
+  raise HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Invalid credentials",
+    headers={"X-Error-Code": CRV_2002},
   )
-  metrics.increment("logins_success")
-  log.info("Login success | username=%s", username)
-  return {"ok": True, "user": {"username": username, "role": "admin"}}
 
 
 @router.post("/google")
@@ -203,15 +209,7 @@ def login_google(request: Request, payload: GoogleLoginRequest, response: Respon
     "user_id": user.id,
     "provider": "google",
   })
-  response.set_cookie(
-    key=settings.SESSION_COOKIE_NAME,
-    value=token,
-    httponly=True,
-    secure=settings.SESSION_SECURE_COOKIE,
-    samesite=SESSION_SAMESITE,
-    max_age=settings.SESSION_TTL_SECONDS,
-    path="/",
-  )
+  _set_session_cookie(response, token)
   metrics.increment("logins_success")
   log.info("Google login success | email=%s", email)
   return {
@@ -243,17 +241,18 @@ def get_session(session: dict | None = Depends(optional_session), db: Session = 
   if session.get("role") == "admin":
     is_subscribed = True
   else:
-    active_sub = (
-        db.query(models.Subscription)
+    active_sub_exists = (
+        db.query(models.Subscription.id)
         .filter(models.Subscription.user_key == user_key, models.Subscription.status == "active")
         .first()
     )
-    is_subscribed = active_sub is not None
-  early_bird = False
+    is_subscribed = active_sub_exists is not None
   credits_balance = get_credit_balance(db, user_key) if user_key else 0
-  user_obj = db.query(models.User).filter(models.User.email == session.get("sub")).first()
-  if user_obj:
-    early_bird = bool(user_obj.early_bird)
+  early_bird = bool(
+    db.query(models.User.early_bird)
+    .filter(models.User.email == user_key)
+    .scalar()
+  ) if user_key else False
   return {
     "ok": True,
     "authenticated": True,
