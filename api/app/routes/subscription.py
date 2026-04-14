@@ -1,7 +1,13 @@
+import base64
 import hashlib
-import urllib.parse
+import hmac
+import json
+import time
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -15,72 +21,55 @@ log = get_logger("carver.subscription")
 
 router = APIRouter(prefix="/subscription", tags=["subscription"])
 
-PAYFAST_SANDBOX_URL = "https://sandbox.payfast.co.za/eng/process"
-PAYFAST_LIVE_URL = "https://www.payfast.co.za/eng/process"
-
-# PayFast sends ITN from these IP ranges — verify on every webhook.
-PAYFAST_VALID_IPS = frozenset({
-    "197.97.145.144", "197.97.145.145", "197.97.145.146", "197.97.145.147",
-    "197.97.145.148", "197.97.145.149", "197.97.145.150", "197.97.145.151",
-    "197.97.145.152", "197.97.145.153", "197.97.145.154", "197.97.145.155",
-    "197.97.145.156", "197.97.145.157", "197.97.145.158", "197.97.145.159",
-    # Sandbox IPs
-    "41.74.179.194",
-})
-
-# Field ordering for PayFast signature generation.
-SIGNATURE_FIELDS = [
-    "merchant_id", "merchant_key", "return_url", "cancel_url", "notify_url",
-    "name_first", "name_last", "email_address", "cell_number",
-    "m_payment_id", "amount", "item_name", "item_description",
-    "custom_int1", "custom_int2", "custom_int3", "custom_int4", "custom_int5",
-    "custom_str1", "custom_str2", "custom_str3", "custom_str4", "custom_str5",
-    "email_confirmation", "confirmation_address",
-    "payment_method", "subscription_type", "billing_date", "recurring_amount",
-    "frequency", "cycles",
-]
+YOCO_CHECKOUTS_URL = "https://payments.yoco.com/api/checkouts"
 
 
-def _generate_signature(data: dict[str, str], passphrase: str | None = None) -> str:
-    """Build an MD5 signature from ordered key=value pairs + optional passphrase."""
-    parts: list[str] = []
-    for key in SIGNATURE_FIELDS:
-        if key in data and data[key] != "":
-            parts.append(f"{key}={urllib.parse.quote_plus(str(data[key]))}")
-    pf_string = "&".join(parts)
-    if passphrase:
-        pf_string += f"&passphrase={urllib.parse.quote_plus(passphrase)}"
-    return hashlib.md5(pf_string.encode()).hexdigest()
+def _amount_str_to_cents(amount_str: str) -> int:
+    return int(round(float(amount_str.strip()) * 100))
 
 
-def _verify_itn_signature(post_data: dict[str, str], passphrase: str | None = None) -> bool:
-    """Verify the signature on an incoming ITN POST from PayFast."""
-    submitted_sig = post_data.get("signature", "")
-    check_data = {k: v for k, v in post_data.items() if k != "signature" and v.strip()}
-    parts: list[str] = []
-    for key, val in check_data.items():
-        parts.append(f"{key}={urllib.parse.quote_plus(val)}")
-    pf_string = "&".join(parts)
-    if passphrase:
-        pf_string += f"&passphrase={urllib.parse.quote_plus(passphrase)}"
-    expected_sig = hashlib.md5(pf_string.encode()).hexdigest()
-    return expected_sig == submitted_sig
+def _yoco_configured() -> bool:
+    return bool(settings.YOCO_SECRET_KEY)
 
 
-def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else ""
-
-
-def _payfast_configured() -> bool:
-    return bool(settings.PAYFAST_MERCHANT_ID and settings.PAYFAST_MERCHANT_KEY)
+def _verify_yoco_webhook_signature(
+    raw_body: bytes,
+    webhook_id: str | None,
+    webhook_timestamp: str | None,
+    signature_header: str | None,
+    secret: str,
+) -> bool:
+    """Verify Yoco webhook per https://developer.yoco.com/guides/online-payments/webhooks/verifying-the-events"""
+    if not webhook_id or not webhook_timestamp or not signature_header:
+        return False
+    try:
+        ts = int(webhook_timestamp)
+    except (TypeError, ValueError):
+        return False
+    if abs(int(time.time()) - ts) > 180:
+        return False
+    if not secret.startswith("whsec_"):
+        return False
+    try:
+        secret_bytes = base64.b64decode(secret.split("_", 1)[1])
+    except (IndexError, ValueError):
+        return False
+    signed_content = f"{webhook_id}.{webhook_timestamp}.{raw_body.decode('utf-8')}"
+    expected = base64.b64encode(
+        hmac.new(secret_bytes, signed_content.encode("utf-8"), hashlib.sha256).digest()
+    ).decode()
+    for part in signature_header.split():
+        if "," not in part:
+            continue
+        _, sig = part.split(",", 1)
+        if hmac.compare_digest(sig.strip(), expected):
+            return True
+    return False
 
 
 @router.post("/checkout")
-def create_checkout(request: Request, session: dict = Depends(require_session), db: Session = Depends(get_db)):
-    if not _payfast_configured():
+def create_checkout(session: dict = Depends(require_session), db: Session = Depends(get_db)):
+    if not _yoco_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider is not configured yet.",
@@ -89,7 +78,6 @@ def create_checkout(request: Request, session: dict = Depends(require_session), 
     user_key = session.get("sub", "")
     payment_id = uuid.uuid4().hex
 
-    # Upsert: cancel any existing pending subscription for this user
     existing = (
         db.query(models.Subscription)
         .filter(models.Subscription.user_key == user_key, models.Subscription.status == "pending")
@@ -103,94 +91,151 @@ def create_checkout(request: Request, session: dict = Depends(require_session), 
         user_key=user_key,
         m_payment_id=payment_id,
         status="pending",
-        amount=settings.PAYFAST_MONTHLY_AMOUNT,
+        amount=settings.YOCO_MONTHLY_AMOUNT,
         frequency=3,
     )
     db.add(sub)
     db.commit()
 
-    api_base = str(request.base_url).rstrip("/")
     frontend_base = settings.FRONTEND_BASE_URL.rstrip("/")
+    cents = _amount_str_to_cents(settings.YOCO_MONTHLY_AMOUNT)
 
-    data = {
-        "merchant_id": settings.PAYFAST_MERCHANT_ID,
-        "merchant_key": settings.PAYFAST_MERCHANT_KEY,
-        "return_url": f"{frontend_base}/subscription?status=success",
-        "cancel_url": f"{frontend_base}/subscription?status=cancelled",
-        "notify_url": f"{api_base}/subscription/notify",
-        "m_payment_id": payment_id,
-        "amount": settings.PAYFAST_MONTHLY_AMOUNT,
-        "item_name": "CARVER Pro Monthly",
-        "item_description": "CARVER Pro subscription — monthly recurring",
-        "email_address": user_key,
-        "subscription_type": "1",
-        "frequency": "3",
-        "cycles": "0",
-        "recurring_amount": settings.PAYFAST_MONTHLY_AMOUNT,
+    payload: dict[str, Any] = {
+        "amount": cents,
+        "currency": "ZAR",
+        "successUrl": f"{frontend_base}/subscription?status=success",
+        "cancelUrl": f"{frontend_base}/subscription?status=cancelled",
+        "failureUrl": f"{frontend_base}/subscription?status=failed",
+        "clientReferenceId": payment_id,
+        "metadata": {"m_payment_id": payment_id, "user_key": user_key},
+        "lineItems": [
+            {
+                "displayName": "CARVER Pro Monthly",
+                "description": "CARVER Pro — monthly access",
+                "quantity": 1,
+                "pricingDetails": {"price": cents},
+            }
+        ],
     }
-    data["signature"] = _generate_signature(data, settings.PAYFAST_PASSPHRASE or None)
 
-    payfast_url = PAYFAST_SANDBOX_URL if settings.PAYFAST_SANDBOX else PAYFAST_LIVE_URL
-    log.info("Checkout created | user=%s | payment_id=%s | sandbox=%s", user_key, payment_id, settings.PAYFAST_SANDBOX)
-    return {"ok": True, "payfast_url": payfast_url, "form_fields": data}
+    try:
+        resp = httpx.post(
+            YOCO_CHECKOUTS_URL,
+            headers={
+                "Authorization": f"Bearer {settings.YOCO_SECRET_KEY}",
+                "Content-Type": "application/json",
+                "Idempotency-Key": payment_id,
+            },
+            json=payload,
+            timeout=30.0,
+        )
+    except httpx.HTTPError as exc:
+        log.exception("Yoco checkout request failed | user=%s", user_key)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Payment provider unreachable. Please try again.",
+        ) from exc
+
+    if resp.status_code != 200:
+        log.warning(
+            "Yoco checkout rejected | status=%s | body=%s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not start checkout. Please try again.",
+        )
+
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        log.warning("Yoco checkout invalid JSON | %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Invalid response from payment provider.",
+        ) from exc
+
+    redirect_url = data.get("redirectUrl")
+    if not redirect_url:
+        log.warning("Yoco checkout missing redirectUrl | keys=%s", list(data.keys()))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Invalid response from payment provider.",
+        )
+
+    # Persist the Yoco checkout session id for auditing / future refund lookups.
+    if data.get("id"):
+        sub.checkout_id = str(data["id"])
+        db.commit()
+
+    log.info("Checkout created | user=%s | payment_id=%s | checkout_id=%s", user_key, payment_id, data.get("id"))
+    return {"ok": True, "redirect_url": redirect_url}
 
 
-@router.post("/notify")
-async def itn_notify(request: Request, db: Session = Depends(get_db)):
-    """PayFast ITN (Instant Transaction Notification) webhook — server-to-server."""
-    body = await request.body()
-    post_data: dict[str, str] = dict(urllib.parse.parse_qsl(body.decode("utf-8")))
-    log.info("ITN received | m_payment_id=%s | status=%s", post_data.get("m_payment_id"), post_data.get("payment_status"))
+@router.post("/webhook")
+async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
+    """Yoco payment webhooks — verify signature, then update subscription."""
+    raw = await request.body()
+    wh_id = request.headers.get("webhook-id")
+    wh_ts = request.headers.get("webhook-timestamp")
+    wh_sig = request.headers.get("webhook-signature")
 
-    # 1. Verify source IP (skip in sandbox for local testing)
-    if not settings.PAYFAST_SANDBOX:
-        client_ip = _get_client_ip(request)
-        if client_ip not in PAYFAST_VALID_IPS:
-            log.warning("ITN rejected: invalid source IP %s", client_ip)
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid source")
+    if not settings.YOCO_WEBHOOK_SECRET:
+        log.error("YOCO_WEBHOOK_SECRET not configured")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Webhook not configured")
 
-    # 2. Verify signature
-    if not _verify_itn_signature(post_data, settings.PAYFAST_PASSPHRASE or None):
-        log.warning("ITN rejected: invalid signature | m_payment_id=%s", post_data.get("m_payment_id"))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid signature")
+    if not _verify_yoco_webhook_signature(raw, wh_id, wh_ts, wh_sig, settings.YOCO_WEBHOOK_SECRET):
+        log.warning("Yoco webhook rejected: invalid signature")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
 
-    # 3. Look up our subscription record
-    m_payment_id = post_data.get("m_payment_id", "")
-    sub = db.query(models.Subscription).filter(models.Subscription.m_payment_id == m_payment_id).first()
+    try:
+        event = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
+
+    event_type = event.get("type")
+    payload = event.get("payload") or {}
+    meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    m_payment_id = meta.get("m_payment_id")
+    if not m_payment_id:
+        log.warning("Yoco webhook missing m_payment_id")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing reference")
+
+    sub = db.query(models.Subscription).filter(models.Subscription.m_payment_id == str(m_payment_id)).first()
     if not sub:
-        log.warning("ITN rejected: unknown m_payment_id=%s", m_payment_id)
+        log.warning("Yoco webhook unknown m_payment_id=%s", m_payment_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
 
-    # 4. Verify amount matches
-    pf_amount = post_data.get("amount_gross", "")
-    if pf_amount and pf_amount != sub.amount:
-        log.warning("ITN amount mismatch | expected=%s | got=%s", sub.amount, pf_amount)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount mismatch")
+    if event_type == "payment.succeeded":
+        amount_cents = payload.get("amount")
+        if amount_cents is not None:
+            expected = _amount_str_to_cents(sub.amount)
+            try:
+                if int(amount_cents) != expected:
+                    log.warning("Yoco webhook amount mismatch | expected=%s | got=%s", expected, amount_cents)
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount mismatch")
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount mismatch")
 
-    # 5. Process based on payment status
-    payment_status = post_data.get("payment_status", "")
-    token = post_data.get("token", "")
-
-    if payment_status == "COMPLETE":
         sub.status = "active"
-        sub.payfast_token = token or sub.payfast_token
-        sub.next_billing_date = post_data.get("billing_date", "")
-        # Also set the user-level flag for quick session lookups
+        if payload.get("id"):
+            sub.payment_token = str(payload["id"])
+        sub.next_billing_date = (
+            datetime.now(timezone.utc) + timedelta(days=30)
+        ).strftime("%Y-%m-%d")
         user = db.query(models.User).filter(models.User.email == sub.user_key).first()
         if user:
             user.is_subscribed = True
-        log.info("Subscription activated | user=%s | token=%s", sub.user_key, bool(token))
-    elif payment_status == "FAILED":
+        log.info("Subscription activated | user=%s | next_billing=%s", sub.user_key, sub.next_billing_date)
+        db.commit()
+    elif event_type == "payment.failed":
         sub.status = "failed"
         log.warning("Subscription payment failed | user=%s", sub.user_key)
-    elif payment_status == "CANCELLED":
-        sub.status = "cancelled"
-        user = db.query(models.User).filter(models.User.email == sub.user_key).first()
-        if user:
-            user.is_subscribed = False
-        log.info("Subscription cancelled via ITN | user=%s", sub.user_key)
+        db.commit()
+    else:
+        log.info("Yoco webhook ignored event type | type=%s", event_type)
 
-    db.commit()
     return {"ok": True}
 
 
@@ -218,16 +263,18 @@ def cancel_subscription(session: dict = Depends(require_session), db: Session = 
 @router.get("/status")
 def subscription_status(session: dict = Depends(require_session), db: Session = Depends(get_db)):
     user_key = session.get("sub", "")
+    monthly_amount = settings.YOCO_MONTHLY_AMOUNT
     sub = (
         db.query(models.Subscription)
         .filter(models.Subscription.user_key == user_key, models.Subscription.status == "active")
         .first()
     )
     if not sub:
-        return {"ok": True, "subscribed": False}
+        return {"ok": True, "subscribed": False, "monthly_amount": monthly_amount}
     return {
         "ok": True,
         "subscribed": True,
         "next_billing_date": sub.next_billing_date,
         "amount": sub.amount,
+        "monthly_amount": monthly_amount,
     }

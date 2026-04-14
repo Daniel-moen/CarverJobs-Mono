@@ -159,7 +159,7 @@ def run_migrations() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_key VARCHAR(160) NOT NULL,
             m_payment_id VARCHAR(64) NOT NULL UNIQUE,
-            payfast_token VARCHAR(120),
+            payment_token VARCHAR(120),
             status VARCHAR(20) NOT NULL DEFAULT 'pending',
             amount VARCHAR(20) NOT NULL,
             frequency INTEGER NOT NULL DEFAULT 3,
@@ -174,6 +174,12 @@ def run_migrations() -> None:
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_m_payment_id ON subscriptions (m_payment_id)"
     )
+
+    # Rename legacy payfast_token column to payment_token (idempotent).
+    sub_cols = _existing("subscriptions")
+    if "payfast_token" in sub_cols and "payment_token" not in sub_cols:
+        conn.execute("ALTER TABLE subscriptions RENAME COLUMN payfast_token TO payment_token")
+    _add("subscriptions", "checkout_id", "VARCHAR(120)", sub_cols)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS credit_accounts (

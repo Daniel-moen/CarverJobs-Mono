@@ -117,12 +117,10 @@ class Settings:
   TELNYX_PUBLIC_KEY: str = os.getenv("TELNYX_PUBLIC_KEY", "").strip()
   TELNYX_PHONE_NUMBER: str = os.getenv("TELNYX_PHONE_NUMBER", "").strip()
 
-  # PayFast — recurring subscription billing
-  PAYFAST_MERCHANT_ID: str = os.getenv("PAYFAST_MERCHANT_ID", "").strip()
-  PAYFAST_MERCHANT_KEY: str = os.getenv("PAYFAST_MERCHANT_KEY", "").strip()
-  PAYFAST_PASSPHRASE: str = os.getenv("PAYFAST_PASSPHRASE", "").strip()
-  PAYFAST_SANDBOX: bool = os.getenv("PAYFAST_SANDBOX", "true").lower() == "true"
-  PAYFAST_MONTHLY_AMOUNT: str = os.getenv("PAYFAST_MONTHLY_AMOUNT", "299.00").strip()
+  # Yoco — Checkout API (https://developer.yoco.com/docs/checkout-api/introduction)
+  YOCO_SECRET_KEY: str = os.getenv("YOCO_SECRET_KEY", "").strip()
+  YOCO_WEBHOOK_SECRET: str = os.getenv("YOCO_WEBHOOK_SECRET", "").strip()
+  YOCO_MONTHLY_AMOUNT: str = os.getenv("YOCO_MONTHLY_AMOUNT", "200.00").strip()
 
   # Scrape.do — HTML scraping proxy (alternative scraper)
   SCRAPE_DO_TOKEN: str = os.getenv("SCRAPE_DO_TOKEN", "").strip()

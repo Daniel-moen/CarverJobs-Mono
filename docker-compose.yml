@@ -67,6 +67,9 @@ services:
       META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-carver-whatsapp-verify}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8080}
       WA_MAGIC_TOKEN_TTL_SECONDS: ${WA_MAGIC_TOKEN_TTL_SECONDS:-1800}
+      YOCO_SECRET_KEY: ${YOCO_SECRET_KEY:-}
+      YOCO_WEBHOOK_SECRET: ${YOCO_WEBHOOK_SECRET:-}
+      YOCO_MONTHLY_AMOUNT: ${YOCO_MONTHLY_AMOUNT:-200.00}
     volumes:
       - ./api/data:/app/data
     restart: unless-stopped

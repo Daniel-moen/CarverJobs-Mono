@@ -10,15 +10,34 @@
   let checkoutError = $state('')
   let returnStatus = $state('')
   let showCancelConfirm = $state(false)
+  let monthlyAmount = $state('200.00')
 
-  onMount(() => {
+  /** Format a decimal amount string like "200.00" → "R200" */
+  function formatPrice(amountStr) {
+    const n = parseFloat(amountStr)
+    if (isNaN(n)) return `R${amountStr}`
+    return `R${Number.isInteger(n) ? n : n.toFixed(2)}`
+  }
+
+  onMount(async () => {
     requestAnimationFrame(() => (mounted = true))
     const params = new URLSearchParams(window.location.search)
     const status = params.get('status')
-    if (status === 'success' || status === 'cancelled') {
+    if (status === 'success' || status === 'cancelled' || status === 'failed') {
       returnStatus = status
       window.history.replaceState({}, '', window.location.pathname)
     }
+    // Fetch current price from the API so it always reflects the backend setting.
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/subscription/status`, {
+        method: 'GET',
+        credentials: 'include',
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.monthly_amount) monthlyAmount = data.monthly_amount
+      }
+    } catch { /* non-critical — fallback to default */ }
   })
 
   const freeFeatures = ['Browse Job Board', 'Manage Profile', 'Upload Documents']
@@ -48,19 +67,11 @@
         return
       }
       const data = await response.json()
-      // Create a hidden form and submit to PayFast
-      const form = document.createElement('form')
-      form.method = 'POST'
-      form.action = data.payfast_url
-      for (const [key, value] of Object.entries(data.form_fields)) {
-        const input = document.createElement('input')
-        input.type = 'hidden'
-        input.name = key
-        input.value = String(value)
-        form.appendChild(input)
+      if (data.redirect_url) {
+        window.location.href = data.redirect_url
+        return
       }
-      document.body.appendChild(form)
-      form.submit()
+      checkoutError = 'Could not start checkout. Please try again.'
     } catch {
       checkoutError = 'Could not reach the server. Please try again.'
     } finally {
@@ -122,6 +133,12 @@
   {#if returnStatus === 'cancelled'}
     <div class="sub-card rounded-2xl border border-slate-500/20 bg-zinc-900/60 p-5" class:visible={mounted} style="--delay:60ms;">
       <p class="text-sm text-slate-400">Checkout was cancelled. No charge was made. You can try again whenever you're ready.</p>
+    </div>
+  {/if}
+
+  {#if returnStatus === 'failed'}
+    <div class="sub-card rounded-2xl border border-rose-400/20 bg-rose-950/25 p-5" class:visible={mounted} style="--delay:60ms;">
+      <p class="text-sm text-rose-200">Payment did not complete. You were not charged. You can try again when you're ready.</p>
     </div>
   {/if}
 
@@ -240,7 +257,7 @@
             </span>
           </div>
           <div class="mt-3 flex items-end gap-1">
-            <span class="text-4xl font-black text-white">R299</span>
+            <span class="text-4xl font-black text-white">{formatPrice(monthlyAmount)}</span>
             <span class="mb-1 text-sm text-slate-400">/ month</span>
           </div>
           <p class="mt-2 text-sm text-slate-300">Everything you need to land your next position.</p>
@@ -263,10 +280,10 @@
             disabled={isLoading}
             class="mt-7 w-full rounded-xl border border-cyan-300/30 bg-cyan-300/10 py-3 text-sm font-bold text-cyan-100 transition-all hover:border-cyan-300/50 hover:bg-cyan-300/18 hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isLoading ? 'Redirecting to PayFast...' : 'Get CARVER Pro →'}
+            {isLoading ? 'Redirecting to Yoco...' : 'Get CARVER Pro →'}
           </button>
           <p class="mt-2.5 text-center text-[10px] text-slate-600">
-            Secure payment via PayFast. Cancel anytime.
+            Secure payment via Yoco. Cancel anytime.
           </p>
         </div>
       </article>
