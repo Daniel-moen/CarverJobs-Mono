@@ -26,7 +26,9 @@ log = get_logger("carver.csrf")
 
 CSRF_HEADER_NAME = "X-CSRF-Token"
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-_EXEMPT_PATHS = frozenset({"/health", "/admin/analytics", "/auth/login", "/auth/google", "/auth/waitlist", "/webhooks/whatsapp", "/subscription/webhook", "/telnyx/webhook"})
+_EXEMPT_PATHS = frozenset({"/health", "/admin/analytics", "/auth/login", "/auth/google", "/auth/waitlist"})
+# External callers (Meta, Yoco, Telnyx) never send a CSRF token — exempt by prefix.
+_EXEMPT_PREFIXES = ("/webhooks/", "/subscription/webhook", "/telnyx/webhook")
 _TOKEN_MAX_AGE = settings.SESSION_TTL_SECONDS
 
 
@@ -61,6 +63,8 @@ def check_csrf(request: Request) -> None:
     if request.method in _SAFE_METHODS:
         return
     if request.url.path in _EXEMPT_PATHS:
+        return
+    if any(request.url.path.startswith(p) for p in _EXEMPT_PREFIXES):
         return
 
     token_header = request.headers.get(CSRF_HEADER_NAME, "")
