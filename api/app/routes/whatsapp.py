@@ -524,6 +524,9 @@ def _make_magic_link(phone_number: str, db: Session, *, redirect_to: str | None 
     ``redirect_to`` must be a known internal path (validated against an allowlist
     to prevent open-redirect attacks).  Defaults to ``/profile`` when omitted.
     Tokens are reusable within their TTL window.
+
+    The redirect is stored in the DB *and* encoded as a ``?r=`` query param
+    so the frontend has a fallback even if the DB value is lost.
     """
     safe_redirect = redirect_to if _is_safe_redirect(redirect_to) else None
     token = secrets.token_urlsafe(16)
@@ -533,7 +536,10 @@ def _make_magic_link(phone_number: str, db: Session, *, redirect_to: str | None 
         expires_at=expires_at, redirect_to=safe_redirect,
     ))
     db.commit()
-    return f"{settings.FRONTEND_BASE_URL}/wa/{token}"
+    url = f"{settings.FRONTEND_BASE_URL}/wa/{token}"
+    if safe_redirect and safe_redirect != "/profile":
+        url += f"?r={safe_redirect}"
+    return url
 
 
 def _get_or_create_session(phone_number: str, db: Session) -> WhatsAppSession:
@@ -1615,7 +1621,7 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
 
 
 @router.get("/wa/auth/{token}")
-async def whatsapp_magic_auth(token: str, response: Response, db: Session = Depends(get_db)):
+async def whatsapp_magic_auth(token: str, request: Request, response: Response, db: Session = Depends(get_db)):
     """Validate a WhatsApp magic link token and issue a session cookie.
 
     Tokens are reusable within their TTL — clicking the same link twice works
@@ -1644,7 +1650,12 @@ async def whatsapp_magic_auth(token: str, response: Response, db: Session = Depe
         max_age=settings.SESSION_TTL_SECONDS,
         path="/",
     )
-    redirect = record.redirect_to if _is_safe_redirect(record.redirect_to) else "/profile"
-    log.info("WhatsApp magic auth success | phone=%s | redirect=%s", record.phone_number[:6] + "****", redirect)
+    # Primary: DB-stored redirect.  Fallback: ?r= query param from the magic link URL.
+    redirect = record.redirect_to if _is_safe_redirect(record.redirect_to) else None
+    if not redirect:
+        qp = request.query_params.get("r", "")
+        redirect = qp if _is_safe_redirect(qp) else "/profile"
+    log.info("WhatsApp magic auth success | phone=%s | redirect=%s | db_redirect=%s",
+             record.phone_number[:6] + "****", redirect, record.redirect_to)
     metrics.increment("whatsapp_magic_logins")
     return {"ok": True, "redirect": redirect, "session_token": session_token}

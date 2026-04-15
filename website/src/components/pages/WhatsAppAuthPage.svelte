@@ -51,7 +51,10 @@
         return
       }
       const data = await response.json().catch(() => ({}))
-      const redirect = data.redirect || '/profile'
+      // Fallback: use ?r= query param if the API didn't return a redirect
+      const urlR = new URLSearchParams(window.location.search).get('r') || ''
+      const SAFE = new Set(['/profile', '/jobs', '/status', '/', '/subscription'])
+      const redirect = data.redirect || (SAFE.has(urlR) ? urlR : '') || '/profile'
 
       if (data.session_token) {
         setWaSessionToken(data.session_token)
