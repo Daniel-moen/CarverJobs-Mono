@@ -222,12 +222,12 @@ def _credits_summary_for_menu(balance: int, subscribed: bool = False) -> str:
     if subscribed:
         return (
             f"💳 *Your balance: {balance} {w}* (Pro — unlimited).\n"
-            "Pro subscribers have *unlimited* matching runs."
+            "Pro subscribers get *25 tokens/month* for matching "
         )
     return (
         f"💳 *Your balance: {balance} {w}.*\n"
-        "You get *25 free tokens/month*. Each *Find Matches* run uses 1 token. "
-        "Submit a valid job to earn extra tokens."
+        "Each *Find Matches* run uses 1 token. "
+        "Submit a valid job to earn tokens, or upgrade to *Pro* for 25 tokens/month."
     )
 
 
@@ -292,9 +292,9 @@ async def _send_help_menu(to: str, db: Session) -> None:
                                 "description": "Tokens & how matching works",
                             },
                             {
-                                "id": "cmd_subscribe",
-                                "title": "Subscribe to Pro",
-                                "description": "Unlimited matches & priority",
+                                "id": "cmd_cancel_sub" if sub else "cmd_subscribe",
+                                "title": "Cancel Pro" if sub else "Subscribe to Pro",
+                                "description": "Manage your subscription" if sub else "Unlimited matches & priority",
                             },
                         ],
                     },
@@ -491,6 +491,7 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_submit_job": "submit job",
     "cmd_credits": "credits",
     "cmd_subscribe": "subscribe",
+    "cmd_cancel_sub": "cancel subscription",
     "cmd_help": "help",
     "btn_find_matches": "match",
     "btn_edit_profile": "edit",
@@ -639,7 +640,7 @@ Style rules for WhatsApp:
 - When all done, celebrate big — they just joined the fleet.
 
 First reply only (empty conversation history in the messages you receive):
-- Include exactly one brief sentence explaining tokens: You get *25 free tokens every month*. Each *Find Matches* run uses 1 token. Submit a valid job to earn extra tokens.
+- Include exactly one brief sentence explaining tokens: Each *Find Matches* run uses *1 token*. Submit a valid job to earn tokens, or upgrade to *Pro* for 25 tokens/month.
 
 Data rules:
 - ONLY set "done": true when ALL 13 fields are collected (missing list is empty).
@@ -973,9 +974,8 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
         current_credits = get_credit_balance(db, phone_number)
         await _send_whatsapp(
             phone_number,
-            "⚠️ You need *1 token* to run matching.\n\n"
-            "You get *25 free tokens/month* — yours have run out. "
-            "Submit a job to earn extra, or upgrade to *Pro* for unlimited runs.\n"
+    "⚠️ You need *1 token* to run matching.\n\n"
+            "Submit a job to earn tokens, or upgrade to *Pro* for 25 tokens/month and unlimited runs.\n"
             f"Current balance: *{current_credits}* token{'s' if current_credits != 1 else ''}.",
         )
         await _send_whatsapp_buttons(
@@ -1161,7 +1161,7 @@ _FALLBACK_GREETING = (
     "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
     "I'm going to build your crew profile in a quick chat — takes about 2 minutes "
     "and gets you in front of recruiters and vessels straight away.\n\n"
-    "💳 *Tokens:* you get *25 free tokens every month*. Each *Find Matches* uses *1* token; submit a valid job to earn extra.\n\n"
+    "💳 *Tokens:* Each *Find Matches* uses *1 token*. Submit a valid job to earn tokens, or go *Pro* for 25/month.\n\n"
     "Let's start with the basics — what's your *full name*? 🪪"
 )
 
@@ -1233,8 +1233,8 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
             f"Your profile is live and ready to match with vessels. "
             f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
-            f"💳 *Tokens:* You get *25 free tokens every month*. Each *Find Matches* run uses *1* token — "
-            f"submit a valid job to earn extra tokens.\n\n"
+            f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
+            f"submit a valid job to earn tokens, or go *Pro* for 25 tokens/month.\n\n"
             f"_Link expires in 30 min. Type *help* anytime to see what I can do for you._ ⚡"
         )
     else:
@@ -1267,7 +1267,9 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
             await _send_whatsapp(
                 phone,
                 "✅ You're already subscribed to *CARVER Pro*!\n\n"
-                "Unlimited matching and priority recommendations are active on your account.",
+                "Unlimited matching and priority recommendations are active on your account.\n\n"
+                f"Manage your subscription:\n👉 {link}\n\n"
+                "_Link expires in 30 minutes._",
             )
         else:
             await _send_whatsapp(
@@ -1277,6 +1279,30 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
                 "and full access to every feature.\n\n"
                 f"👉 {link}\n\n"
                 "_Link expires in 30 minutes._",
+            )
+        return None
+
+    if cmd in ("cancel subscription", "cancel pro", "cancel", "unsubscribe"):
+        sub = is_subscribed(db, phone)
+        link = _make_magic_link(phone, db, redirect_to="/subscription")
+        if sub:
+            await _send_whatsapp(
+                phone,
+                "⚠️ *Cancel CARVER Pro*\n\n"
+                "You can cancel your subscription from this link:\n\n"
+                f"👉 {link}\n\n"
+                "_Link expires in 30 minutes._",
+            )
+        else:
+            await _send_whatsapp(
+                phone,
+                "You don't have an active Pro subscription.\n\n"
+                "Want to upgrade? Tap below.",
+            )
+            await _send_whatsapp_buttons(
+                phone,
+                "Get Pro?",
+                [("cmd_subscribe", "Subscribe to Pro"), ("btn_menu", "Menu")],
             )
         return None
 
@@ -1382,12 +1408,32 @@ async def whatsapp_verify(request: Request):
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
+# Commands that should work regardless of session mode (onboarding, job_submit, etc.).
+# This ensures tapping "Subscribe to Pro" or "Help" from the WhatsApp menu always works.
+_GLOBAL_CMDS: frozenset[str] = frozenset({
+    "subscribe", "pro", "upgrade", "paid", "subscription",
+    "cancel subscription", "cancel pro", "cancel", "unsubscribe",
+    "help", "commands", "menu",
+    "credits", "balance", "my credits", "tokens", "my tokens",
+})
+
+
 async def _process_whatsapp_message(phone_number: str, user_text: str, graph_phone_number_id: str = "") -> None:
     """Handle a parsed WhatsApp message in the background (owns its own DB session)."""
     ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
     db = SessionLocal()
     try:
         wa_session = _get_or_create_session(phone_number, db)
+
+        # Global commands bypass onboarding / job-submit modes so the user
+        # can always subscribe, check balance, or open the help menu.
+        _cmd = user_text.strip().lower()
+        if wa_session.mode != "chat" and _cmd in _GLOBAL_CMDS:
+            reply = await _run_chat(wa_session, user_text, db)
+            if reply is not None:
+                await _send_whatsapp(phone_number, reply)
+            metrics.increment("whatsapp_messages")
+            return
 
         if wa_session.mode == "job_submit":
             # Keep mode until we're done so concurrent image webhooks still see job_submit

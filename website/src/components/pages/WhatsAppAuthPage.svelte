@@ -5,6 +5,7 @@
   import ProfilePage from './ProfilePage.svelte'
   import JobBoardPage from './JobBoardPage.svelte'
   import StatusPage from './StatusPage.svelte'
+  import SubscriptionPage from './SubscriptionPage.svelte'
 
   export let token = ''
 
@@ -14,6 +15,21 @@
 
   let targetPage = ''
   let matchSessionId = 0
+  let isSubscribed = false
+
+  const PAGE_PATH = {
+    'profile': '/profile',
+    'job-board': '/jobs',
+    'subscription': '/subscription',
+    'status': '/status',
+    'auto-apply': '/profile',
+  }
+
+  function navigate(pageKey) {
+    const path = PAGE_PATH[pageKey] ?? '/profile'
+    targetPage = pageKey
+    history.replaceState({}, '', path)
+  }
 
   onMount(async () => {
     if (!token) {
@@ -41,6 +57,18 @@
         setWaSessionToken(data.session_token)
       }
 
+      // Fetch subscription status so child pages render correctly.
+      try {
+        const subRes = await apiFetch(`${API_BASE_URL}/subscription/status`, {
+          method: 'GET',
+          credentials: 'include',
+        })
+        if (subRes.ok) {
+          const subData = await subRes.json()
+          isSubscribed = Boolean(subData.subscribed)
+        }
+      } catch { /* non-critical */ }
+
       const matchPath = redirect.match(/^\/matches\/(\d+)$/)
       if (matchPath) {
         targetPage = 'match-session'
@@ -51,6 +79,8 @@
         targetPage = 'job-board'
       } else if (redirect === '/status') {
         targetPage = 'status'
+      } else if (redirect === '/subscription') {
+        targetPage = 'subscription'
       } else {
         targetPage = 'profile'
       }
@@ -87,11 +117,29 @@
   </main>
 
 {:else if state === 'ready'}
-  <!-- Minimal standalone header -->
+  <!-- Standalone header with minimal nav -->
   <header class="border-b border-white/8 bg-black/80 backdrop-blur-sm">
-    <div class="mx-auto flex h-12 max-w-7xl items-center px-4 sm:px-6">
-      <span class="text-sm font-bold tracking-widest text-white">CARVER</span>
-      <span class="ml-2 text-[10px] text-slate-500">Superyacht Crew</span>
+    <div class="mx-auto flex h-12 max-w-7xl items-center justify-between px-4 sm:px-6">
+      <div class="flex items-center">
+        <span class="text-sm font-bold tracking-widest text-white">CARVER</span>
+        <span class="ml-2 text-[10px] text-slate-500">Superyacht Crew</span>
+      </div>
+      <nav class="flex items-center gap-1 sm:gap-2">
+        <button type="button" onclick={() => navigate('profile')}
+          class="rounded-md px-2 py-1 text-[11px] font-medium transition {targetPage === 'profile' ? 'text-white bg-white/8' : 'text-slate-500 hover:text-slate-300'}">
+          Profile
+        </button>
+        <button type="button" onclick={() => navigate('job-board')}
+          class="rounded-md px-2 py-1 text-[11px] font-medium transition {targetPage === 'job-board' ? 'text-white bg-white/8' : 'text-slate-500 hover:text-slate-300'}">
+          Jobs
+        </button>
+        {#if !isSubscribed}
+          <button type="button" onclick={() => navigate('subscription')}
+            class="rounded-md px-2 py-1 text-[11px] font-medium transition {targetPage === 'subscription' ? 'text-cyan-200 bg-cyan-300/10 border border-cyan-300/25' : 'text-cyan-400 hover:text-cyan-300'}">
+            Subscribe
+          </button>
+        {/if}
+      </nav>
     </div>
   </header>
 
@@ -104,6 +152,8 @@
       <JobBoardPage />
     {:else if targetPage === 'status'}
       <StatusPage />
+    {:else if targetPage === 'subscription'}
+      <SubscriptionPage {isSubscribed} onNavigate={navigate} />
     {:else}
       <ProfilePage />
     {/if}
