@@ -7,7 +7,36 @@ from app.security import hash_password
 
 
 def list_jobs(db: Session):
-  return db.query(models.Job).order_by(models.Job.created_at.desc()).all()
+  jobs = db.query(models.Job).order_by(models.Job.created_at.desc()).all()
+  seen: set[tuple[str, str]] = set()
+  deduped: list[models.Job] = []
+
+  for job in jobs:
+    key: tuple[str, str] | None = None
+    if job.content_hash:
+      key = ("content_hash", job.content_hash)
+    elif job.job_fingerprint:
+      key = ("job_fingerprint", job.job_fingerprint)
+    elif job.application_url:
+      key = ("application_url", job.application_url.strip().lower())
+    else:
+      fallback = "|".join([
+        (job.title or "").strip().lower(),
+        (job.role or "").strip().lower(),
+        (job.yacht or "").strip().lower(),
+        (job.location or "").strip().lower(),
+        (job.start_date or "").strip().lower(),
+      ])
+      if fallback.strip("|"):
+        key = ("fallback", fallback)
+
+    if key and key in seen:
+      continue
+    if key:
+      seen.add(key)
+    deduped.append(job)
+
+  return deduped
 
 
 def get_job(db: Session, job_id: int):
@@ -54,7 +83,14 @@ EARLY_BIRD_LIMIT = 100
 
 
 def _is_early_bird(db: Session) -> bool:
-  return db.query(models.User).count() < EARLY_BIRD_LIMIT
+  cutoff_user = (
+    db.query(models.User.id)
+    .order_by(models.User.id.asc())
+    .offset(EARLY_BIRD_LIMIT - 1)
+    .limit(1)
+    .first()
+  )
+  return cutoff_user is None
 
 
 def create_user(db: Session, payload: schemas.UserCreate):

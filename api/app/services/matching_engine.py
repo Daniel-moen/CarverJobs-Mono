@@ -19,12 +19,24 @@ from typing import Any, Callable
 log = logging.getLogger("carver.matching_engine")
 
 BATCH_SIZE = 10
-MATCH_THRESHOLD = 35
+MATCH_THRESHOLD = 30
 MAX_WORKERS = 4
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
 _RETRYABLE_CODES = {429, 500, 502, 503, 504}
 _MAX_RETRIES = 3
 _BASE_DELAY = 1.5
+_FEMALE_REQ_PATTERNS = (
+    re.compile(r"\bfemale(?:\s+candidates?)?(?:\s+only)?\b"),
+    re.compile(r"\bfemales?\s+only\b"),
+    re.compile(r"\blady(?:\s+only)?\b"),
+    re.compile(r"\bstewardess(?:es)?\b"),
+)
+_MALE_REQ_PATTERNS = (
+    re.compile(r"\bmale(?:\s+candidates?)?(?:\s+only)?\b"),
+    re.compile(r"\bmales?\s+only\b"),
+    re.compile(r"\bgentleman(?:\s+only)?\b"),
+    re.compile(r"\bsteward\b"),
+)
 
 
 # ── Data containers ──────────────────────────────────────────────────────────
@@ -72,6 +84,7 @@ class JobSummary:
     certifications_required: str = ""
     languages_required: str = ""
     description: str = ""
+    status: str = "open"
 
 
 @dataclass
@@ -87,6 +100,40 @@ class MatchResult:
 
 ProgressCallback = Callable[[int, int, int, int, int], None]
 """(jobs_scanned, total_jobs, matches_so_far, batch_num, total_batches)"""
+
+
+def _normalise_gender(value: str | None) -> str | None:
+    if not value:
+        return None
+    v = str(value).strip().lower()
+    if v in {"f", "female", "woman", "lady"}:
+        return "female"
+    if v in {"m", "male", "man", "gentleman"}:
+        return "male"
+    return None
+
+
+def _job_gender_requirement(job: JobSummary) -> str | None:
+    text = " ".join(
+        part for part in [
+            job.title,
+            job.role,
+            job.description,
+            job.certifications_required,
+            job.languages_required,
+        ] if part
+    ).lower()
+    if not text:
+        return None
+
+    female_req = any(p.search(text) for p in _FEMALE_REQ_PATTERNS)
+    male_req = any(p.search(text) for p in _MALE_REQ_PATTERNS)
+
+    if female_req and not male_req:
+        return "female"
+    if male_req and not female_req:
+        return "male"
+    return None
 
 
 # ── OpenAI caller (stdlib only — no extra deps) ─────────────────────────────
@@ -168,7 +215,7 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
 
     jobs_list = []
     for j in jobs:
-        jobs_list.append({
+        job_entry: dict[str, Any] = {
             "job_id": j.job_id,
             "title": j.title,
             "role": j.role,
@@ -187,7 +234,10 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
             "certifications_required": j.certifications_required,
             "languages_required": j.languages_required,
             "description": (j.description or "")[:400],
-        })
+        }
+        if getattr(j, "status", None) == "priority":
+            job_entry["status"] = "priority"
+        jobs_list.append(job_entry)
 
     payload = {
         "rules": {
@@ -200,15 +250,19 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
                 "ROLE DEPARTMENT is the primary filter. The job must be in the same department or a closely related one.",
                 "Departments: Deck, Interior/Stew, Engine, Galley, Bridge, Medical, Pursers.",
                 "Cross-department mismatches (e.g. desired=Deckhand, job=Stewardess) must get compatibility <= 15.",
-                "Same-department roles at different seniority levels ARE valid matches — score them 30-65 depending on experience gap.",
+                "Same-department roles at different seniority levels ARE valid matches — score them 35-70 depending on experience gap. E.g. a Deckhand with 3+ years should match Bosun roles at 45-55.",
+                "Adjacent roles within the same department should score highly: Bosun↔Deckhand, Chief Stew↔Stewardess, 2nd Engineer↔Chief Engineer, Sous Chef↔Head Chef.",
                 "Dual roles like Deck/Stew should match BOTH Deck and Interior departments.",
                 f"Set matched=true if compatibility >= {MATCH_THRESHOLD}. Be GENEROUS — if the candidate could reasonably apply and have a shot, mark it matched.",
-                "Use the candidate's bio, job_history, and document_summary as the primary evidence of capability. If their history or documents show they can do the job, score high.",
-                "Do NOT over-penalise for missing certifications unless the job explicitly requires them for safety-critical roles (Captain, Engineer, Officer).",
+                "Use the candidate's bio, job_history, and document_summary as the PRIMARY evidence of capability. Recent job history (last 2 roles) should carry the most weight — if they did the role before, score 70+.",
+                "If the candidate held the exact same role on a previous vessel, that is a STRONG match (80+) regardless of other factors.",
+                "Do NOT over-penalise for missing certifications unless the job explicitly requires them for safety-critical roles (Captain, Engineer, Officer). Partial cert matches (e.g. has STCW but not ENG1) should only reduce by 5-10 points.",
                 "Location flexibility: yachting is a global industry — location mismatches should only reduce by 3-5 points, not disqualify.",
                 "Pay mismatches: only reduce if the job pay is drastically (>50%) below the candidate's minimum.",
                 "If the candidate has relevant experience for the role, that should outweigh minor gaps in listed requirements.",
                 "AIM to find at least 5+ matches if the candidate has any relevant experience. Be helpful, not punitive.",
+                "Jobs with status=priority should receive a +10 compatibility boost (they are urgent hires looking for crew now).",
+                "Gender requirements are strict. If a job explicitly specifies male/female-only (or uses gendered role labels like stewardess/steward), opposite-gender candidates must be matched=false with compatibility <= 5.",
                 "Output ONLY raw JSON. No markdown fences, no extra text.",
                 f"You MUST return exactly one entry for every job_id: {json.dumps(job_ids)}. Copy each job_id verbatim.",
                 "Each entry: job_id (integer, verbatim), matched (boolean), compatibility (integer 0-100), reason (1-2 sentences), strengths (list), gaps (list), factor_scores (object).",
@@ -382,9 +436,27 @@ def match_candidate_to_jobs(
         if existing is None or r.compatibility > existing.compatibility:
             deduped[r.job_id] = r
 
+    candidate_gender = _normalise_gender(candidate.sex)
+    jobs_by_id = {j.job_id: j for j in jobs}
+    gender_filtered = 0
+    if candidate_gender:
+        for result in deduped.values():
+            job = jobs_by_id.get(result.job_id)
+            if not job:
+                continue
+            required_gender = _job_gender_requirement(job)
+            if required_gender and required_gender != candidate_gender:
+                gender_filtered += 1
+                result.matched = False
+                result.compatibility = min(result.compatibility, 5.0)
+                result.reason = f"Filtered out: job specifies {required_gender} candidates."
+                result.strengths = []
+                result.gaps = [f"Gender requirement mismatch ({required_gender} only)."]
+                result.factor_scores = {}
+
     results = sorted(deduped.values(), key=lambda x: x.compatibility, reverse=True)
     matched_count = sum(1 for r in results if r.matched)
-    log.info("Matching complete | candidate=%s | total=%d | matched=%d | top=%.0f",
-             candidate.user_key, len(results), matched_count,
+    log.info("Matching complete | candidate=%s | total=%d | matched=%d | gender_filtered=%d | top=%.0f",
+             candidate.user_key, len(results), matched_count, gender_filtered,
              results[0].compatibility if results else 0)
     return results

@@ -194,4 +194,7 @@ def run_migrations() -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_credit_accounts_user_key ON credit_accounts (user_key)"
     )
 
+    ca_cols = _existing("credit_accounts")
+    _add("credit_accounts", "last_reset_at", "DATETIME", ca_cols)
+
     conn.commit()

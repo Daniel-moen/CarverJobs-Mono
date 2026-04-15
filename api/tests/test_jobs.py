@@ -30,6 +30,16 @@ def test_list_jobs_after_create(client):
     assert len(resp.json()) == 1
 
 
+def test_list_jobs_dedupes_duplicates(client):
+    client.post("/jobs", json=_JOB_PAYLOAD)
+    client.post("/jobs", json=_JOB_PAYLOAD)
+
+    resp = client.get("/jobs")
+
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+
 def test_get_job(client):
     create = client.post("/jobs", json=_JOB_PAYLOAD)
     job_id = create.json()["id"]

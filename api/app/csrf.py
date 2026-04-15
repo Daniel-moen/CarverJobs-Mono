@@ -26,7 +26,7 @@ log = get_logger("carver.csrf")
 
 CSRF_HEADER_NAME = "X-CSRF-Token"
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-_EXEMPT_PATHS = frozenset({"/health", "/admin/analytics", "/auth/login", "/auth/google", "/auth/waitlist", "/webhooks/whatsapp", "/subscription/notify", "/telnyx/webhook"})
+_EXEMPT_PATHS = frozenset({"/health", "/admin/analytics", "/auth/login", "/auth/google", "/auth/waitlist", "/webhooks/whatsapp", "/subscription/webhook", "/telnyx/webhook"})
 _TOKEN_MAX_AGE = settings.SESSION_TTL_SECONDS
 
 

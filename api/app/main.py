@@ -126,25 +126,26 @@ def _log_error_to_db(
                 request_id=request_id,
                 client_ip=client_ip,
             ))
-            db.commit()
-            total = db.query(models.ErrorLog).count()
-            if total > 200:
-                cutoff_id = (
-                    db.query(models.ErrorLog.id)
-                    .order_by(models.ErrorLog.id.desc())
-                    .offset(199)
-                    .limit(1)
-                    .scalar()
+            db.flush()
+            cutoff_id = (
+                db.query(models.ErrorLog.id)
+                .order_by(models.ErrorLog.id.desc())
+                .offset(199)
+                .limit(1)
+                .scalar()
+            )
+            if cutoff_id:
+                db.query(models.ErrorLog).filter(models.ErrorLog.id < cutoff_id).delete(
+                    synchronize_session=False
                 )
-                if cutoff_id:
-                    db.query(models.ErrorLog).filter(models.ErrorLog.id < cutoff_id).delete(
-                        synchronize_session=False
-                    )
-                    db.commit()
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
     except Exception:
-        pass
+        log.debug("Failed to persist error log entry", exc_info=True)
 
 
 # ── Global exception handlers ───────────────────────────────────────────────
@@ -258,44 +259,32 @@ def _route_module(path: str) -> str:
 async def request_logger(request: Request, call_next):
     start = time.perf_counter()
     req_id = getattr(request.state, "request_id", "-")
-    log.info("→ %s %s | ip=%s | req=%s", request.method, request.url.path, request.client.host if request.client else "unknown", req_id)
+    module = _route_module(request.url.path)
+    client_ip = request.client.host if request.client else "unknown"
+    status_code = 500
+    log.info("→ %s %s | ip=%s | req=%s", request.method, request.url.path, client_ip, req_id)
     try:
         response = await call_next(request)
-    except Exception as exc:
-        tb = _traceback.format_exc()
+        status_code = response.status_code
+        return response
+    except Exception:
+        status_code = 500
+        raise
+    finally:
         elapsed = round((time.perf_counter() - start) * 1000)
-        module = _route_module(request.url.path)
-        log.exception("✗ %s %s | UNHANDLED ERROR | %dms | req=%s | module=%s | %s", request.method, request.url.path, elapsed, req_id, module, exc)
-        metrics.record_error_by_module(module, "5xx")
-        _log_error_to_db(
-            level="error",
-            status_code=500,
-            crv_code=CRV_1006,
-            method=request.method,
-            path=str(request.url.path),
-            module=module,
-            message=str(exc),
-            tb=tb,
-            request_id=req_id,
-            client_ip=request.client.host if request.client else None,
-        )
-        return JSONResponse(status_code=500, content={"detail": "Internal server error.", "code": CRV_1006})
-    elapsed = round((time.perf_counter() - start) * 1000)
-    module = _route_module(request.url.path)
-    level = log.warning if response.status_code >= 400 else log.info
-    level("← %s %s | status=%d | %dms | req=%s | module=%s", request.method, request.url.path, response.status_code, elapsed, req_id, module)
-    metrics.increment("requests_total")
-    if not request.url.path.startswith("/interview/"):
-        metrics.record_response_time(elapsed)
-    if response.status_code == 429:
-        metrics.increment("rate_limit_hits")
-    elif 400 <= response.status_code < 500:
-        metrics.increment("errors_4xx")
-        metrics.record_error_by_module(module, "4xx")
-    elif response.status_code >= 500:
-        metrics.increment("errors_5xx")
-        metrics.record_error_by_module(module, "5xx")
-    return response
+        level = log.warning if status_code >= 400 else log.info
+        level("← %s %s | status=%d | %dms | req=%s | module=%s", request.method, request.url.path, status_code, elapsed, req_id, module)
+        metrics.increment("requests_total")
+        if not request.url.path.startswith("/interview/"):
+            metrics.record_response_time(elapsed)
+        if status_code == 429:
+            metrics.increment("rate_limit_hits")
+        elif 400 <= status_code < 500:
+            metrics.increment("errors_4xx")
+            metrics.record_error_by_module(module, "4xx")
+        elif status_code >= 500:
+            metrics.increment("errors_5xx")
+            metrics.record_error_by_module(module, "5xx")
 
 
 @app.middleware("http")

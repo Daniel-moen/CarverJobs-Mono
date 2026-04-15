@@ -40,10 +40,12 @@
     } catch { /* non-critical — fallback to default */ }
   })
 
-  const freeFeatures = ['Browse Job Board', 'Manage Profile', 'Upload Documents']
-  const lockedFeatures = ['Auto Match', 'Auto Apply', 'Match Insights']
+  const freeFeatures = ['25 Free Tokens / Month', 'Browse Job Board', 'Manage Profile', 'Upload Documents']
+  const lockedFeatures = ['Unlimited Tokens', 'Priority Recommendations', 'Auto Apply']
 
   const proFeatures = [
+    { label: 'Unlimited Tokens', desc: 'No cap on matching runs per month' },
+    { label: 'Priority Recommendations', desc: 'Your profile surfaces first to employers' },
     { label: 'Auto Match', desc: 'AI matching against live listings' },
     { label: 'Auto Apply', desc: 'Automated applications to qualified roles' },
     { label: 'Priority Jobs', desc: 'First access to urgent hire postings' },
@@ -52,7 +54,7 @@
     { label: 'Document Storage', desc: 'Secure CV, passport, STCW & ENG1 vault' },
   ]
 
-  async function startCheckout() {
+  async function startCheckout(retried = false) {
     isLoading = true
     checkoutError = ''
     try {
@@ -63,6 +65,11 @@
       })
       if (!response.ok) {
         const err = await response.json().catch(() => ({}))
+        // CSRF token expired — apiFetch already refreshed _csrfToken from the
+        // error response headers, so one silent retry will succeed.
+        if (!retried && response.status === 403 && err.code === 'CRV-2006') {
+          return startCheckout(true)
+        }
         checkoutError = err.detail || 'Could not start checkout. Please try again.'
         return
       }
@@ -216,7 +223,7 @@
           <span class="text-4xl font-black text-white">R0</span>
           <span class="mb-1 text-sm text-slate-600">/ month</span>
         </div>
-        <p class="mt-2 text-sm text-slate-500">Browse listings and manage your profile.</p>
+        <p class="mt-2 text-sm text-slate-500">Browse listings, manage your profile, and get 25 free tokens every month.</p>
 
         <ul class="mt-5 space-y-2.5">
           {#each freeFeatures as item}

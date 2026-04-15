@@ -118,9 +118,13 @@ class Settings:
   TELNYX_PHONE_NUMBER: str = os.getenv("TELNYX_PHONE_NUMBER", "").strip()
 
   # Yoco — Checkout API (https://developer.yoco.com/docs/checkout-api/introduction)
+  YOCO_PUBLIC_KEY: str = os.getenv("YOCO_PUBLIC_KEY", "").strip()
   YOCO_SECRET_KEY: str = os.getenv("YOCO_SECRET_KEY", "").strip()
   YOCO_WEBHOOK_SECRET: str = os.getenv("YOCO_WEBHOOK_SECRET", "").strip()
   YOCO_MONTHLY_AMOUNT: str = os.getenv("YOCO_MONTHLY_AMOUNT", "200.00").strip()
+
+  # Free tier — tokens granted to every user each month (reset every 30 days)
+  FREE_MONTHLY_TOKENS: int = int(os.getenv("FREE_MONTHLY_TOKENS", "25"))
 
   # Scrape.do — HTML scraping proxy (alternative scraper)
   SCRAPE_DO_TOKEN: str = os.getenv("SCRAPE_DO_TOKEN", "").strip()

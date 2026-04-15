@@ -35,14 +35,14 @@
   let reviewResult     = $state(null)
   let reviewError      = $state('')
 
-  let pfLoading        = $state(false)
+  let subCheckoutLoading = $state(false)
   let pfResult         = $state(null)
   let pfError          = $state('')
   let pfSubStatus      = $state(null)
   let pfCancelling     = $state(false)
 
-  async function pfCheckout(redirect) {
-    pfLoading = true
+  async function subscriptionCheckout(redirect) {
+    subCheckoutLoading = true
     pfError = ''
     pfResult = null
     try {
@@ -54,20 +54,11 @@
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { pfError = data.detail || `Error ${res.status}`; return }
       pfResult = data
-      if (redirect && data.payfast_url && data.form_fields) {
-        const form = document.createElement('form')
-        form.method = 'POST'
-        form.action = data.payfast_url
-        for (const [k, v] of Object.entries(data.form_fields)) {
-          const input = document.createElement('input')
-          input.type = 'hidden'; input.name = k; input.value = String(v)
-          form.appendChild(input)
-        }
-        document.body.appendChild(form)
-        form.submit()
+      if (redirect && data.redirect_url) {
+        window.location.href = data.redirect_url
       }
     } catch { pfError = 'Could not reach server.' }
-    finally { pfLoading = false }
+    finally { subCheckoutLoading = false }
   }
 
   async function pfStatus() {
@@ -1187,11 +1178,11 @@
       </div>
     </div>
 
-    <!-- ── PayFast Test ── -->
+    <!-- ── Yoco checkout test ── -->
     <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:450ms;">
       <div class="mb-4 flex items-center gap-2">
         <span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
-        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">PayFast Subscription Test</p>
+        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Yoco subscription test</p>
       </div>
 
       <div class="grid gap-3 lg:grid-cols-3">
@@ -1202,19 +1193,19 @@
           <div class="flex flex-wrap gap-2">
             <button
               type="button"
-              onclick={() => pfCheckout(false)}
-              disabled={pfLoading}
+              onclick={() => subscriptionCheckout(false)}
+              disabled={subCheckoutLoading}
               class="rounded-lg border border-cyan-400/25 bg-cyan-400/8 px-3 py-1.5 text-xs font-bold text-cyan-200 transition hover:border-cyan-400/45 hover:bg-cyan-400/15 disabled:opacity-35 active:scale-95"
             >
-              {pfLoading ? 'Loading...' : 'Get Data'}
+              {subCheckoutLoading ? 'Loading...' : 'Get Data'}
             </button>
             <button
               type="button"
-              onclick={() => pfCheckout(true)}
-              disabled={pfLoading}
+              onclick={() => subscriptionCheckout(true)}
+              disabled={subCheckoutLoading}
               class="rounded-lg border border-emerald-400/25 bg-emerald-400/8 px-3 py-1.5 text-xs font-bold text-emerald-200 transition hover:border-emerald-400/45 hover:bg-emerald-400/15 disabled:opacity-35 active:scale-95"
             >
-              {pfLoading ? 'Redirecting...' : 'Go to PayFast'}
+              {subCheckoutLoading ? 'Redirecting...' : 'Go to Yoco'}
             </button>
           </div>
         </div>

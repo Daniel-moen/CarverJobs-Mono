@@ -137,10 +137,16 @@ def create_checkout(session: dict = Depends(require_session), db: Session = Depe
         ) from exc
 
     if resp.status_code != 200:
+        yoco_body = resp.text[:500]
+        try:
+            yoco_err = resp.json()
+            yoco_detail = yoco_err.get("detail") or yoco_err.get("message") or yoco_body
+        except Exception:
+            yoco_detail = yoco_body
         log.warning(
-            "Yoco checkout rejected | status=%s | body=%s",
+            "Yoco checkout rejected | status=%s | detail=%s",
             resp.status_code,
-            resp.text[:500],
+            yoco_detail,
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -264,17 +270,19 @@ def cancel_subscription(session: dict = Depends(require_session), db: Session = 
 def subscription_status(session: dict = Depends(require_session), db: Session = Depends(get_db)):
     user_key = session.get("sub", "")
     monthly_amount = settings.YOCO_MONTHLY_AMOUNT
+    free_tokens = settings.FREE_MONTHLY_TOKENS
     sub = (
         db.query(models.Subscription)
         .filter(models.Subscription.user_key == user_key, models.Subscription.status == "active")
         .first()
     )
     if not sub:
-        return {"ok": True, "subscribed": False, "monthly_amount": monthly_amount}
+        return {"ok": True, "subscribed": False, "monthly_amount": monthly_amount, "free_monthly_tokens": free_tokens}
     return {
         "ok": True,
         "subscribed": True,
         "next_billing_date": sub.next_billing_date,
         "amount": sub.amount,
         "monthly_amount": monthly_amount,
+        "free_monthly_tokens": free_tokens,
     }

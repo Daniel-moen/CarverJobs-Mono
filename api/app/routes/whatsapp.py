@@ -34,7 +34,7 @@ from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession
 from app.security import issue_session_token
 from app.settings import settings
 from app.services.ai_client import AIClientError
-from app.services.credits import add_credits, get_credit_balance, spend_credits
+from app.services.credits import add_credits, get_credit_balance, is_subscribed, spend_credits
 
 log = get_logger("carver.whatsapp")
 
@@ -217,19 +217,24 @@ async def _send_job_review_wait(to: str) -> None:
     )
 
 
-def _credits_summary_for_menu(balance: int) -> str:
+def _credits_summary_for_menu(balance: int, subscribed: bool = False) -> str:
     w = "token" if balance == 1 else "tokens"
+    if subscribed:
+        return (
+            f"💳 *Your balance: {balance} {w}* (Pro — unlimited).\n"
+            "Pro subscribers have *unlimited* matching runs."
+        )
     return (
         f"💳 *Your balance: {balance} {w}.*\n"
-        "Each *Find Matches* run uses 1 token. "
-        "Submit a valid job to the board to earn 1 token."
+        "You get *25 free tokens/month*. Each *Find Matches* run uses 1 token. "
+        "Submit a valid job to earn extra tokens."
     )
 
 
-def _credits_standalone_message(balance: int) -> str:
+def _credits_standalone_message(balance: int, subscribed: bool = False) -> str:
     """Full explainer for *balance* / *tokens* text commands."""
     return (
-        _credits_summary_for_menu(balance)
+        _credits_summary_for_menu(balance, subscribed)
         + "\n\n"
         + "_Type *help* for the full menu._"
     )
@@ -238,7 +243,8 @@ def _credits_standalone_message(balance: int) -> str:
 async def _send_help_menu(to: str, db: Session) -> None:
     """Send interactive list menu with all available commands."""
     balance = get_credit_balance(db, to)
-    body_text = f"What would you like to do?\n\n{_credits_summary_for_menu(balance)}"
+    sub = is_subscribed(db, to)
+    body_text = f"What would you like to do?\n\n{_credits_summary_for_menu(balance, sub)}"
     url = _messages_url()
     payload = {
         "messaging_product": "whatsapp",
@@ -284,6 +290,11 @@ async def _send_help_menu(to: str, db: Session) -> None:
                                 "id": "cmd_credits",
                                 "title": "My balance",
                                 "description": "Tokens & how matching works",
+                            },
+                            {
+                                "id": "cmd_subscribe",
+                                "title": "Subscribe to Pro",
+                                "description": "Unlimited matches & priority",
                             },
                         ],
                     },
@@ -479,6 +490,7 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_jobs": "jobs",
     "cmd_submit_job": "submit job",
     "cmd_credits": "credits",
+    "cmd_subscribe": "subscribe",
     "cmd_help": "help",
     "btn_find_matches": "match",
     "btn_edit_profile": "edit",
@@ -627,7 +639,7 @@ Style rules for WhatsApp:
 - When all done, celebrate big — they just joined the fleet.
 
 First reply only (empty conversation history in the messages you receive):
-- Include exactly one brief sentence explaining tokens: *Find Matches* uses 1 token per run; balance starts at 0; submitting a valid job to the board earns 1 token.
+- Include exactly one brief sentence explaining tokens: You get *25 free tokens every month*. Each *Find Matches* run uses 1 token. Submit a valid job to earn extra tokens.
 
 Data rules:
 - ONLY set "done": true when ALL 13 fields are collected (missing list is empty).
@@ -955,19 +967,21 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
         await _send_whatsapp(phone_number, "No open yacht positions right now — check back soon!")
         return
 
+    user_is_subscribed = is_subscribed(db, phone_number)
     credits_remaining = spend_credits(db, phone_number, amount=1)
     if credits_remaining is None:
         current_credits = get_credit_balance(db, phone_number)
         await _send_whatsapp(
             phone_number,
             "⚠️ You need *1 token* to run matching.\n\n"
-            "Submit a job posting first and you'll earn one token for it.\n"
+            "You get *25 free tokens/month* — yours have run out. "
+            "Submit a job to earn extra, or upgrade to *Pro* for unlimited runs.\n"
             f"Current balance: *{current_credits}* token{'s' if current_credits != 1 else ''}.",
         )
         await _send_whatsapp_buttons(
             phone_number,
-            "Want to earn a token?\n\n_Reply *balance* anytime._",
-            [("btn_submit_job", "Submit Job"), ("cmd_jobs", "Browse Jobs"), ("btn_menu", "Menu")],
+            "What would you like to do?",
+            [("btn_submit_job", "Submit Job"), ("cmd_subscribe", "Go Pro"), ("btn_menu", "Menu")],
         )
         return
 
@@ -977,12 +991,19 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
     est_secs = num_batches * _AVG_SECS_PER_BATCH
     est_str = f"~{est_secs}s" if est_secs < 60 else f"~{round(est_secs / 60)} min"
 
-    tok_left = "token" if credits_remaining == 1 else "tokens"
-    await _send_whatsapp(
-        phone_number,
-        f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
-        f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
-    )
+    if user_is_subscribed:
+        await _send_whatsapp(
+            phone_number,
+            f"⭐ *Pro subscriber* — no token charged.\n\n"
+            f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
+        )
+    else:
+        tok_left = "token" if credits_remaining == 1 else "tokens"
+        await _send_whatsapp(
+            phone_number,
+            f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
+            f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
+        )
 
     certs = [c.strip() for c in (profile.certifications or "").replace("\n", ",").split(",") if c.strip()]
     langs = [lang.strip() for lang in (profile.languages or "").split(",") if lang.strip()]
@@ -1041,6 +1062,7 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
             certifications_required=j.certifications_required or "",
             languages_required=j.languages_required or "",
             description=j.description or "",
+            status=j.status or "open",
         )
         for j in all_jobs
     ]
@@ -1139,7 +1161,7 @@ _FALLBACK_GREETING = (
     "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
     "I'm going to build your crew profile in a quick chat — takes about 2 minutes "
     "and gets you in front of recruiters and vessels straight away.\n\n"
-    "💳 *Tokens:* you start at *0*; each *Find Matches* uses *1* token; submit a valid job to earn *1*.\n\n"
+    "💳 *Tokens:* you get *25 free tokens every month*. Each *Find Matches* uses *1* token; submit a valid job to earn extra.\n\n"
     "Let's start with the basics — what's your *full name*? 🪪"
 )
 
@@ -1211,8 +1233,8 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
             f"Your profile is live and ready to match with vessels. "
             f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
-            f"💳 *Tokens:* You start with *0*. Each *Find Matches* run uses *1* token — "
-            f"submit a valid job to the board to earn *1* token.\n\n"
+            f"💳 *Tokens:* You get *25 free tokens every month*. Each *Find Matches* run uses *1* token — "
+            f"submit a valid job to earn extra tokens.\n\n"
             f"_Link expires in 30 min. Type *help* anytime to see what I can do for you._ ⚡"
         )
     else:
@@ -1234,7 +1256,28 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
 
     if cmd in ("credits", "balance", "my credits", "tokens", "my tokens"):
         bal = get_credit_balance(db, phone)
-        await _send_whatsapp(phone, _credits_standalone_message(bal))
+        sub = is_subscribed(db, phone)
+        await _send_whatsapp(phone, _credits_standalone_message(bal, sub))
+        return None
+
+    if cmd in ("subscribe", "pro", "upgrade", "paid", "subscription"):
+        link = _make_magic_link(phone, db, redirect_to="/subscription")
+        sub = is_subscribed(db, phone)
+        if sub:
+            await _send_whatsapp(
+                phone,
+                "✅ You're already subscribed to *CARVER Pro*!\n\n"
+                "Unlimited matching and priority recommendations are active on your account.",
+            )
+        else:
+            await _send_whatsapp(
+                phone,
+                "⭐ *CARVER Pro*\n\n"
+                "Upgrade for *unlimited matching runs*, *priority recommendations* to employers, "
+                "and full access to every feature.\n\n"
+                f"👉 {link}\n\n"
+                "_Link expires in 30 minutes._",
+            )
         return None
 
     if cmd in ("profile", "my profile", "show profile"):

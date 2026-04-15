@@ -136,7 +136,7 @@ _MAX_IMPORT_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
 def _run_import_pipeline(*, text: str, url: str, source: str = "manual"):
     from app.models import Job
     from app.services.ai_job_reviewer import review_post
-    from app.services.job_sync import _build_job_fields, _content_hash
+    from app.services.job_sync import _build_job_fields, _content_hash, _job_fingerprint
 
     ai_fields = review_post(
         post_text=text,
@@ -152,11 +152,21 @@ def _run_import_pipeline(*, text: str, url: str, source: str = "manual"):
 
     h = _content_hash(text) if text else None
     fields["content_hash"] = h
+    fp = _job_fingerprint(
+        fields.get("role"),
+        fields.get("location"),
+        fields.get("start_date"),
+    )
+    fields["job_fingerprint"] = fp
 
     db = SessionLocal()
     try:
         if h:
             exists = db.query(Job.id).filter(Job.content_hash == h).first()
+            if exists:
+                return {"duplicate": True, "id": exists[0]}
+        if fp:
+            exists = db.query(Job.id).filter(Job.job_fingerprint == fp).first()
             if exists:
                 return {"duplicate": True, "id": exists[0]}
 
@@ -227,13 +237,23 @@ async def import_job(request: Request, payload: ImportJobRequest):
 def _save_job_from_ai_fields(*, ai_fields: dict, url: str, source: str = "manual_screenshot"):
     """Build Job row from AI-extracted fields and save to DB (dedup-aware)."""
     from app.models import Job
-    from app.services.job_sync import _build_job_fields
+    from app.services.job_sync import _build_job_fields, _job_fingerprint
 
     fields = _build_job_fields(ai_fields, {"url": url}, "manual")
     fields["source"] = source
+    fp = _job_fingerprint(
+        fields.get("role"),
+        fields.get("location"),
+        fields.get("start_date"),
+    )
+    fields["job_fingerprint"] = fp
 
     db = SessionLocal()
     try:
+        if fp:
+            exists = db.query(Job.id).filter(Job.job_fingerprint == fp).first()
+            if exists:
+                return {"duplicate": True, "id": exists[0]}
         if fields.get("application_url"):
             exists = db.query(Job.id).filter(
                 Job.application_url == fields["application_url"]

@@ -250,6 +250,8 @@ class CreditAccount(Base):
   id = Column(Integer, primary_key=True, index=True)
   user_key = Column(String(160), unique=True, nullable=False, index=True)
   balance = Column(Integer, nullable=False, default=0)
+  # Tracks when the free monthly token grant was last applied.
+  last_reset_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),
