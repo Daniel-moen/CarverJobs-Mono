@@ -195,7 +195,7 @@ def _run_import_pipeline(*, text: str, url: str, source: str = "manual"):
         db.close()
 
 
-def _shape_import_response
+def _shape_import_response(result):
     return {
         "ok": True,
         "id": result.id,
