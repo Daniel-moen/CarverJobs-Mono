@@ -194,9 +194,10 @@ def sync_jobs(
       - Skips items that have neither contact_email nor application_url.
 
     Deduplication layers:
-      1. content_hash   — same raw text (catches cross-group reposts)
-      2. job_fingerprint — same role+location+start_date (catches re-worded reposts)
-      3. application_url — belt-and-braces URL match
+      1. content_hash          — same raw text (catches cross-group reposts)
+      2. job_fingerprint       — same role+location+start_date (catches re-worded reposts)
+      3. application_url       — belt-and-braces URL match
+      4. title+role+location   — catches same job re-scraped with different text/start_date
 
     Returns (created, skipped, errors).
     Raises JobSyncError if the final DB commit fails.
@@ -270,7 +271,27 @@ def sync_jobs(
                     log.debug("Duplicate skipped (url) | url=%s", fields["application_url"])
                     continue
 
-            # Step 6: Insert
+            # Step 6: title+role+location dedup — catches same job re-scraped from a
+            # different URL with slightly different text or start_date phrasing
+            if fields.get("title") and fields.get("role") and fields.get("location"):
+                exists = (
+                    db.query(Job.id)
+                    .filter(
+                        Job.title == fields["title"],
+                        Job.role == fields["role"],
+                        Job.location == fields["location"],
+                    )
+                    .first()
+                )
+                if exists:
+                    skipped += 1
+                    log.debug(
+                        "Duplicate skipped (title+role+location) | title=%r | url=%s",
+                        fields["title"], post_url,
+                    )
+                    continue
+
+            # Step 7: Insert
             db.add(Job(**fields))
             db.flush()
             created += 1

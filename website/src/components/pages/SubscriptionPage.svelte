@@ -173,7 +173,7 @@
             </li>
             <li class="flex items-center gap-2.5">
               <span class="flex h-4 w-4 flex-none items-center justify-center rounded-full border {isPopular ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-400' : 'border-slate-700 bg-slate-800 text-slate-500'} text-[10px]">✓</span>
-              <span class="{isPopular ? 'text-slate-200' : 'text-slate-300'}">No subscription needed</span>
+              <span class="{isPopular ? 'text-slate-200' : 'text-slate-300'}">Buy tokens anytime</span>
             </li>
           </ul>
 

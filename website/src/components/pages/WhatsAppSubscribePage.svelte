@@ -137,7 +137,7 @@
             Buy Tokens
           </h1>
           <p class="mt-2 text-sm text-slate-400">
-            {formatPrice(tokenPrice)} per token · No subscription needed
+            {formatPrice(tokenPrice)} per token · Buy tokens anytime
           </p>
 
           <!-- Balance -->

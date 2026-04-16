@@ -346,6 +346,27 @@ def get_flows(db: Session = Depends(get_db)):
     return {"ok": True, "flows": flows, "transitions": transitions}
 
 
+@router.delete("/jobs/duplicates")
+def wipe_duplicate_jobs(db: Session = Depends(get_db)):
+    """Delete duplicate jobs (same title+role+location), keeping the oldest of each group."""
+    from sqlalchemy import func
+
+    keep_subq = (
+        db.query(func.min(Job.id).label("min_id"))
+        .group_by(Job.title, Job.role, Job.location)
+        .subquery()
+    )
+    keep_ids = [row[0] for row in db.query(keep_subq).all()]
+    deleted = (
+        db.query(Job)
+        .filter(~Job.id.in_(keep_ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    log.warning("Admin wiped duplicate jobs | deleted=%d", deleted)
+    return {"ok": True, "deleted": deleted}
+
+
 @router.delete("/whatsapp/sessions")
 def wipe_whatsapp_sessions(db: Session = Depends(get_db)):
     """Delete all WhatsApp sessions and magic tokens (admin only)."""

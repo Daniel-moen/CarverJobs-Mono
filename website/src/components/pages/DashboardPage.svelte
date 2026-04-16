@@ -1183,7 +1183,7 @@
     <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:450ms;">
       <div class="mb-4 flex items-center gap-2">
         <span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
-        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Yoco subscription test</p>
+        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Yoco token checkout test</p>
       </div>
 
       <div class="grid gap-3 lg:grid-cols-3">

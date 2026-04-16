@@ -287,9 +287,9 @@ async def _send_help_menu(to: str, db: Session) -> None:
                                 "description": "Tokens & how matching works",
                             },
                             {
-                                "id": "cmd_cancel_sub" if sub else "cmd_subscribe",
-                                "title": "Cancel Pro" if sub else "Subscribe to Pro",
-                                "description": "Manage your subscription" if sub else "Unlimited matches & priority",
+                                "id": "cmd_subscribe",
+                                "title": "Buy Tokens",
+                                "description": "Top up your token balance",
                             },
                         ],
                     },
@@ -641,7 +641,7 @@ Style rules for WhatsApp:
 - When all done, celebrate big — they just joined the fleet.
 
 First reply only (empty conversation history in the messages you receive):
-- Include exactly one brief sentence explaining tokens: Each *Find Matches* run uses *1 token*. Submit a valid job to earn tokens, or upgrade to *Pro* for 25 tokens/month.
+- Include exactly one brief sentence explaining tokens: Each *Find Matches* run uses *1 token*. Submit a valid job to earn tokens, or type *buy tokens* to top up.
 
 Data rules:
 - ONLY set "done": true when ALL 13 fields are collected (missing list is empty).
@@ -1154,7 +1154,7 @@ _FALLBACK_GREETING = (
     "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
     "I'm going to build your crew profile in a quick chat — takes about 2 minutes "
     "and gets you in front of recruiters and vessels straight away.\n\n"
-    "💳 *Tokens:* Each *Find Matches* uses *1 token*. Submit a valid job to earn tokens, or go *Pro* for 25/month.\n\n"
+    "💳 *Tokens:* Each *Find Matches* uses *1 token*. Submit a valid job to earn tokens, or type *buy tokens* to top up.\n\n"
     "Let's start with the basics — what's your *full name*? 🪪"
 )
 
@@ -1227,7 +1227,7 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
             f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
             f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
-            f"submit a valid job to earn tokens, or go *Pro* for 25 tokens/month.\n\n"
+            f"submit a valid job to earn tokens, or type *buy tokens* to top up.\n\n"
             f"_Link expires in 30 min. Type *help* anytime to see what I can do for you._ ⚡"
         )
     else:
@@ -1274,14 +1274,14 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         link = _make_magic_link(phone, db, redirect_to="/subscription")
         await _send_whatsapp(
             phone,
-            f"There's no subscription to cancel — CARVER uses pay-per-token.\n\n"
+            f"CARVER is pay-per-token — no recurring plan to cancel.\n\n"
             f"Your balance: *{bal} {w}*.\n\n"
             f"Need more tokens? 👉 {link}",
         )
         await _send_whatsapp_buttons(
             phone,
-            "Get Pro?",
-            [("cmd_subscribe", "Subscribe to Pro"), ("btn_menu", "Menu")],
+            "Buy more tokens?",
+            [("cmd_subscribe", "Buy Tokens"), ("btn_menu", "Menu")],
         )
         return None
 
@@ -1388,7 +1388,7 @@ async def whatsapp_verify(request: Request):
 
 
 # Commands that should work regardless of session mode (onboarding, job_submit, etc.).
-# This ensures tapping "Subscribe to Pro" or "Help" from the WhatsApp menu always works.
+# This ensures tapping "Buy Tokens" or "Help" from the WhatsApp menu always works.
 _GLOBAL_CMDS: frozenset[str] = frozenset({
     "subscribe", "pro", "upgrade", "paid", "subscription",
     "buy tokens", "buy", "top up", "topup",
@@ -1406,7 +1406,7 @@ async def _process_whatsapp_message(phone_number: str, user_text: str, graph_pho
         wa_session = _get_or_create_session(phone_number, db)
 
         # Global commands bypass onboarding / job-submit modes so the user
-        # can always subscribe, check balance, or open the help menu.
+        # can always buy tokens, check balance, or open the help menu.
         _cmd = user_text.strip().lower()
         if wa_session.mode != "chat" and _cmd in _GLOBAL_CMDS:
             reply = await _run_chat(wa_session, user_text, db)

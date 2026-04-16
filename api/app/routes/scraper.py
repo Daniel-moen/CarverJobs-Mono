@@ -177,6 +177,15 @@ def _run_import_pipeline(*, text: str, url: str, source: str = "manual"):
             if exists:
                 return {"duplicate": True, "id": exists[0]}
 
+        if fields.get("title") and fields.get("role") and fields.get("location"):
+            exists = db.query(Job.id).filter(
+                Job.title == fields["title"],
+                Job.role == fields["role"],
+                Job.location == fields["location"],
+            ).first()
+            if exists:
+                return {"duplicate": True, "id": exists[0]}
+
         job = Job(**fields)
         db.add(job)
         db.commit()
@@ -186,7 +195,7 @@ def _run_import_pipeline(*, text: str, url: str, source: str = "manual"):
         db.close()
 
 
-def _shape_import_response(result):
+def _shape_import_response
     return {
         "ok": True,
         "id": result.id,
@@ -257,6 +266,15 @@ def _save_job_from_ai_fields(*, ai_fields: dict, url: str, source: str = "manual
         if fields.get("application_url"):
             exists = db.query(Job.id).filter(
                 Job.application_url == fields["application_url"]
+            ).first()
+            if exists:
+                return {"duplicate": True, "id": exists[0]}
+
+        if fields.get("title") and fields.get("role") and fields.get("location"):
+            exists = db.query(Job.id).filter(
+                Job.title == fields["title"],
+                Job.role == fields["role"],
+                Job.location == fields["location"],
             ).first()
             if exists:
                 return {"duplicate": True, "id": exists[0]}
