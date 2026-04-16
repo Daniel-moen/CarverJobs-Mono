@@ -55,6 +55,10 @@ CRV_5002 = "CRV-5002"  # Unknown feature flag key supplied to PATCH /admin/flags
 CRV_5003 = "CRV-5003"  # AI error analysis failed (OpenAI or config issue)
 CRV_5004 = "CRV-5004"  # AI job review failed
 
+# ── Agent Monitoring ────────────────────────────────────────────────────────
+CRV_5005 = "CRV-5005"  # Agent stats endpoint not configured (missing token)
+CRV_5006 = "CRV-5006"  # Agent stats query failed (database error)
+
 # ── APIFY Scraper / Job Ingestion ────────────────────────────────────────────
 CRV_6001 = "CRV-6001"  # APIFY API key is missing or not configured
 CRV_6002 = "CRV-6002"  # No APIFY actor IDs are configured
@@ -94,6 +98,8 @@ DESCRIPTIONS: dict[str, str] = {
     CRV_5002: "Unknown feature flag key",
     CRV_5003: "AI error analysis failed",
     CRV_5004: "AI job review failed",
+    CRV_5005: "Agent stats endpoint not configured",
+    CRV_5006: "Agent stats query failed",
     CRV_6001: "APIFY API key not configured",
     CRV_6002: "No APIFY actor IDs configured",
     CRV_6003: "APIFY actor run timed out",
