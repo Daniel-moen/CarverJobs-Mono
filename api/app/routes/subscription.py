@@ -4,17 +4,18 @@ import hmac
 import json
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import models
 from app.database import get_db
 from app.logger import get_logger
 from app.security import require_session
+from app.services.credits import add_credits, get_credit_balance
 from app.settings import settings
 
 log = get_logger("carver.subscription")
@@ -30,6 +31,12 @@ def _amount_str_to_cents(amount_str: str) -> int:
 
 def _yoco_configured() -> bool:
     return bool(settings.YOCO_SECRET_KEY)
+
+
+def _package_amount(tokens: int) -> int:
+    """Return the total price in cents for a token package."""
+    price_per_token = _amount_str_to_cents(settings.TOKEN_PRICE)
+    return price_per_token * tokens
 
 
 def _verify_yoco_webhook_signature(
@@ -67,16 +74,28 @@ def _verify_yoco_webhook_signature(
     return False
 
 
+class CheckoutRequest(BaseModel):
+    tokens: int
+
+
 @router.post("/checkout")
-def create_checkout(session: dict = Depends(require_session), db: Session = Depends(get_db)):
+def create_checkout(body: CheckoutRequest, session: dict = Depends(require_session), db: Session = Depends(get_db)):
     if not _yoco_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment provider is not configured yet.",
         )
 
+    if body.tokens not in settings.TOKEN_PACKAGES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid package. Choose one of: {settings.TOKEN_PACKAGES}",
+        )
+
     user_key = session.get("sub", "")
     payment_id = uuid.uuid4().hex
+    cents = _package_amount(body.tokens)
+    amount_str = f"{cents / 100:.2f}"
 
     existing = (
         db.query(models.Subscription)
@@ -91,14 +110,13 @@ def create_checkout(session: dict = Depends(require_session), db: Session = Depe
         user_key=user_key,
         m_payment_id=payment_id,
         status="pending",
-        amount=settings.YOCO_MONTHLY_AMOUNT,
-        frequency=3,
+        amount=amount_str,
+        frequency=0,
     )
     db.add(sub)
     db.commit()
 
     frontend_base = settings.FRONTEND_BASE_URL.rstrip("/")
-    cents = _amount_str_to_cents(settings.YOCO_MONTHLY_AMOUNT)
 
     payload: dict[str, Any] = {
         "amount": cents,
@@ -107,11 +125,11 @@ def create_checkout(session: dict = Depends(require_session), db: Session = Depe
         "cancelUrl": f"{frontend_base}/subscription?status=cancelled",
         "failureUrl": f"{frontend_base}/subscription?status=failed",
         "clientReferenceId": payment_id,
-        "metadata": {"m_payment_id": payment_id, "user_key": user_key},
+        "metadata": {"m_payment_id": payment_id, "user_key": user_key, "tokens": body.tokens},
         "lineItems": [
             {
-                "displayName": "CARVER Pro Monthly",
-                "description": "CARVER Pro — monthly access",
+                "displayName": f"CARVER {body.tokens} Token Pack",
+                "description": f"{body.tokens} tokens — R{settings.TOKEN_PRICE} each",
                 "quantity": 1,
                 "pricingDetails": {"price": cents},
             }
@@ -170,18 +188,17 @@ def create_checkout(session: dict = Depends(require_session), db: Session = Depe
             detail="Invalid response from payment provider.",
         )
 
-    # Persist the Yoco checkout session id for auditing / future refund lookups.
     if data.get("id"):
         sub.checkout_id = str(data["id"])
         db.commit()
 
-    log.info("Checkout created | user=%s | payment_id=%s | checkout_id=%s", user_key, payment_id, data.get("id"))
+    log.info("Checkout created | user=%s | payment_id=%s | tokens=%d | checkout_id=%s", user_key, payment_id, body.tokens, data.get("id"))
     return {"ok": True, "redirect_url": redirect_url}
 
 
 @router.post("/webhook")
 async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
-    """Yoco payment webhooks — verify signature, then update subscription."""
+    """Yoco payment webhooks — verify signature, then credit tokens."""
     raw = await request.body()
     wh_id = request.headers.get("webhook-id")
     wh_ts = request.headers.get("webhook-timestamp")
@@ -224,20 +241,26 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
             except (TypeError, ValueError):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount mismatch")
 
-        sub.status = "active"
+        sub.status = "completed"
         if payload.get("id"):
             sub.payment_token = str(payload["id"])
-        sub.next_billing_date = (
-            datetime.now(timezone.utc) + timedelta(days=30)
-        ).strftime("%Y-%m-%d")
-        user = db.query(models.User).filter(models.User.email == sub.user_key).first()
-        if user:
-            user.is_subscribed = True
-        log.info("Subscription activated | user=%s | next_billing=%s", sub.user_key, sub.next_billing_date)
         db.commit()
+
+        tokens_to_add = meta.get("tokens")
+        if tokens_to_add and int(tokens_to_add) > 0:
+            add_credits(db, sub.user_key, int(tokens_to_add))
+            log.info("Tokens credited | user=%s | tokens=%d", sub.user_key, int(tokens_to_add))
+        else:
+            price_cents = _amount_str_to_cents(settings.TOKEN_PRICE)
+            tokens_from_amount = _amount_str_to_cents(sub.amount) // price_cents
+            if tokens_from_amount > 0:
+                add_credits(db, sub.user_key, tokens_from_amount)
+                log.info("Tokens credited (from amount) | user=%s | tokens=%d", sub.user_key, tokens_from_amount)
+
+        log.info("Token purchase completed | user=%s", sub.user_key)
     elif event_type == "payment.failed":
         sub.status = "failed"
-        log.warning("Subscription payment failed | user=%s", sub.user_key)
+        log.warning("Token purchase payment failed | user=%s", sub.user_key)
         db.commit()
     else:
         log.info("Yoco webhook ignored event type | type=%s", event_type)
@@ -245,44 +268,17 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@router.post("/cancel")
-def cancel_subscription(session: dict = Depends(require_session), db: Session = Depends(get_db)):
-    user_key = session.get("sub", "")
-    sub = (
-        db.query(models.Subscription)
-        .filter(models.Subscription.user_key == user_key, models.Subscription.status == "active")
-        .first()
-    )
-    if not sub:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription found.")
-
-    sub.status = "cancelled"
-    user = db.query(models.User).filter(models.User.email == user_key).first()
-    if user:
-        user.is_subscribed = False
-    db.commit()
-
-    log.info("Subscription cancelled by user | user=%s", user_key)
-    return {"ok": True, "detail": "Subscription cancelled."}
-
-
 @router.get("/status")
 def subscription_status(session: dict = Depends(require_session), db: Session = Depends(get_db)):
     user_key = session.get("sub", "")
-    monthly_amount = settings.YOCO_MONTHLY_AMOUNT
-    free_tokens = settings.FREE_MONTHLY_TOKENS
-    sub = (
-        db.query(models.Subscription)
-        .filter(models.Subscription.user_key == user_key, models.Subscription.status == "active")
-        .first()
-    )
-    if not sub:
-        return {"ok": True, "subscribed": False, "monthly_amount": monthly_amount, "free_monthly_tokens": free_tokens}
+    balance = get_credit_balance(db, user_key)
+    token_price = settings.TOKEN_PRICE
+    packages = [
+        {"tokens": t, "price": f"{(t * float(token_price)):.2f}"} for t in settings.TOKEN_PACKAGES
+    ]
     return {
         "ok": True,
-        "subscribed": True,
-        "next_billing_date": sub.next_billing_date,
-        "amount": sub.amount,
-        "monthly_amount": monthly_amount,
-        "free_monthly_tokens": free_tokens,
+        "balance": balance,
+        "token_price": token_price,
+        "packages": packages,
     }

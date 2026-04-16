@@ -14,7 +14,7 @@ export const site = {
     { key: 'job-board', label: 'Job Board' },
     { key: 'profile', label: 'Profile' },
     { key: 'status', label: 'Status' },
-    { key: 'subscription', label: 'Subscribe', hideWhenSubscribed: true },
+    { key: 'subscription', label: 'Buy Tokens' },
     { key: 'dashboard', label: 'Dashboard', adminOnly: true },
     { key: 'admin-job-ingest', label: 'Job Ingest', adminOnly: true },
   ],

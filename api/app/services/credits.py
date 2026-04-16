@@ -78,10 +78,6 @@ def spend_credits(db: Session, user_key: str, amount: int = 1) -> int | None:
     if amount < 0:
         raise ValueError("amount must be non-negative")
 
-    # Paid subscribers have unlimited tokens.
-    if is_subscribed(db, user_key):
-        return get_credit_balance(db, user_key)
-
     account = _get_or_create_account(db, user_key)
     if account.balance < amount:
         return None

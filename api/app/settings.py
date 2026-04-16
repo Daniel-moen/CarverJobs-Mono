@@ -121,7 +121,8 @@ class Settings:
   YOCO_PUBLIC_KEY: str = os.getenv("YOCO_PUBLIC_KEY", "").strip()
   YOCO_SECRET_KEY: str = os.getenv("YOCO_SECRET_KEY", "").strip()
   YOCO_WEBHOOK_SECRET: str = os.getenv("YOCO_WEBHOOK_SECRET", "").strip()
-  YOCO_MONTHLY_AMOUNT: str = os.getenv("YOCO_MONTHLY_AMOUNT", "200.00").strip()
+  TOKEN_PRICE: str = os.getenv("TOKEN_PRICE", "10.00").strip()
+  TOKEN_PACKAGES: list[int] = [10, 20]
 
   # Free tier — tokens granted to every user each month (reset every 30 days)
   FREE_MONTHLY_TOKENS: int = int(os.getenv("FREE_MONTHLY_TOKENS", "25"))

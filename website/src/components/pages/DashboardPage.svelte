@@ -50,6 +50,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        body: JSON.stringify({ tokens: 10 }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { pfError = data.detail || `Error ${res.status}`; return }
@@ -1225,13 +1226,13 @@
             <div class="mt-3">
               {#if pfSubStatus.error}
                 <span class="rounded-full bg-rose-400/15 px-2 py-0.5 text-[10px] font-bold text-rose-300">{pfSubStatus.error}</span>
-              {:else if pfSubStatus.subscribed}
-                <span class="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">Active</span>
-                {#if pfSubStatus.next_billing_date}
-                  <p class="mt-1 text-[10px] text-slate-500">Next bill: {pfSubStatus.next_billing_date}</p>
+              {:else if pfSubStatus.balance != null}
+                <span class="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">Balance: {pfSubStatus.balance} tokens</span>
+                {#if pfSubStatus.token_price}
+                  <p class="mt-1 text-[10px] text-slate-500">R{pfSubStatus.token_price}/token</p>
                 {/if}
               {:else}
-                <span class="rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold text-slate-400">Not subscribed</span>
+                <span class="rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold text-slate-400">No data</span>
               {/if}
             </div>
           {/if}

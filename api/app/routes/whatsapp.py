@@ -219,15 +219,10 @@ async def _send_job_review_wait(to: str) -> None:
 
 def _credits_summary_for_menu(balance: int, subscribed: bool = False) -> str:
     w = "token" if balance == 1 else "tokens"
-    if subscribed:
-        return (
-            f"💳 *Your balance: {balance} {w}* (Pro — unlimited).\n"
-            "Pro subscribers get *25 tokens/month* for matching "
-        )
     return (
         f"💳 *Your balance: {balance} {w}.*\n"
         "Each *Find Matches* run uses 1 token. "
-        "Submit a valid job to earn tokens, or upgrade to *Pro* for 25 tokens/month."
+        "Submit a valid job to earn tokens, or type *buy tokens* to top up."
     )
 
 
@@ -974,20 +969,19 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
         await _send_whatsapp(phone_number, "No open yacht positions right now — check back soon!")
         return
 
-    user_is_subscribed = is_subscribed(db, phone_number)
     credits_remaining = spend_credits(db, phone_number, amount=1)
     if credits_remaining is None:
         current_credits = get_credit_balance(db, phone_number)
         await _send_whatsapp(
             phone_number,
-    "⚠️ You need *1 token* to run matching.\n\n"
-            "Submit a job to earn tokens, or upgrade to *Pro* for 25 tokens/month and unlimited runs.\n"
+            "⚠️ You need *1 token* to run matching.\n\n"
+            "Submit a job to earn tokens, or type *buy tokens* to top up.\n"
             f"Current balance: *{current_credits}* token{'s' if current_credits != 1 else ''}.",
         )
         await _send_whatsapp_buttons(
             phone_number,
             "What would you like to do?",
-            [("btn_submit_job", "Submit Job"), ("cmd_subscribe", "Go Pro"), ("btn_menu", "Menu")],
+            [("btn_submit_job", "Submit Job"), ("cmd_subscribe", "Buy Tokens"), ("btn_menu", "Menu")],
         )
         return
 
@@ -997,19 +991,12 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
     est_secs = num_batches * _AVG_SECS_PER_BATCH
     est_str = f"~{est_secs}s" if est_secs < 60 else f"~{round(est_secs / 60)} min"
 
-    if user_is_subscribed:
-        await _send_whatsapp(
-            phone_number,
-            f"⭐ *Pro subscriber* — no token charged.\n\n"
-            f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
-        )
-    else:
-        tok_left = "token" if credits_remaining == 1 else "tokens"
-        await _send_whatsapp(
-            phone_number,
-            f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
-            f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
-        )
+    tok_left = "token" if credits_remaining == 1 else "tokens"
+    await _send_whatsapp(
+        phone_number,
+        f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
+        f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
+    )
 
     certs = [c.strip() for c in (profile.certifications or "").replace("\n", ",").split(",") if c.strip()]
     langs = [lang.strip() for lang in (profile.languages or "").split(",") if lang.strip()]
@@ -1262,48 +1249,34 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
 
     if cmd in ("credits", "balance", "my credits", "tokens", "my tokens"):
         bal = get_credit_balance(db, phone)
-        sub = is_subscribed(db, phone)
-        await _send_whatsapp(phone, _credits_standalone_message(bal, sub))
+        await _send_whatsapp(phone, _credits_standalone_message(bal))
         return None
 
-    if cmd in ("subscribe", "pro", "upgrade", "paid", "subscription"):
+    if cmd in ("subscribe", "pro", "upgrade", "paid", "subscription", "buy tokens", "buy", "top up", "topup"):
         link = _make_magic_link(phone, db, redirect_to="/subscription")
-        sub = is_subscribed(db, phone)
-        if sub:
-            await _send_whatsapp(
-                phone,
-                "✅ You're already subscribed to *CARVER Pro*!\n\n"
-                "Unlimited matching and priority recommendations are active on your account.\n\n"
-                f"Manage your subscription:\n👉 {link}\n\n"
-                "_Link expires in 30 minutes._",
-            )
-        else:
-            await _send_whatsapp(
-                phone,
-                "⭐ *CARVER Pro*\n\n"
-                "Upgrade for *unlimited matching runs*, *priority recommendations* to employers, "
-                "and full access to every feature.\n\n"
-                f"👉 {link}\n\n"
-                "_Link expires in 30 minutes._",
-            )
+        bal = get_credit_balance(db, phone)
+        w = "token" if bal == 1 else "tokens"
+        await _send_whatsapp(
+            phone,
+            f"🪙 *Buy Tokens*\n\n"
+            f"Your balance: *{bal} {w}*\n\n"
+            f"Token packs available:\n"
+            f"• *10 tokens* — R100\n"
+            f"• *20 tokens* — R200\n\n"
+            f"👉 {link}\n\n"
+            "_Link expires in 30 minutes._",
+        )
         return None
 
     if cmd in ("cancel subscription", "cancel pro", "cancel", "unsubscribe"):
-        sub = is_subscribed(db, phone)
+        bal = get_credit_balance(db, phone)
+        w = "token" if bal == 1 else "tokens"
         link = _make_magic_link(phone, db, redirect_to="/subscription")
-        if sub:
-            await _send_whatsapp(
-                phone,
-                "⚠️ *Cancel CARVER Pro*\n\n"
-                "You can cancel your subscription from this link:\n\n"
-                f"👉 {link}\n\n"
-                "_Link expires in 30 minutes._",
-            )
-        else:
-            await _send_whatsapp(
-                phone,
-                "You don't have an active Pro subscription.\n\n"
-                "Want to upgrade? Tap below.",
+        await _send_whatsapp(
+            phone,
+            f"There's no subscription to cancel — CARVER uses pay-per-token.\n\n"
+            f"Your balance: *{bal} {w}*.\n\n"
+            f"Need more tokens? 👉 {link}",
             )
             await _send_whatsapp_buttons(
                 phone,
@@ -1418,6 +1391,7 @@ async def whatsapp_verify(request: Request):
 # This ensures tapping "Subscribe to Pro" or "Help" from the WhatsApp menu always works.
 _GLOBAL_CMDS: frozenset[str] = frozenset({
     "subscribe", "pro", "upgrade", "paid", "subscription",
+    "buy tokens", "buy", "top up", "topup",
     "cancel subscription", "cancel pro", "cancel", "unsubscribe",
     "help", "commands", "menu",
     "credits", "balance", "my credits", "tokens", "my tokens",

@@ -5,7 +5,7 @@
   import ProfilePage from './ProfilePage.svelte'
   import JobBoardPage from './JobBoardPage.svelte'
   import StatusPage from './StatusPage.svelte'
-  import SubscriptionPage from './SubscriptionPage.svelte'
+  import WhatsAppSubscribePage from './WhatsAppSubscribePage.svelte'
 
   export let token = ''
 
@@ -136,12 +136,10 @@
           class="rounded-md px-2 py-1 text-[11px] font-medium transition {targetPage === 'job-board' ? 'text-white bg-white/8' : 'text-slate-500 hover:text-slate-300'}">
           Jobs
         </button>
-        {#if !isSubscribed}
-          <button type="button" onclick={() => navigate('subscription')}
-            class="rounded-md px-2 py-1 text-[11px] font-medium transition {targetPage === 'subscription' ? 'text-cyan-200 bg-cyan-300/10 border border-cyan-300/25' : 'text-cyan-400 hover:text-cyan-300'}">
-            Subscribe
-          </button>
-        {/if}
+        <button type="button" onclick={() => navigate('subscription')}
+          class="rounded-md px-2 py-1 text-[11px] font-medium transition {targetPage === 'subscription' ? 'text-cyan-200 bg-cyan-300/10 border border-cyan-300/25' : 'text-cyan-400 hover:text-cyan-300'}">
+          Buy Tokens
+        </button>
       </nav>
     </div>
   </header>
@@ -156,7 +154,7 @@
     {:else if targetPage === 'status'}
       <StatusPage />
     {:else if targetPage === 'subscription'}
-      <SubscriptionPage {isSubscribed} onNavigate={navigate} />
+      <WhatsAppSubscribePage onNavigate={navigate} />
     {:else}
       <ProfilePage />
     {/if}
