@@ -126,6 +126,8 @@ class Settings:
 
   # Free tier — tokens granted to every user each month (reset every 30 days)
   FREE_MONTHLY_TOKENS: int = int(os.getenv("FREE_MONTHLY_TOKENS", "25"))
+  # One-time token grant for brand-new accounts (before any subscription)
+  FREE_SIGNUP_TOKENS: int = int(os.getenv("FREE_SIGNUP_TOKENS", "2"))
 
   # Static bearer token for the AI agent monitoring endpoint (/agent/stats)
   AGENT_API_TOKEN: str = os.getenv("AGENT_API_TOKEN", "").strip()

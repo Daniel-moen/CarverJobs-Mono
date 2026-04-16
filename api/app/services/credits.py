@@ -14,7 +14,7 @@ def _get_or_create_account(db: Session, user_key: str) -> CreditAccount:
         _maybe_reset_monthly(db, account)
         return account
 
-    initial_balance = settings.FREE_MONTHLY_TOKENS if is_subscribed(db, user_key) else 0
+    initial_balance = settings.FREE_MONTHLY_TOKENS if is_subscribed(db, user_key) else settings.FREE_SIGNUP_TOKENS
     account = CreditAccount(
         user_key=user_key,
         balance=initial_balance,
