@@ -2,7 +2,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # SQLite only — no PostgreSQL. Optional absolute path for the DB file (e.g. mounted volume).
@@ -16,8 +16,33 @@ else:
     DB_PATH = DB_DIR / "carver.db"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False, "timeout": 30},
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def _enable_wal() -> None:
+    """Switch SQLite to WAL mode for concurrent read/write support."""
+    import sqlite3 as _sqlite3
+    with _sqlite3.connect(str(DB_PATH), timeout=30) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+
+
+_enable_wal()
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.close()
+
+
 Base = declarative_base()
 
 
@@ -35,7 +60,9 @@ def run_migrations() -> None:
   Uses a raw sqlite3 connection so SQLAlchemy's connection pool is never
   left in an error/rollback state by a failed DDL statement.
   """
-  with sqlite3.connect(str(DB_PATH)) as conn:
+  with sqlite3.connect(str(DB_PATH), timeout=30) as conn:
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     def _existing(table: str) -> set[str]:
       cur = conn.cursor()
       cur.execute(f"PRAGMA table_info({table})")

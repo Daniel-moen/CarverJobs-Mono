@@ -526,11 +526,22 @@ def _make_magic_link(phone_number: str, db: Session, *, redirect_to: str | None 
     safe_redirect = redirect_to if _is_safe_redirect(redirect_to) else None
     token = secrets.token_urlsafe(16)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.WA_MAGIC_TOKEN_TTL_SECONDS)
-    db.add(WhatsAppMagicToken(
-        token=token, phone_number=phone_number,
-        expires_at=expires_at, redirect_to=safe_redirect,
-    ))
-    db.commit()
+
+    from sqlalchemy.exc import OperationalError
+    for attempt in range(3):
+        try:
+            db.add(WhatsAppMagicToken(
+                token=token, phone_number=phone_number,
+                expires_at=expires_at, redirect_to=safe_redirect,
+            ))
+            db.commit()
+            break
+        except OperationalError:
+            db.rollback()
+            if attempt == 2:
+                raise
+            time.sleep(0.5 * (attempt + 1))
+
     url = f"{settings.FRONTEND_BASE_URL}/wa/{token}"
     if safe_redirect and safe_redirect != "/profile":
         url += f"?r={safe_redirect}"

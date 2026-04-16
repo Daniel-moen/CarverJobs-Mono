@@ -1,5 +1,7 @@
+import time
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.models import CreditAccount, Subscription
@@ -12,8 +14,6 @@ def _get_or_create_account(db: Session, user_key: str) -> CreditAccount:
         _maybe_reset_monthly(db, account)
         return account
 
-    # New accounts start at 0 tokens. Only Pro subscribers receive the
-    # monthly token allowance (granted via _maybe_reset_monthly).
     initial_balance = settings.FREE_MONTHLY_TOKENS if is_subscribed(db, user_key) else 0
     account = CreditAccount(
         user_key=user_key,
@@ -21,7 +21,16 @@ def _get_or_create_account(db: Session, user_key: str) -> CreditAccount:
         last_reset_at=datetime.now(timezone.utc),
     )
     db.add(account)
-    db.commit()
+    for attempt in range(3):
+        try:
+            db.commit()
+            break
+        except OperationalError:
+            db.rollback()
+            if attempt == 2:
+                raise
+            time.sleep(0.5 * (attempt + 1))
+            db.add(account)
     db.refresh(account)
     return account
 
@@ -78,11 +87,17 @@ def spend_credits(db: Session, user_key: str, amount: int = 1) -> int | None:
     if amount < 0:
         raise ValueError("amount must be non-negative")
 
-    account = _get_or_create_account(db, user_key)
-    if account.balance < amount:
-        return None
-
-    account.balance -= amount
-    db.commit()
-    db.refresh(account)
-    return account.balance
+    for attempt in range(3):
+        try:
+            account = _get_or_create_account(db, user_key)
+            if account.balance < amount:
+                return None
+            account.balance -= amount
+            db.commit()
+            db.refresh(account)
+            return account.balance
+        except OperationalError:
+            db.rollback()
+            if attempt == 2:
+                raise
+            time.sleep(0.5 * (attempt + 1))
