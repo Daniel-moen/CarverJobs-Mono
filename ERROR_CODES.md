@@ -86,6 +86,10 @@ CRV-XYYY
 |------|---------|---------------|
 | `CRV-5001` | Admin stats DB query failed | Inspect API logs for the underlying SQLAlchemy error. The database may be locked or corrupted. |
 | `CRV-5002` | Unknown feature flag key | A flag key was sent to `PATCH /admin/flags` that does not exist. Check the key name against `GET /admin/flags`. |
+| `CRV-5005` | Agent stats endpoint not configured | `AGENT_API_TOKEN` is not set in `.env`. The agent monitoring endpoint is disabled until a token is configured. |
+| `CRV-5006` | Agent stats query failed | A database error occurred while computing agent statistics. Inspect API logs. |
+| `CRV-5007` | Agent SQL query rejected | The submitted SQL query was rejected — only read-only `SELECT`, `PRAGMA`, `EXPLAIN`, and `WITH` queries are allowed. |
+| `CRV-5008` | Agent SQL query failed | The SQL query failed to execute. Check the query syntax or inspect API logs for the database error. |
 
 ---
 

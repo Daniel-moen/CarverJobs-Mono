@@ -58,6 +58,8 @@ CRV_5004 = "CRV-5004"  # AI job review failed
 # ── Agent Monitoring ────────────────────────────────────────────────────────
 CRV_5005 = "CRV-5005"  # Agent stats endpoint not configured (missing token)
 CRV_5006 = "CRV-5006"  # Agent stats query failed (database error)
+CRV_5007 = "CRV-5007"  # Agent SQL query rejected (forbidden statement)
+CRV_5008 = "CRV-5008"  # Agent SQL query failed (execution error)
 
 # ── APIFY Scraper / Job Ingestion ────────────────────────────────────────────
 CRV_6001 = "CRV-6001"  # APIFY API key is missing or not configured
@@ -100,6 +102,8 @@ DESCRIPTIONS: dict[str, str] = {
     CRV_5004: "AI job review failed",
     CRV_5005: "Agent stats endpoint not configured",
     CRV_5006: "Agent stats query failed",
+    CRV_5007: "Agent SQL query rejected",
+    CRV_5008: "Agent SQL query failed",
     CRV_6001: "APIFY API key not configured",
     CRV_6002: "No APIFY actor IDs configured",
     CRV_6003: "APIFY actor run timed out",

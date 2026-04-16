@@ -1,23 +1,27 @@
 """
-Agent monitoring endpoint.
+Agent monitoring endpoints.
 
-GET /agent/stats — returns platform-wide aggregate statistics for an
-external AI agent to poll.  Authenticated via a static bearer token
-(AGENT_API_TOKEN env var), not the normal session system.
+GET  /agent/stats — platform-wide aggregate statistics.
+POST /agent/sql   — run a read-only SQL query against the database.
+
+Authenticated via a static bearer token (AGENT_API_TOKEN env var),
+not the normal session system.
 """
 
 import hmac
+import re
+import sqlite3
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import cast, func, Numeric
 from sqlalchemy.orm import Session
 
 from app import metrics
-from app.database import get_db
-from app.error_codes import CRV_2004, CRV_5005, CRV_5006
+from app.database import get_db, DB_PATH
+from app.error_codes import CRV_2004, CRV_5005, CRV_5006, CRV_5007, CRV_5008
 from app.logger import get_logger
 from app.models import (
     CreditAccount,
@@ -207,3 +211,120 @@ def get_agent_stats(request: Request, db: Session = Depends(get_db)):
             "avg_ai_response_ms": events.get("avg_ai_response_ms", 0),
         },
     }
+
+
+# ── SQL query endpoint ──────────────────────────────────────────────────────
+
+_MAX_QUERY_LENGTH = 4096
+_MAX_ROWS = 1000
+_QUERY_TIMEOUT_SECONDS = 10
+
+_FORBIDDEN_PATTERN = re.compile(
+    r"\b("
+    r"DROP|ALTER|CREATE|TRUNCATE"
+    r"|ATTACH|DETACH|LOAD_EXTENSION|REINDEX|VACUUM"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_ALLOWED_LEADING = re.compile(
+    r"^\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|PRAGMA|EXPLAIN|WITH)\b",
+    re.IGNORECASE,
+)
+
+
+def _validate_sql(query: str) -> None:
+    """Reject destructive schema operations. Allow reads and data modifications."""
+    if len(query) > _MAX_QUERY_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Query too long (max {_MAX_QUERY_LENGTH} chars).",
+            headers={"X-Error-Code": CRV_5007},
+        )
+
+    stripped = query.strip().rstrip(";").strip()
+    if not stripped:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty query.",
+            headers={"X-Error-Code": CRV_5007},
+        )
+
+    if not _ALLOWED_LEADING.match(stripped):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only SELECT, INSERT, UPDATE, DELETE, REPLACE, PRAGMA, EXPLAIN, and WITH queries are allowed.",
+            headers={"X-Error-Code": CRV_5007},
+        )
+
+    if _FORBIDDEN_PATTERN.search(stripped):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Query contains a forbidden keyword (DROP, ALTER, CREATE, TRUNCATE are not allowed).",
+            headers={"X-Error-Code": CRV_5007},
+        )
+
+
+@router.post("/sql", dependencies=[Depends(_require_agent_token)])
+@_limiter.limit("5/minute")
+def run_agent_sql(
+    request: Request,
+    query: str = Body(..., embed=True),
+    limit: int = Body(_MAX_ROWS, embed=True, ge=1, le=_MAX_ROWS),
+):
+    _validate_sql(query)
+
+    effective_query = query.strip().rstrip(";")
+
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=_QUERY_TIMEOUT_SECONDS)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+    except Exception as exc:
+        log.error("Agent SQL: could not open connection: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not open database connection.",
+            headers={"X-Error-Code": CRV_5008},
+        ) from exc
+
+    try:
+        cursor = conn.execute(effective_query)
+
+        if cursor.description:
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchmany(limit)
+            truncated = len(rows) == limit and cursor.fetchone() is not None
+            conn.commit()
+            return {
+                "ok": True,
+                "columns": columns,
+                "rows": [list(row) for row in rows],
+                "row_count": len(rows),
+                "truncated": truncated,
+            }
+
+        affected = cursor.rowcount
+        conn.commit()
+        return {
+            "ok": True,
+            "rows_affected": affected,
+        }
+    except sqlite3.OperationalError as exc:
+        conn.rollback()
+        log.warning("Agent SQL query failed: %s | query=%s", exc, effective_query[:200])
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Query error: {exc}",
+            headers={"X-Error-Code": CRV_5008},
+        ) from exc
+    except Exception as exc:
+        conn.rollback()
+        log.error("Agent SQL unexpected error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Query execution failed.",
+            headers={"X-Error-Code": CRV_5008},
+        ) from exc
+    finally:
+        conn.close()
