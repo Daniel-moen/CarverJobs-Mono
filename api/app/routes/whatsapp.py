@@ -1277,12 +1277,12 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
             f"There's no subscription to cancel — CARVER uses pay-per-token.\n\n"
             f"Your balance: *{bal} {w}*.\n\n"
             f"Need more tokens? 👉 {link}",
-            )
-            await _send_whatsapp_buttons(
-                phone,
-                "Get Pro?",
-                [("cmd_subscribe", "Subscribe to Pro"), ("btn_menu", "Menu")],
-            )
+        )
+        await _send_whatsapp_buttons(
+            phone,
+            "Get Pro?",
+            [("cmd_subscribe", "Subscribe to Pro"), ("btn_menu", "Menu")],
+        )
         return None
 
     if cmd in ("profile", "my profile", "show profile"):
