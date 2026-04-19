@@ -563,11 +563,13 @@
       <MobileMarketingPage
         onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
         onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
+        onAgencySignup={() => { authError = ''; showLogin = false; showSignup = true; history.pushState({ page: 'signup' }, '', '/signup/agency'); trackClick('agency_signup_cta') }}
       />
     {:else}
       <LandingPage
         onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
         onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
+        onAgencySignup={() => { authError = ''; showLogin = false; showSignup = true; history.pushState({ page: 'signup' }, '', '/signup/agency'); trackClick('agency_signup_cta') }}
       />
     {/if}
   {:else if !isAuthenticated && showLogin}

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { trackEvent } from '../../config/analytics'
 
-  let { onSignIn = () => {}, onStartMatch = () => {} } = $props()
+  let { onSignIn = () => {}, onStartMatch = () => {}, onAgencySignup = () => {} } = $props()
   const isFinePointer = window.matchMedia('(pointer:fine)').matches
   const isMobileViewport = window.matchMedia('(max-width: 768px)').matches
 
@@ -425,6 +425,29 @@
         class="mt-8 rounded-full border border-white/20 bg-white px-10 py-4 text-sm font-bold text-black transition-all duration-200 hover:bg-slate-100 hover:shadow-[0_0_40px_rgba(255,255,255,0.15)]"
       >
         Join the Beta — Discount for First 100 Crew
+      </button>
+    </div>
+  </section>
+
+  <!-- ── AGENCY STRIP ───────────────────────────────────────────────── -->
+  <section class="border-t border-white/5 px-4 py-12 sm:px-6 sm:py-16">
+    <div
+      class="mx-auto flex max-w-5xl flex-col items-start justify-between gap-6 rounded-2xl border border-white/10 bg-white/[0.02] p-6 sm:flex-row sm:items-center sm:p-8"
+      data-animate
+    >
+      <div class="max-w-xl">
+        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300/80">For agencies</p>
+        <h3 class="mt-2 text-2xl font-bold text-white sm:text-3xl">Are you a yachting agency?</h3>
+        <p class="mt-2 text-sm leading-relaxed text-slate-400">
+          Post jobs straight to qualified crew in seconds. Free to use during beta — no tokens, no fees.
+        </p>
+      </div>
+      <button
+        type="button"
+        onclick={() => onAgencySignup('agency_strip')}
+        class="shrink-0 rounded-full border border-white/15 bg-transparent px-7 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-white/10"
+      >
+        Post a job →
       </button>
     </div>
   </section>

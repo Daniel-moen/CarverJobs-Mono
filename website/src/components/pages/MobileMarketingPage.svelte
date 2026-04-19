@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { trackEvent } from '../../config/analytics'
 
-  let { onSignIn = () => {}, onStartMatch = () => {} } = $props()
+  let { onSignIn = () => {}, onStartMatch = () => {}, onAgencySignup = () => {} } = $props()
 
   onMount(() => {
     const depths = new Set()
@@ -242,6 +242,21 @@
         class="mt-6 rounded-xl border border-white/20 bg-white px-8 py-3.5 text-sm font-bold text-black transition-all duration-200 hover:bg-slate-100"
       >
         Join the Beta — Discount for First 100 Crew
+      </button>
+    </section>
+
+    <section class="mt-10 rounded-2xl border border-white/10 bg-white/[0.02] p-6 text-left">
+      <p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-300/80">For agencies</p>
+      <h3 class="mt-2 text-2xl font-bold text-white">Are you a yachting agency?</h3>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        Post jobs straight to qualified crew in seconds. Free during beta.
+      </p>
+      <button
+        type="button"
+        onclick={() => onAgencySignup('agency_strip')}
+        class="mt-5 w-full rounded-xl border border-white/15 bg-transparent px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-white/10"
+      >
+        Post a job →
       </button>
     </section>
   </main>
