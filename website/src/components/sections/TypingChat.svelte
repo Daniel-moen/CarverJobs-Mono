@@ -87,6 +87,9 @@
   let typing = $state(false)
   /** Cycle counter so {#each} re-creates bubble nodes on every loop, retriggering enter animations. */
   let cycle = $state(0)
+  /** Bound chat scroll container so we can keep the latest message in view. */
+  /** @type {HTMLElement|null} */
+  let bodyEl = $state(null)
 
   /** @type {ReturnType<typeof setTimeout>|null} */
   let _timer = null
@@ -155,6 +158,22 @@
       restart()
     }
   })
+
+  // Auto-scroll the chat body so the most recent bubble (or the typing
+  // indicator) is always pinned to the bottom. Triggered on every change
+  // to the message list, the typing flag, or a loop restart.
+  $effect(() => {
+    // Read reactive deps so Svelte tracks them.
+    void visible.length
+    void typing
+    void cycle
+    if (!bodyEl) return
+    // requestAnimationFrame ensures we scroll *after* the new bubble has
+    // been laid out (scrollHeight reflects the newly inserted node).
+    requestAnimationFrame(() => {
+      if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight
+    })
+  })
 </script>
 
 <div class="chat" aria-label="Live demo of the Carver WhatsApp bot">
@@ -177,7 +196,7 @@
   </header>
 
   <!-- chat body — paper grain over a deep WhatsApp-dark surface -->
-  <div class="chat-body chat-surface" aria-live="polite">
+  <div class="chat-body chat-surface" aria-live="polite" bind:this={bodyEl}>
     {#key cycle}
       {#each visible as msg, i (i)}
         {#if msg.role === 'me'}
