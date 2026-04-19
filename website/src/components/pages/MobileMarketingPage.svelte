@@ -58,16 +58,19 @@
   ]
 </script>
 
-<div class="min-h-screen bg-black text-slate-100 relative overflow-hidden">
-  <nav class="sticky top-0 z-50 w-full border-b border-white/10 bg-black/95">
+<div class="min-h-screen bg-[#04070b] text-slate-100 relative overflow-hidden">
+  <nav class="sticky top-0 z-50 w-full border-b border-white/[0.06] bg-[#04070b]/90 backdrop-blur-xl">
     <div class="mx-auto flex max-w-7xl items-center justify-between px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-      <span class="text-sm font-black tracking-[0.26em] text-white">CARVER</span>
+      <a href="/" class="flex items-center gap-2">
+        <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
+        <span class="font-display text-[14px] tracking-[0.38em] text-ivory">CARVER</span>
+      </a>
       <button
         type="button"
         onclick={() => onSignIn('nav')}
-        class="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-5 py-2 text-xs font-semibold text-cyan-300 transition-all duration-200 hover:border-cyan-400/70 hover:bg-cyan-400/20 hover:text-white"
+        class="rounded-full border border-white/15 bg-white/[0.04] px-4 py-1.5 text-[12px] font-medium text-slate-200 transition-all duration-200 hover:border-cyan-300/50 hover:text-white"
       >
-        Sign In →
+        Sign in
       </button>
     </div>
   </nav>
@@ -81,81 +84,89 @@
 
   <main class="relative z-10 mx-auto w-full max-w-3xl px-4 pb-10 pt-8">
     <section class="text-center">
-      <div class="mx-auto inline-flex items-center gap-2.5 rounded-full border border-cyan-400/20 bg-cyan-400/5 px-4 py-1.5">
+      <div class="mx-auto inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/[0.025] px-4 py-1.5">
         <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400 animate-pulse"></span>
-        <span class="text-[10px] tracking-[0.18em] text-cyan-300/80">SUPERYACHT CREW</span>
+        <span class="font-mono text-[10px] uppercase tracking-[0.22em] text-slate-300">Superyacht crew &middot; Beta</span>
       </div>
 
-      <h1 class="mt-6 text-[clamp(2rem,10vw,3rem)] font-black leading-[1.02] tracking-tight text-white">
+      <h1 class="mt-6 font-display text-[clamp(2.1rem,9.5vw,3.4rem)] font-light leading-[1.04] text-white">
         Every yacht job.<br />
-        <span class="gradient-text">One place.</span><br />
+        <em class="gradient-text font-light italic">One place.</em><br />
         Auto-matched.
       </h1>
 
-      <p class="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-slate-400">
-        We collect jobs from 50+ groups, crew agencies, and any listing with a contact email — so you don't have to scroll for hours.
-        Captains hiring? Post your own jobs directly.
-      </p>
-
-      <p class="mt-4 text-sm font-medium text-cyan-300/70">
-        Already helping crew in Med &amp; Caribbean groups
+      <p class="mx-auto mt-5 max-w-2xl text-[15px] leading-relaxed text-slate-300/85">
+        We aggregate listings from 50+ crew groups, agencies, and any source with a contact email —
+        so you stop scrolling and start applying.
       </p>
 
       <div class="mt-8 flex flex-col items-center gap-3">
         <button
           type="button"
           onclick={() => onSignIn('hero')}
-          class="cta-primary group w-full rounded-xl px-7 py-3.5 text-sm font-bold text-black transition-all duration-200 hover:shadow-[0_0_40px_rgba(34,211,238,0.25)]"
+          class="cta-primary group w-full rounded-xl px-7 py-3.5 text-[13px] font-semibold text-[#04070b] transition-all duration-200"
         >
-          Join the Beta — Discount for First 100 Crew
+          Join the Beta · First 100 discount
         </button>
         <a
           href="#how-it-works"
-          class="w-full rounded-xl border border-white/15 px-7 py-3.5 text-sm font-medium text-slate-400 transition-all duration-200 hover:border-white/30 hover:text-white text-center"
+          class="w-full rounded-xl border border-white/15 px-7 py-3.5 text-[13px] font-medium text-slate-300 transition-all duration-200 hover:border-white/30 hover:text-white text-center"
         >
-          How it works
+          How it works →
         </a>
+      </div>
+
+      <div class="mt-7 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-slate-500">
+        <span class="inline-flex items-center gap-1.5">
+          <svg class="h-3.5 w-3.5 text-emerald-300/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          TLS encrypted
+        </span>
+        <span class="text-slate-700">·</span>
+        <span>EU data residency</span>
+        <span class="text-slate-700">·</span>
+        <span>Used by crew in Med &amp; Caribbean</span>
       </div>
     </section>
 
     <section class="mt-14 text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-cyan-400/70">Community-powered</p>
-      <h2 class="mt-3 text-3xl font-black text-white">See one we missed?</h2>
-      <p class="mx-auto mt-4 max-w-md text-sm leading-relaxed text-slate-400">
-        Saw a job in a crew group or social post? Submit it easily with a screenshot or pasted text—we add it to the board and you get a token to match roles that fit your profile. Hiring managers can post positions directly too.
+      <p class="eyebrow">Community-powered</p>
+      <h2 class="mt-3 font-display text-3xl font-light text-white sm:text-4xl">See one we missed?</h2>
+      <p class="mx-auto mt-4 max-w-md text-[14px] leading-relaxed text-slate-400">
+        Saw a job in a crew group or social post? Submit it with a screenshot or pasted text — we add it to the board
+        and you earn a token. Hiring managers can post positions directly too.
       </p>
     </section>
 
     <section class="mt-14">
       <div class="text-center">
-        <p class="text-xs uppercase tracking-[0.3em] text-cyan-400/70">Features</p>
-        <h2 class="mt-3 text-3xl font-black text-white">Built for superyacht crew</h2>
-        <p class="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-400">
+        <p class="eyebrow">Features</p>
+        <h2 class="mt-3 font-display text-3xl font-light text-white sm:text-4xl">Built for superyacht crew</h2>
+        <p class="mx-auto mt-3 max-w-md text-[14px] leading-relaxed text-slate-400">
           Every feature is designed for working on the water: faster applications and smarter matching.
         </p>
       </div>
 
       <div class="mt-8 grid gap-3 sm:grid-cols-2">
         {#each features as feature}
-          <article class="rounded-2xl border border-white/8 bg-zinc-950 p-5">
+          <article class="rounded-2xl border border-white/[0.07] bg-[#0a0e14] p-5">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-cyan-300">
+              <div class="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-cyan-300">
                 {@html feature.icon}
               </div>
-              <h3 class="font-semibold text-white">{feature.title}</h3>
+              <h3 class="text-[15px] font-semibold text-white">{feature.title}</h3>
             </div>
-            <p class="mt-3 text-sm leading-relaxed text-slate-400">{feature.desc}</p>
+            <p class="mt-3 text-[13.5px] leading-relaxed text-slate-400">{feature.desc}</p>
           </article>
         {/each}
       </div>
     </section>
 
-    <section class="mt-14 rounded-3xl border border-white/10 bg-zinc-950/70 p-5">
+    <section class="mt-14 rounded-3xl border border-white/[0.08] bg-[#0a0e14]/80 p-5">
       <div class="flex items-start gap-3">
-        <span class="mt-0.5 h-2 w-2 rounded-full bg-cyan-400"></span>
+        <span class="mt-1.5 h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
         <div>
-          <p class="text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Matching Engine</p>
-          <h3 class="mt-2 text-2xl font-black text-white">Find your best fit</h3>
+          <p class="eyebrow">Matching Engine</p>
+          <h3 class="mt-2 font-display text-2xl font-light text-white">Find your <em class="italic">best fit</em></h3>
           <p class="mt-2 text-sm leading-relaxed text-slate-400">
             Sign in to run the matching engine against your profile. We’ll scan open positions and return the one that fits.
           </p>
@@ -212,8 +223,10 @@
 
     <section id="how-it-works" class="mt-14">
       <div class="text-center">
-        <p class="text-xs uppercase tracking-[0.3em] text-cyan-400/70">Process</p>
-        <h2 class="mt-3 text-3xl font-black text-white">Four steps to your next berth</h2>
+        <p class="eyebrow">Process</p>
+        <h2 class="mt-3 font-display text-3xl font-light text-white sm:text-4xl">
+          Four steps to your <em class="italic">next berth</em>
+        </h2>
       </div>
 
       <div class="mt-8 space-y-6">
@@ -231,40 +244,53 @@
       </div>
     </section>
 
-    <section class="mt-14 rounded-3xl border border-white/10 bg-zinc-950/70 p-6 text-center">
-      <h2 class="text-3xl font-black text-white">Ready to go offshore?</h2>
-      <p class="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-400">
+    <section class="mt-14 rounded-3xl border border-white/[0.08] bg-[#0a0e14]/80 p-6 text-center">
+      <p class="eyebrow">Set sail</p>
+      <h2 class="mt-3 font-display text-3xl font-light text-white sm:text-4xl">
+        Ready to go <em class="italic">offshore?</em>
+      </h2>
+      <p class="mx-auto mt-3 max-w-md text-[14px] leading-relaxed text-slate-400">
         Let CARVER do the legwork. Your next superyacht position is closer than you think.
       </p>
       <button
         type="button"
         onclick={() => onSignIn('cta_bottom')}
-        class="mt-6 rounded-xl border border-white/20 bg-white px-8 py-3.5 text-sm font-bold text-black transition-all duration-200 hover:bg-slate-100"
+        class="mt-6 inline-flex items-center gap-2 rounded-xl bg-ivory px-7 py-3.5 text-[13px] font-semibold text-[#04070b] transition-all duration-200 hover:shadow-[0_0_60px_rgba(243,234,216,0.18)]"
+        style="background: var(--ivory);"
       >
-        Join the Beta — Discount for First 100 Crew
+        Join the Beta · First 100 discount
       </button>
+      <p class="mt-4 inline-flex items-center gap-2 text-[11px] text-slate-500">
+        <svg class="h-3.5 w-3.5 text-emerald-300/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        No card required &middot; cancel anytime
+      </p>
     </section>
 
-    <section class="mt-10 rounded-2xl border border-white/10 bg-white/[0.02] p-6 text-left">
-      <p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-300/80">For agencies</p>
-      <h3 class="mt-2 text-2xl font-bold text-white">Are you a yachting agency?</h3>
-      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+    <section class="mt-10 rounded-2xl border border-white/10 bg-white/[0.025] p-6 text-left">
+      <p class="eyebrow">For agencies</p>
+      <h3 class="mt-2 font-display text-2xl font-light text-white sm:text-3xl">
+        Are you a yachting agency?
+      </h3>
+      <p class="mt-3 text-[14px] leading-relaxed text-slate-400">
         Post jobs straight to qualified crew in seconds. Free during beta.
       </p>
       <button
         type="button"
         onclick={() => onAgencySignup('agency_strip')}
-        class="mt-5 w-full rounded-xl border border-white/15 bg-transparent px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-white/10"
+        class="mt-5 w-full rounded-xl border border-white/15 bg-white/[0.03] px-6 py-3 text-[13px] font-semibold text-white transition-all duration-200 hover:border-white/30 hover:bg-white/[0.07]"
       >
         Post a job →
       </button>
     </section>
   </main>
 
-  <footer class="border-t border-white/5 px-4 py-7">
-    <div class="mx-auto flex max-w-7xl flex-col items-center gap-2 text-xs text-slate-600">
-      <span class="font-black tracking-[0.35em] text-slate-500">CARVER</span>
-      <span>© {new Date().getFullYear()} — Automated superyacht job applications</span>
+  <footer class="border-t border-white/[0.06] px-4 py-7">
+    <div class="mx-auto flex max-w-7xl flex-col items-center gap-2 text-[11px] text-slate-500">
+      <div class="flex items-center gap-2">
+        <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
+        <span class="font-display tracking-[0.42em] text-slate-300">CARVER</span>
+      </div>
+      <span>© {new Date().getFullYear()} Carver &middot; TLS encrypted &middot; EU data residency</span>
     </div>
   </footer>
 </div>
@@ -278,8 +304,10 @@
   }
 
   .cta-primary {
-    background: linear-gradient(135deg, #22d3ee, #38bdf8);
-    box-shadow: 0 0 30px rgba(34, 211, 238, 0.28);
+    background: linear-gradient(135deg, #67e8f9 0%, #38bdf8 55%, #818cf8 100%);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.4) inset,
+      0 14px 32px -14px rgba(34, 211, 238, 0.45);
   }
 
   .mobile-grid-bg {

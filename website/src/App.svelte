@@ -517,7 +517,13 @@
     </main>
   {:else if isCheckingSession}
     <main class="mx-auto flex min-h-[100dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-      <p class="text-sm text-slate-400">Checking session...</p>
+      <div class="flex flex-col items-center gap-3">
+        <span class="relative flex h-2 w-2 items-center justify-center">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400/60"></span>
+          <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
+        </span>
+        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Securing session</p>
+      </div>
     </main>
   {:else if !isAuthenticated && showSignup}
     <SignUpPage
@@ -573,26 +579,36 @@
       />
     {/if}
   {:else if !isAuthenticated && showLogin}
-    <main class="mx-auto flex min-h-[100dvh] w-full max-w-3xl items-center px-4 py-10 sm:px-6">
-      <section class="w-full rounded-2xl border border-white/10 bg-zinc-950 p-6 sm:p-8">
+    <main class="relative mx-auto flex min-h-[100dvh] w-full max-w-md items-center px-4 py-10 sm:px-6">
+      <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div class="absolute -left-24 -top-24 h-72 w-72 rounded-full" style="background: radial-gradient(circle, rgba(34,211,238,0.14) 0%, transparent 65%); filter: blur(80px);"></div>
+        <div class="absolute -bottom-32 -right-24 h-80 w-80 rounded-full" style="background: radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 65%); filter: blur(90px);"></div>
+      </div>
+
+      <section class="relative w-full rounded-2xl border border-white/[0.08] bg-[#0a0e14]/95 p-6 shadow-[0_30px_120px_-40px_rgba(34,211,238,0.18)] backdrop-blur-sm sm:p-8">
         <button
           type="button"
           onclick={() => { showLogin = false; authError = '' }}
-          class="mb-5 flex items-center gap-1.5 text-xs text-slate-500 transition hover:text-slate-300"
+          class="mb-5 inline-flex items-center gap-1.5 text-[12px] text-slate-500 transition hover:text-slate-200"
         >
-          ← Back
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Back
         </button>
-        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Secure Access</p>
-        <h1 class="mt-3 text-3xl font-semibold text-white">Sign in to CARVER</h1>
-        <p class="mt-3 text-sm text-slate-300">
-          Use Google sign-in or your email/password credentials.
+
+        <div class="flex items-center gap-2">
+          <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
+          <p class="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-400">Secure access</p>
+        </div>
+        <h1 class="mt-3 font-display text-3xl font-light text-white sm:text-[2rem]">Welcome back</h1>
+        <p class="mt-3 text-[14px] leading-relaxed text-slate-400">
+          Sign in with Google or your email and password.
         </p>
 
-        <form class="mt-6 grid gap-3" onsubmit={loginWithPassword}>
+        <form class="mt-6 grid gap-3.5" onsubmit={loginWithPassword}>
           <label class="grid gap-1.5">
-            <span class="text-xs text-slate-400">Email / Username</span>
+            <span class="text-[11px] font-medium uppercase tracking-wider text-slate-500">Email or username</span>
             <input
-              class="rounded-md border border-white/15 bg-black px-3 py-2 text-sm text-white outline-none ring-cyan-300/70 transition focus:border-cyan-200/40 focus:ring"
+              class="rounded-lg border border-white/[0.1] bg-[#04070b] px-3.5 py-2.5 text-[14px] text-white outline-none transition focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/20"
               type="text"
               bind:value={loginUsername}
               autocomplete="username"
@@ -600,9 +616,9 @@
             />
           </label>
           <label class="grid gap-1.5">
-            <span class="text-xs text-slate-400">Password</span>
+            <span class="text-[11px] font-medium uppercase tracking-wider text-slate-500">Password</span>
             <input
-              class="rounded-md border border-white/15 bg-black px-3 py-2 text-sm text-white outline-none ring-cyan-300/70 transition focus:border-cyan-200/40 focus:ring"
+              class="rounded-lg border border-white/[0.1] bg-[#04070b] px-3.5 py-2.5 text-[14px] text-white outline-none transition focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/20"
               type="password"
               bind:value={loginPassword}
               autocomplete="current-password"
@@ -612,15 +628,19 @@
           <button
             type="submit"
             disabled={isSubmittingLogin}
-            class="mt-1 rounded-md border border-cyan-200/50 bg-cyan-300/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-300/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            class="mt-1 inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/40 bg-gradient-to-b from-cyan-300/15 to-cyan-300/5 px-4 py-2.5 text-[13px] font-semibold text-cyan-50 transition hover:border-cyan-300/60 hover:from-cyan-300/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmittingLogin ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 
         {#if googleEnabled && googleClientId}
-          <div class="mt-6 border-t border-white/10 pt-5">
-            <p class="mb-3 text-xs uppercase tracking-wide text-slate-500">Or continue with Google</p>
+          <div class="mt-6">
+            <div class="mb-3 flex items-center gap-3">
+              <span class="hairline flex-1"></span>
+              <p class="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-500">Or continue with</p>
+              <span class="hairline flex-1"></span>
+            </div>
             <div id="google-signin-button"></div>
             {#if isGoogleLoading}
               <p class="mt-2 text-xs text-slate-500">Loading Google sign-in...</p>
@@ -632,16 +652,21 @@
         {/if}
 
         {#if authError}
-          <p class="mt-4 text-sm text-rose-300">{authError}</p>
+          <p class="mt-4 rounded-lg border border-rose-400/20 bg-rose-400/[0.06] px-3 py-2 text-[13px] text-rose-200">{authError}</p>
         {/if}
 
-        <div class="mt-6 border-t border-white/10 pt-5">
-          <p class="text-center text-sm text-slate-500">
+        <p class="mt-5 inline-flex items-center justify-center gap-1.5 text-center text-[11px] text-slate-500">
+          <svg class="h-3.5 w-3.5 text-emerald-300/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Encrypted session &middot; we never store your password in plaintext
+        </p>
+
+        <div class="mt-5 border-t border-white/[0.06] pt-5">
+          <p class="text-center text-[13px] text-slate-500">
             Don't have an account?
             <button
               type="button"
               onclick={() => { showLogin = false; showSignup = true; authError = ''; history.pushState({ page: 'signup' }, '', '/signup'); trackClick('goto_signup') }}
-              class="font-medium text-cyan-400 transition hover:text-cyan-300"
+              class="ml-1 font-medium text-cyan-300 underline-offset-4 transition hover:text-cyan-200 hover:underline"
             >
               Sign up
             </button>

@@ -17,40 +17,60 @@
   }
 </script>
 
-<header class="sticky top-0 z-10 border-b border-white/10 bg-black sm:bg-black/90 sm:backdrop-blur">
+<header class="sticky top-0 z-20 border-b border-white/[0.06] bg-[#04070b]/80 backdrop-blur-xl supports-[backdrop-filter]:bg-[#04070b]/65">
   <div class="mx-auto w-full max-w-7xl px-4 py-3 sm:px-6 md:px-8">
 
     <!-- Desktop nav -->
     <div class="hidden sm:grid sm:grid-cols-3 sm:items-center">
-      <nav class="flex gap-2 text-xs sm:gap-3 sm:text-sm">
+      <nav class="flex items-center gap-1 text-sm">
         {#each visibleNav as item}
           <button
             type="button"
-            class={`rounded-md px-3 py-1.5 transition-colors ${
+            class={`relative rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${
               currentPage === item.key
-                ? 'bg-white/10 text-white'
-                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                ? 'text-white'
+                : 'text-slate-400 hover:text-white'
             }`}
             onclick={() => navigate(item.key)}
           >
             {item.label}
+            {#if currentPage === item.key}
+              <span class="absolute inset-x-3 -bottom-[13px] h-px bg-cyan-300/70" aria-hidden="true"></span>
+            {/if}
           </button>
         {/each}
       </nav>
-      <p class="text-center text-sm font-semibold tracking-[0.2em] text-slate-100">CARVER</p>
-      <div class="flex items-center justify-end gap-3">
+
+      <a
+        href="/"
+        onclick={(e) => { e.preventDefault(); navigate('auto-apply') }}
+        class="group flex items-center justify-center gap-2.5 select-none"
+        aria-label="Carver home"
+      >
+        <span class="relative flex h-2 w-2 items-center justify-center">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400/50 opacity-60"></span>
+          <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
+        </span>
+        <span class="font-display text-[15px] tracking-[0.42em] text-ivory transition group-hover:text-white">
+          CARVER
+        </span>
+      </a>
+
+      <div class="flex items-center justify-end gap-2.5">
         {#if userRole === 'crew'}
-          <div class="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold text-cyan-100">
-            {creditsBalance} Token{creditsBalance === 1 ? '' : 's'}
+          <div class="flex items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1 text-[11px] font-semibold text-cyan-100">
+            <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 9.5h4a2 2 0 0 1 0 4H9.5a2 2 0 0 0 0 4H15"/></svg>
+            <span>{creditsBalance}<span class="ml-0.5 text-cyan-200/70 font-normal">{creditsBalance === 1 ? 'token' : 'tokens'}</span></span>
           </div>
         {/if}
         {#if onLogout}
           <button
             type="button"
-            class="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/30 hover:text-white"
+            class="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-white/25 hover:bg-white/[0.05] hover:text-white"
             onclick={onLogout}
           >
-            Logout
+            <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign out
           </button>
         {/if}
       </div>
@@ -60,7 +80,7 @@
     <div class="flex items-center justify-between sm:hidden">
       <button
         type="button"
-        class="rounded-md p-2.5 text-slate-400 hover:text-white active:text-white"
+        class="rounded-lg p-2 text-slate-400 hover:text-white active:text-white"
         onclick={() => (mobileOpen = !mobileOpen)}
         aria-label="Toggle menu"
       >
@@ -74,38 +94,49 @@
           </svg>
         {/if}
       </button>
-      <p class="text-sm font-semibold tracking-[0.2em] text-slate-100">CARVER</p>
+
+      <a
+        href="/"
+        onclick={(e) => { e.preventDefault(); navigate('auto-apply') }}
+        class="flex items-center gap-2"
+        aria-label="Carver home"
+      >
+        <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
+        <span class="font-display text-[14px] tracking-[0.38em] text-ivory">CARVER</span>
+      </a>
+
       {#if onLogout}
         <div class="flex items-center gap-2">
           {#if userRole === 'crew'}
-            <div class="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold text-cyan-100">
-              {creditsBalance} token{creditsBalance === 1 ? '' : 's'}
+            <div class="rounded-full border border-cyan-300/25 bg-cyan-300/[0.06] px-2.5 py-1 text-[10px] font-semibold text-cyan-100">
+              {creditsBalance}
             </div>
           {/if}
           <button
             type="button"
-            class="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/30 hover:text-white"
+            class="rounded-full border border-white/15 px-3 py-1.5 text-[11px] text-slate-300 transition hover:border-white/30 hover:text-white"
             onclick={onLogout}
+            aria-label="Sign out"
           >
-            Logout
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           </button>
         </div>
       {:else}
-        <div class="w-16"></div>
+        <div class="w-9"></div>
       {/if}
     </div>
   </div>
 
   <!-- Mobile dropdown -->
   {#if mobileOpen}
-    <nav class="mobile-menu border-t border-white/10 bg-black/95 px-4 pb-4 pt-2 sm:hidden">
+    <nav class="mobile-menu border-t border-white/[0.06] bg-[#04070b]/95 px-4 pb-4 pt-2 sm:hidden">
       {#each visibleNav as item}
         <button
           type="button"
           class={`block w-full rounded-lg px-4 py-3 text-left text-sm font-medium transition-colors active:bg-white/10 ${
             currentPage === item.key
-              ? 'bg-white/10 text-white'
-              : 'text-slate-400 hover:bg-white/5 hover:text-white'
+              ? 'bg-white/[0.06] text-white'
+              : 'text-slate-400 hover:bg-white/[0.04] hover:text-white'
           }`}
           onclick={() => navigate(item.key)}
         >
