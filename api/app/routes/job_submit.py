@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
 from app import metrics, models
@@ -336,6 +337,42 @@ def list_my_submissions(
         .limit(200)
         .all()
     )
+    job_ids = [j.id for j in rows]
+
+    # Engagement counts — unique users matched / unique users who drafted an
+    # email per job. Two grouped queries scoped to the agency's own jobs.
+    matches: dict[int, int] = {}
+    drafts: dict[int, int] = {}
+    if job_ids:
+        match_rows = (
+            db.query(
+                models.MatchSessionResult.job_id,
+                func.count(distinct(models.MatchSession.user_key)),
+            )
+            .join(
+                models.MatchSession,
+                models.MatchSession.id == models.MatchSessionResult.session_id,
+            )
+            .filter(
+                models.MatchSessionResult.job_id.in_(job_ids),
+                models.MatchSessionResult.matched.is_(True),
+            )
+            .group_by(models.MatchSessionResult.job_id)
+            .all()
+        )
+        matches = {jid: count for jid, count in match_rows}
+
+        draft_rows = (
+            db.query(
+                models.JobDraftEvent.job_id,
+                func.count(distinct(models.JobDraftEvent.user_key)),
+            )
+            .filter(models.JobDraftEvent.job_id.in_(job_ids))
+            .group_by(models.JobDraftEvent.job_id)
+            .all()
+        )
+        drafts = {jid: count for jid, count in draft_rows}
+
     jobs = [
         {
             "id": j.id,
@@ -346,6 +383,8 @@ def list_my_submissions(
             "status": j.status,
             "source": j.source,
             "created_at": j.created_at.isoformat() if j.created_at else None,
+            "match_count": int(matches.get(j.id, 0)),
+            "draft_count": int(drafts.get(j.id, 0)),
         }
         for j in rows
     ]

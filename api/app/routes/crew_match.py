@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import metrics
 from app.database import get_db
 from app.logger import get_logger
-from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult
+from app.models import CrewProfile, Document, Job, JobDraftEvent, JobHistoryEntry, MatchSession, MatchSessionResult
 from app.schemas import (
     CrewMatchJob,
     CrewMatchV2Response,
@@ -632,6 +632,22 @@ Respond with JSON only:
     body = str(parsed.get("body", "")).strip()
     if not body:
         raise HTTPException(status_code=502, detail="AI returned an empty draft.")
+
+    # Record engagement signal so the agency dashboard can show how many crew
+    # have drafted an email for this job. Unique on (job_id, user_key) so
+    # repeated drafts by the same crew member don't inflate the counter.
+    try:
+        existing = (
+            db.query(JobDraftEvent)
+            .filter(JobDraftEvent.job_id == job.id, JobDraftEvent.user_key == user_key)
+            .first()
+        )
+        if existing is None:
+            db.add(JobDraftEvent(job_id=job.id, user_key=user_key))
+            db.commit()
+    except Exception as exc:  # noqa: BLE001 — never block drafting on telemetry
+        db.rollback()
+        log.warning("Failed to record JobDraftEvent | job_id=%s | error=%s", job.id, exc)
 
     return DraftEmailResponse(
         to=job.contact_email or "",

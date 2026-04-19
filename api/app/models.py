@@ -291,3 +291,29 @@ class MatchSessionResult(Base):
   strengths = Column(Text, nullable=True)
   gaps = Column(Text, nullable=True)
   factor_scores = Column(Text, nullable=True)
+
+
+class JobDraftEvent(Base):
+  """One row per (user, job) when a crew member drafts an application email.
+
+  Used to surface engagement counts on the agency dashboard. Unique on
+  (job_id, user_key) so repeated drafts by the same crew member don't
+  inflate the count.
+  """
+
+  __tablename__ = "job_drafts"
+
+  id = Column(Integer, primary_key=True, index=True)
+  job_id = Column(Integer, nullable=False, index=True)
+  user_key = Column(String(160), nullable=False, index=True)
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+  updated_at = Column(
+    DateTime(timezone=True),
+    server_default=func.now(),
+    onupdate=func.now(),
+    nullable=False,
+  )
+
+  __table_args__ = (
+    UniqueConstraint("job_id", "user_key", name="uq_job_drafts_job_user"),
+  )

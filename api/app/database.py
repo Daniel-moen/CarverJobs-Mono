@@ -230,4 +230,22 @@ def run_migrations() -> None:
     ca_cols = _existing("credit_accounts")
     _add("credit_accounts", "last_reset_at", "DATETIME", ca_cols)
 
+    # job_drafts — engagement signal for agency dashboards. One row per
+    # (job_id, user_key); enforced unique so repeated drafts don't inflate.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS job_drafts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            user_key VARCHAR(160) NOT NULL,
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+            updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_job_drafts_job_user ON job_drafts (job_id, user_key)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_job_drafts_job_id ON job_drafts (job_id)"
+    )
+
     conn.commit()

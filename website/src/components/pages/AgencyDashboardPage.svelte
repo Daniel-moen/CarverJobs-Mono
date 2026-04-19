@@ -49,6 +49,9 @@
     return 'border-amber-400/30 bg-amber-400/10 text-amber-200'
   }
 
+  let totalMatches = $derived(jobs.reduce((sum, j) => sum + (j.match_count || 0), 0))
+  let totalDrafts = $derived(jobs.reduce((sum, j) => sum + (j.draft_count || 0), 0))
+
   onMount(loadMine)
 </script>
 
@@ -99,6 +102,23 @@
       </button>
     </div>
   {:else}
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div class="rounded-2xl border border-white/8 bg-zinc-950 p-4">
+        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Active jobs</p>
+        <p class="mt-2 text-2xl font-black text-white">{jobs.length}</p>
+      </div>
+      <div class="rounded-2xl border border-white/8 bg-zinc-950 p-4">
+        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Crew matched</p>
+        <p class="mt-2 text-2xl font-black text-emerald-200">{totalMatches}</p>
+        <p class="mt-1 text-[11px] text-slate-500">Unique crew our matching engine surfaced your jobs to</p>
+      </div>
+      <div class="rounded-2xl border border-white/8 bg-zinc-950 p-4">
+        <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Emails drafted</p>
+        <p class="mt-2 text-2xl font-black text-cyan-200">{totalDrafts}</p>
+        <p class="mt-1 text-[11px] text-slate-500">Crew who started drafting an application via CARVER</p>
+      </div>
+    </div>
+
     <div class="overflow-hidden rounded-2xl border border-white/8 bg-zinc-950">
       <table class="w-full text-left text-sm">
         <thead class="border-b border-white/10 text-[11px] uppercase tracking-wide text-slate-500">
@@ -107,6 +127,8 @@
             <th class="px-4 py-3 font-semibold">Role</th>
             <th class="px-4 py-3 font-semibold">Yacht</th>
             <th class="px-4 py-3 font-semibold">Location</th>
+            <th class="px-4 py-3 font-semibold text-right" title="Unique crew matched by CARVER">Matched</th>
+            <th class="px-4 py-3 font-semibold text-right" title="Unique crew who drafted an application email">Drafted</th>
             <th class="px-4 py-3 font-semibold">Status</th>
             <th class="px-4 py-3 font-semibold">Posted</th>
           </tr>
@@ -118,6 +140,8 @@
               <td class="px-4 py-3 text-slate-300">{job.role}</td>
               <td class="px-4 py-3 text-slate-300">{job.yacht}</td>
               <td class="px-4 py-3 text-slate-300">{job.location}</td>
+              <td class="px-4 py-3 text-right font-mono text-emerald-200">{job.match_count ?? 0}</td>
+              <td class="px-4 py-3 text-right font-mono text-cyan-200">{job.draft_count ?? 0}</td>
               <td class="px-4 py-3">
                 <span class={`inline-block rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusClass(job.status)}`}>
                   {job.status}
@@ -129,6 +153,6 @@
         </tbody>
       </table>
     </div>
-    <p class="text-[11px] text-slate-600">Need to edit or close a job? Email support and we'll take care of it.</p>
+    <p class="text-[11px] text-slate-600">Counts refresh on demand. Need to edit or close a job? Email support and we'll take care of it.</p>
   {/if}
 </section>
