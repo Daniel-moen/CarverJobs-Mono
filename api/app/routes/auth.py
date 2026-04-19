@@ -12,7 +12,7 @@ from app import crud, flags, metrics, models
 from app.error_codes import CRV_2002, CRV_2007, CRV_2008, CRV_2009
 from app.database import get_db
 from app.logger import get_logger
-from app.schemas import GoogleLoginRequest, LoginRequest, SignupRequest, UserCreate, WaitlistSignupRequest
+from app.schemas import AgencySignupRequest, GoogleLoginRequest, LoginRequest, SignupRequest, UserCreate, WaitlistSignupRequest
 from app.security import issue_session_token, optional_session, require_session, verify_password
 from app.services.credits import get_credit_balance
 from app.settings import settings
@@ -124,6 +124,41 @@ def signup(request: Request, payload: SignupRequest, response: Response, db: Ses
   metrics.increment("signups_success")
   log.info("Signup success | id=%d | email=%s", user.id, email)
   return {"ok": True, "user": {"id": user.id, "email": email, "role": "crew"}}
+
+
+@router.post("/signup-agency", status_code=status.HTTP_201_CREATED)
+@_limiter.limit("5/minute")
+def signup_agency(request: Request, payload: AgencySignupRequest, response: Response, db: Session = Depends(get_db)):
+  if not flags.is_enabled("user_registration"):
+    metrics.increment("feature_blocked")
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="Registration is temporarily disabled.",
+    )
+
+  email = payload.email.strip().lower()
+  existing = crud.get_user_by_email(db, email)
+  if existing:
+    log.warning("Agency signup failed: email exists | email=%s", email)
+    raise HTTPException(
+      status_code=status.HTTP_409_CONFLICT,
+      detail="An account with this email already exists.",
+      headers={"X-Error-Code": CRV_2009},
+    )
+
+  user = crud.create_agency_user(
+    db,
+    email=email,
+    full_name=payload.full_name,
+    agency_name=payload.agency_name,
+    password=payload.password,
+  )
+
+  token = issue_session_token({"sub": email, "role": "agency", "user_id": user.id})
+  _set_session_cookie(response, token)
+  metrics.increment("signups_success")
+  log.info("Agency signup success | id=%d | email=%s | agency=%s", user.id, email, user.agency_name)
+  return {"ok": True, "user": {"id": user.id, "email": email, "role": "agency", "agency_name": user.agency_name}}
 
 
 @router.post("/login")

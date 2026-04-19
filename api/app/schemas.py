@@ -22,7 +22,7 @@ OptMed     = Annotated[Optional[str], Field(default=None, max_length=260)]
 OptLong    = Annotated[Optional[str], Field(default=None, max_length=5000)]
 
 # Valid user roles — extend this list when new roles are introduced.
-_VALID_USER_ROLES  = {"crew", "admin"}
+_VALID_USER_ROLES  = {"crew", "admin", "agency"}
 # Valid job statuses.
 _VALID_JOB_STATUSES = {"open", "closed", "priority", "filled", "draft"}
 
@@ -70,6 +70,29 @@ class SignupRequest(APIModel):
         v = v.strip()
         if not v:
             raise ValueError("Full name is required")
+        return v
+
+
+class AgencySignupRequest(APIModel):
+    email: Annotated[str, Field(min_length=5, max_length=160)]
+    full_name: Annotated[str, Field(min_length=1, max_length=120)]
+    agency_name: Annotated[str, Field(min_length=1, max_length=160)]
+    password: Annotated[str, Field(min_length=8, max_length=256)]
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not _EMAIL_RE.match(v):
+            raise ValueError("Invalid email address")
+        return v
+
+    @field_validator("full_name", "agency_name")
+    @classmethod
+    def _strip_required(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("This field is required")
         return v
 
 
@@ -223,6 +246,48 @@ class JobBase(APIModel):
 
 class JobCreate(JobBase):
     pass
+
+
+class AgencyJobFormRequest(APIModel):
+    """Guided-form submission from an agency. Only the essentials are required."""
+    title:                   ShortStr
+    role:                    ShortStr
+    yacht:                   ShortStr
+    location:                ShortStr
+    yacht_type:              OptShort = None
+    yacht_length_m:          Annotated[Optional[int], Field(default=None, ge=1, le=600)] = None
+    department:              OptShort = None
+    rank_level:              OptShort = None
+    start_date:              OptShort = None
+    contract_type:           OptShort = None
+    rotation:                OptShort = None
+    season:                  OptShort = None
+    salary_currency:         Annotated[Optional[str], Field(default="EUR", max_length=10)] = "EUR"
+    salary_min:              Annotated[Optional[float], Field(default=None, ge=0, le=10_000_000)] = None
+    salary_max:              Annotated[Optional[float], Field(default=None, ge=0, le=10_000_000)] = None
+    visa_support:            bool = False
+    accommodation:           OptShort = None
+    travel_reimbursement:    bool = False
+    experience_required_years: Annotated[Optional[int], Field(default=None, ge=0, le=80)] = None
+    minimum_license:         OptShort = None
+    certifications_required: OptLong = None
+    languages_required:      OptMed = None
+    description:             OptLong = None
+    responsibilities:        OptLong = None
+    requirements:            OptLong = None
+    benefits:                OptLong = None
+    contact_email:           Annotated[Optional[str], Field(default=None, max_length=160)] = None
+    application_url:         OptMed = None
+    urgent_hire:             bool = False
+
+    @field_validator("contact_email", mode="before")
+    @classmethod
+    def _validate_contact_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = str(v).strip()
+            if v and not _EMAIL_RE.match(v.lower()):
+                return None
+        return v or None
 
 
 class JobUpdate(APIModel):

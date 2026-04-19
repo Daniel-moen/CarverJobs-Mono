@@ -1,5 +1,10 @@
 """
-Crew-facing job submission — same AI review as admin ingest, earns 1 token on success.
+User-facing job submission.
+
+- Crew + agencies + admin may submit jobs (text, screenshots, or guided form).
+- The crew flow earns +1 token on success (legacy behaviour); agencies do not.
+- Every submitted job records `posted_by_user_id` so the agency dashboard
+  can list its own submissions and admins can audit / bulk-action.
 """
 import asyncio
 import json as _json
@@ -10,10 +15,10 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from app import metrics
+from app import metrics, models
 from app.database import get_db
 from app.logger import get_logger
-from app.security import require_crew_or_admin_session
+from app.security import require_agency_or_admin_session, require_poster_session
 from app.services.credits import add_credits
 from app.settings import settings
 
@@ -26,6 +31,7 @@ from app.routes.scraper import (
     _save_job_from_ai_fields,
     _shape_import_response,
 )
+from app.schemas import AgencyJobFormRequest
 
 log = get_logger("carver.job_submit")
 _limiter = Limiter(key_func=get_remote_address)
@@ -37,12 +43,31 @@ _MAX_SUBMIT_TOTAL_BYTES = 24 * 1024 * 1024
 router = APIRouter(prefix="/jobs/submit", tags=["job-submit"])
 
 
+def _poster_meta(session: dict, db: Session) -> tuple[int | None, str | None]:
+    """Resolve (user_id, agency_name) for the calling session, if available.
+
+    Admins typing into the dashboard pass through with user_id=None; that
+    matches today's behaviour and keeps admin actions out of the agency
+    dashboard listings.
+    """
+    role = session.get("role")
+    user_id = session.get("user_id")
+    agency_name: str | None = None
+    if role == "agency" and user_id:
+        agency_name = (
+            db.query(models.User.agency_name)
+            .filter(models.User.id == user_id)
+            .scalar()
+        )
+    return (user_id if role in ("crew", "agency") else None), agency_name
+
+
 @router.post("/text", status_code=status.HTTP_201_CREATED)
 @_limiter.limit("10/minute")
 async def crew_submit_text(
     request: Request,
     payload: ImportJobRequest,
-    session: dict = Depends(require_crew_or_admin_session),
+    session: dict = Depends(require_poster_session),
     db: Session = Depends(get_db),
 ):
     if not settings.OPENAI_API_KEY:
@@ -51,11 +76,15 @@ async def crew_submit_text(
             detail="OPENAI_API_KEY is not configured.",
         )
 
+    user_id, agency_name = _poster_meta(session, db)
+
     result = await asyncio.to_thread(
         _run_import_pipeline,
         text=payload.text,
         url=payload.url,
-        source="website_submit",
+        source="agency_submit" if session.get("role") == "agency" else "website_submit",
+        posted_by_user_id=user_id,
+        posted_by_agency=agency_name,
     )
 
     if result is None:
@@ -71,8 +100,11 @@ async def crew_submit_text(
         )
 
     user_key = session["sub"]
-    new_bal = add_credits(db, user_key, amount=1)
-    log.info("Crew text job submit | id=%d | sub=%s…", result.id, (user_key or "")[:12])
+    new_bal = 0
+    if session.get("role") == "crew":
+        new_bal = add_credits(db, user_key, amount=1)
+    log.info("Job submit (text) | id=%d | role=%s | sub=%s…",
+             result.id, session.get("role"), (user_key or "")[:12])
     metrics.increment("manual_job_imports")
 
     out = _shape_import_response(result)
@@ -85,7 +117,7 @@ async def crew_submit_text(
 async def crew_submit_image(
     request: Request,
     url: str = Form(""),
-    session: dict = Depends(require_crew_or_admin_session),
+    session: dict = Depends(require_poster_session),
     db: Session = Depends(get_db),
 ):
     from app.services.ai_client import review_job_images
@@ -170,11 +202,16 @@ async def crew_submit_image(
 
     parsed.pop("is_job", None)
 
+    user_id, agency_name = _poster_meta(session, db)
+    is_agency = session.get("role") == "agency"
+
     result = await asyncio.to_thread(
         _save_job_from_ai_fields,
         ai_fields=parsed,
         url=url.strip(),
-        source="website_submit_screenshot",
+        source="agency_submit_screenshot" if is_agency else "website_submit_screenshot",
+        posted_by_user_id=user_id,
+        posted_by_agency=agency_name,
     )
 
     if result is None:
@@ -189,8 +226,11 @@ async def crew_submit_image(
         )
 
     user_key = session["sub"]
-    new_bal = add_credits(db, user_key, amount=1)
-    log.info("Crew image job submit | id=%d | sub=%s…", result.id, (user_key or "")[:12])
+    new_bal = 0
+    if session.get("role") == "crew":
+        new_bal = add_credits(db, user_key, amount=1)
+    log.info("Job submit (image) | id=%d | role=%s | sub=%s…",
+             result.id, session.get("role"), (user_key or "")[:12])
     metrics.increment("manual_job_imports")
 
     return {
@@ -204,3 +244,109 @@ async def crew_submit_image(
         },
         "credits_balance": new_bal,
     }
+
+
+@router.post("/form", status_code=status.HTTP_201_CREATED)
+@_limiter.limit("20/minute")
+def crew_submit_form(
+    request: Request,
+    payload: AgencyJobFormRequest,
+    session: dict = Depends(require_poster_session),
+    db: Session = Depends(get_db),
+):
+    """Guided structured form — no AI parsing, just validate + dedup + save."""
+    from app.services.job_sync import _content_hash, _job_fingerprint
+
+    user_id, agency_name = _poster_meta(session, db)
+    is_agency = session.get("role") == "agency"
+
+    fields = payload.model_dump(exclude_none=False)
+    fields["status"] = "open"
+    fields["source"] = "agency_form" if is_agency else "website_form"
+    fields["auto_apply_enabled"] = False
+    if user_id is not None:
+        fields["posted_by_user_id"] = user_id
+    if agency_name:
+        fields["posted_by_agency"] = agency_name
+        if not fields.get("recruiter_agency"):
+            fields["recruiter_agency"] = agency_name
+
+    text_for_hash = "|".join([
+        (fields.get("title") or "").strip().lower(),
+        (fields.get("role") or "").strip().lower(),
+        (fields.get("yacht") or "").strip().lower(),
+        (fields.get("location") or "").strip().lower(),
+        (fields.get("description") or "").strip().lower(),
+    ])
+    if text_for_hash.strip("|"):
+        fields["content_hash"] = _content_hash(text_for_hash)
+    fields["job_fingerprint"] = _job_fingerprint(
+        fields.get("role"),
+        fields.get("location"),
+        fields.get("start_date"),
+    )
+
+    if fields.get("content_hash"):
+        existing = db.query(models.Job.id).filter(models.Job.content_hash == fields["content_hash"]).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"This job is already on the board (id={existing[0]}).",
+            )
+    if fields.get("job_fingerprint"):
+        existing = db.query(models.Job.id).filter(models.Job.job_fingerprint == fields["job_fingerprint"]).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"This job is already on the board (id={existing[0]}).",
+            )
+
+    job = models.Job(**fields)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    user_key = session["sub"]
+    new_bal = 0
+    if session.get("role") == "crew":
+        new_bal = add_credits(db, user_key, amount=1)
+    log.info("Job submit (form) | id=%d | role=%s | sub=%s…",
+             job.id, session.get("role"), (user_key or "")[:12])
+    metrics.increment("manual_job_imports")
+
+    out = _shape_import_response(job)
+    out["credits_balance"] = new_bal
+    return out
+
+
+@router.get("/mine")
+def list_my_submissions(
+    session: dict = Depends(require_agency_or_admin_session),
+    db: Session = Depends(get_db),
+):
+    """Return jobs posted by the calling user (agency dashboard)."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return {"ok": True, "jobs": []}
+
+    rows = (
+        db.query(models.Job)
+        .filter(models.Job.posted_by_user_id == user_id)
+        .order_by(models.Job.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    jobs = [
+        {
+            "id": j.id,
+            "title": j.title,
+            "role": j.role,
+            "yacht": j.yacht,
+            "location": j.location,
+            "status": j.status,
+            "source": j.source,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+        }
+        for j in rows
+    ]
+    return {"ok": True, "jobs": jobs}

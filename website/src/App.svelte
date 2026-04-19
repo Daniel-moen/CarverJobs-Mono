@@ -17,6 +17,8 @@
   import LaunchSignupPage from './components/pages/LaunchSignupPage.svelte'
   import SignUpPage from './components/pages/SignUpPage.svelte'
   import AdminJobIngestPage from './components/pages/AdminJobIngestPage.svelte'
+  import AgencySubmitJobPage from './components/pages/AgencySubmitJobPage.svelte'
+  import AgencyDashboardPage from './components/pages/AgencyDashboardPage.svelte'
   import PrivacyPolicyPage from './components/pages/PrivacyPolicyPage.svelte'
   import TermsOfServicePage from './components/pages/TermsOfServicePage.svelte'
   import DataDeletionPage from './components/pages/DataDeletionPage.svelte'
@@ -29,12 +31,15 @@
   const PATH_TO_PAGE = {
     '/launch':       'launch-signup',
     '/signup':       'signup',
+    '/signup/agency': 'signup',
     '/':             'auto-apply',
     '/jobs':         'job-board',
     '/profile':      'profile',
     '/status':       'status',
     '/dashboard':    'dashboard',
     '/dashboard/job-ingest': 'admin-job-ingest',
+    '/agency':        'agency-dashboard',
+    '/agency/submit': 'agency-submit',
     '/subscription': 'subscription',
     '/privacy':      'privacy',
     '/terms':        'terms',
@@ -85,10 +90,25 @@
     trackPageView(pageKey)
   }
 
-  function enforceAdminOnlyPageAccess() {
+  function enforceRoleAccess() {
     if (currentPage === 'admin-job-ingest' && userRole !== 'admin') {
       currentPage = 'auto-apply'
       history.replaceState({ page: 'auto-apply' }, '', '/')
+      return
+    }
+    const agencyOnly = currentPage === 'agency-dashboard' || currentPage === 'agency-submit'
+    if (agencyOnly && userRole !== 'agency' && userRole !== 'admin') {
+      currentPage = 'auto-apply'
+      history.replaceState({ page: 'auto-apply' }, '', '/')
+      return
+    }
+    // Agencies don't use crew-facing pages — bounce them to their dashboard.
+    if (userRole === 'agency') {
+      const crewOnly = ['auto-apply', 'profile', 'subscription', 'status', 'match-session']
+      if (crewOnly.includes(currentPage)) {
+        currentPage = 'agency-dashboard'
+        history.replaceState({ page: 'agency-dashboard' }, '', '/agency')
+      }
     }
   }
 
@@ -190,6 +210,8 @@
     status: StatusPage,
     dashboard: DashboardPage,
     'admin-job-ingest': AdminJobIngestPage,
+    'agency-dashboard': AgencyDashboardPage,
+    'agency-submit': AgencySubmitJobPage,
     subscription: SubscriptionPage,
   }
 
@@ -229,7 +251,13 @@
         creditsBalance = Number(data?.session?.credits_balance ?? 0)
         // Keep the page that matches the current URL; don't override with a default.
         currentPage = pageFromPath(window.location.pathname)
-        enforceAdminOnlyPageAccess()
+        enforceRoleAccess()
+        if (userRole === 'agency') {
+          // Agencies skip crew onboarding/docs reminders entirely.
+          showOnboarding = false
+          showDocsReminder = false
+          return
+        }
         showOnboarding = checkOnboardingNeeded()
         if (!showOnboarding) showDocsReminder = checkDocsReminder()
       } else {
@@ -429,7 +457,7 @@
       waToken = extractWaToken(window.location.pathname)
       matchSessionId = extractMatchSessionId(window.location.pathname)
       currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
-      enforceAdminOnlyPageAccess()
+      enforceRoleAccess()
       showSignup = currentPage === 'signup'
       showLogin = false
       trackPageView(currentPage)
@@ -494,6 +522,7 @@
     <SignUpPage
       {googleEnabled}
       {googleClientId}
+      initialIntent={window.location.pathname === '/signup/agency' ? 'agency' : 'crew'}
       onGoogleSignIn={async (token) => {
         await loginWithGoogleToken(token)
         if (isAuthenticated) {
@@ -506,10 +535,17 @@
           history.replaceState({ page: 'auto-apply' }, '', '/')
         }
       }}
-      onSignUpSuccess={async () => {
+      onSignUpSuccess={async (result) => {
         await checkSession()
         showSignup = false
-        trackFunnel('signup_complete', { label: 'email' })
+        trackFunnel('signup_complete', { label: result?.intent === 'agency' ? 'agency' : 'email' })
+        if (result?.intent === 'agency') {
+          showOnboarding = false
+          showDocsReminder = false
+          currentPage = 'agency-dashboard'
+          history.replaceState({ page: 'agency-dashboard' }, '', '/agency')
+          return
+        }
         try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
         showOnboarding = checkOnboardingNeeded()
         if (!showOnboarding) showDocsReminder = checkDocsReminder()

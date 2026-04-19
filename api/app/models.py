@@ -46,6 +46,10 @@ class Job(Base):
   auto_apply_enabled = Column(Boolean, nullable=False, default=False)
   # "apify" = scraped automatically | "manual" = added via admin API
   source = Column(String(50), nullable=True, default="manual", index=True)
+  # When a job is submitted by a logged-in user (crew or agency), record who.
+  # NULL for scraped/admin-seeded jobs. Used for the agency dashboard and audit/abuse triage.
+  posted_by_user_id = Column(Integer, nullable=True, index=True)
+  posted_by_agency = Column(String(160), nullable=True, index=True)
   # SHA-256 of the raw post text — prevents same post being saved twice even
   # if it was shared across multiple Facebook groups (different URL, same content).
   content_hash = Column(String(64), nullable=True, unique=True, index=True)
@@ -77,6 +81,8 @@ class User(Base):
   is_active = Column(Boolean, nullable=False, default=True)
   is_subscribed = Column(Boolean, nullable=False, default=False)
   early_bird = Column(Boolean, nullable=False, default=False)
+  # Set when role == "agency": the agency/recruitment-firm name shown on jobs they post.
+  agency_name = Column(String(160), nullable=True, index=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),

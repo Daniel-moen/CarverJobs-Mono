@@ -9,15 +9,20 @@
     googleEnabled = false,
     googleClientId = '',
     onGoogleSignIn = () => {},
+    initialIntent = 'crew',
   } = $props()
 
+  // Initial value comes from the parent prop; afterwards the user can flip the toggle.
+  let intent = $state('crew')
+  $effect(() => { if (initialIntent === 'agency') intent = 'agency' })
   let fullName = $state('')
   let email = $state('')
+  let agencyName = $state('')
   let password = $state('')
   let confirmPassword = $state('')
   let isSubmitting = $state(false)
   let errorMessage = $state('')
-  let fieldErrors = $state({ fullName: '', email: '', password: '', confirmPassword: '' })
+  let fieldErrors = $state({ fullName: '', email: '', agencyName: '', password: '', confirmPassword: '' })
   let isGoogleLoading = $state(false)
   let googleRenderError = $state('')
   const browserWindow = /** @type {any} */ (window)
@@ -72,11 +77,16 @@
   onMount(() => { initGoogleButton() })
 
   function validateFields() {
-    const errors = { fullName: '', email: '', password: '', confirmPassword: '' }
+    const errors = { fullName: '', email: '', agencyName: '', password: '', confirmPassword: '' }
     let valid = true
 
     if (!fullName.trim()) {
       errors.fullName = 'Full name is required.'
+      valid = false
+    }
+
+    if (intent === 'agency' && !agencyName.trim()) {
+      errors.agencyName = 'Agency name is required.'
       valid = false
     }
 
@@ -110,19 +120,28 @@
     if (!validateFields()) return
 
     isSubmitting = true
-    trackClick('signup_submit')
+    trackClick(intent === 'agency' ? 'signup_submit_agency' : 'signup_submit')
 
     try {
-      const response = await apiFetch(`${API_BASE_URL}/auth/signup`, {
+      const endpoint = intent === 'agency' ? '/auth/signup-agency' : '/auth/signup'
+      const body = intent === 'agency'
+        ? {
+            email: email.trim().toLowerCase(),
+            full_name: fullName.trim(),
+            agency_name: agencyName.trim(),
+            password,
+          }
+        : {
+            email: email.trim().toLowerCase(),
+            full_name: fullName.trim(),
+            password,
+          }
+      const response = await apiFetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         skipAuthHandling: true,
-        body: JSON.stringify({
-          email: email.trim().toLowerCase(),
-          full_name: fullName.trim(),
-          password,
-        }),
+        body: JSON.stringify(body),
       })
 
       if (!response.ok) {
@@ -131,8 +150,8 @@
         return
       }
 
-      trackFunnel('signup_success', { label: 'email' })
-      onSignUpSuccess()
+      trackFunnel('signup_success', { label: intent })
+      onSignUpSuccess({ intent })
     } catch {
       errorMessage = 'Could not reach the server. Please try again.'
     } finally {
@@ -144,10 +163,31 @@
 <main class="mx-auto flex min-h-[100dvh] w-full max-w-md items-center px-4 py-10 sm:px-6">
   <section class="w-full rounded-2xl border border-white/10 bg-zinc-950 p-6 sm:p-8">
     <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Get Started</p>
-    <h1 class="mt-3 text-3xl font-semibold text-white">Create your account</h1>
+    <h1 class="mt-3 text-3xl font-semibold text-white">
+      {intent === 'agency' ? 'Create an agency account' : 'Create your account'}
+    </h1>
     <p class="mt-3 text-sm text-slate-400">
-      Sign up to start matching with superyacht positions.
+      {intent === 'agency'
+        ? 'Post jobs directly to the CARVER board and reach matched crew.'
+        : 'Sign up to start matching with superyacht positions.'}
     </p>
+
+    <div class="mt-5 inline-flex w-full rounded-lg border border-white/10 bg-black p-1 text-xs">
+      <button
+        type="button"
+        class={`flex-1 rounded-md px-3 py-2 transition ${intent === 'crew' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}
+        onclick={() => (intent = 'crew')}
+      >
+        I'm crew
+      </button>
+      <button
+        type="button"
+        class={`flex-1 rounded-md px-3 py-2 transition ${intent === 'agency' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}
+        onclick={() => (intent = 'agency')}
+      >
+        I'm a yacht agency
+      </button>
+    </div>
 
     <form class="mt-6 grid gap-4" onsubmit={handleSubmit}>
       <label class="grid gap-1.5">
@@ -164,6 +204,24 @@
           <p class="text-xs text-rose-400">{fieldErrors.fullName}</p>
         {/if}
       </label>
+
+      {#if intent === 'agency'}
+        <label class="grid gap-1.5">
+          <span class="text-xs text-slate-400">Agency Name</span>
+          <input
+            class="rounded-md border border-white/15 bg-black px-3 py-2.5 text-sm text-white outline-none ring-cyan-300/70 transition focus:border-cyan-200/40 focus:ring"
+            type="text"
+            bind:value={agencyName}
+            autocomplete="organization"
+            placeholder="e.g. Northrop & Johnson Crew"
+            maxlength="160"
+            required
+          />
+          {#if fieldErrors.agencyName}
+            <p class="text-xs text-rose-400">{fieldErrors.agencyName}</p>
+          {/if}
+        </label>
+      {/if}
 
       <label class="grid gap-1.5">
         <span class="text-xs text-slate-400">Email</span>
@@ -221,7 +279,7 @@
       </button>
     </form>
 
-    {#if googleEnabled && googleClientId}
+    {#if googleEnabled && googleClientId && intent === 'crew'}
       <div class="mt-6 border-t border-white/10 pt-5">
         <p class="mb-3 text-xs uppercase tracking-wide text-slate-500">Or sign up with Google</p>
         <div id="google-signup-button"></div>

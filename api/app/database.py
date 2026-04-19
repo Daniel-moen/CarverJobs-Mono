@@ -76,6 +76,7 @@ def run_migrations() -> None:
     _add("users", "is_subscribed", "BOOLEAN NOT NULL DEFAULT 0", users_cols)
     _add("users", "gender", "VARCHAR(20)", users_cols)
     _add("users", "early_bird", "BOOLEAN NOT NULL DEFAULT 0", users_cols)
+    _add("users", "agency_name", "VARCHAR(160)", users_cols)
 
     ae_cols = _existing("analytics_events")
     _add("analytics_events", "error_code", "VARCHAR(20)", ae_cols)
@@ -85,6 +86,11 @@ def run_migrations() -> None:
     _add("jobs", "source", "VARCHAR(50) DEFAULT 'manual'", jobs_cols)
     _add("jobs", "content_hash", "VARCHAR(64)", jobs_cols)
     _add("jobs", "job_fingerprint", "VARCHAR(64)", jobs_cols)
+    _add("jobs", "posted_by_user_id", "INTEGER", jobs_cols)
+    _add("jobs", "posted_by_agency", "VARCHAR(160)", jobs_cols)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_jobs_posted_by_user_id ON jobs (posted_by_user_id)"
+    )
 
     # scrape_watermarks — tracks newest post timestamp per source URL so
     # Apify runs only fetch posts newer than the last successful scrape.

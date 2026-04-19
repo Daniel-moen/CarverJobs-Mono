@@ -5,6 +5,8 @@
   const visibleNav = $derived(
     site.nav.filter(item =>
       (!item.adminOnly || userRole === 'admin') &&
+      (!item.agencyOnly || userRole === 'agency' || userRole === 'admin') &&
+      (!item.hideForAgency || userRole !== 'agency') &&
       (!item.hideWhenSubscribed || !isSubscribed)
     )
   )

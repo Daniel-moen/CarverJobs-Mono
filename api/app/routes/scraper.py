@@ -133,7 +133,14 @@ _IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 _MAX_IMPORT_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
-def _run_import_pipeline(*, text: str, url: str, source: str = "manual"):
+def _run_import_pipeline(
+    *,
+    text: str,
+    url: str,
+    source: str = "manual",
+    posted_by_user_id: int | None = None,
+    posted_by_agency: str | None = None,
+):
     from app.models import Job
     from app.services.ai_job_reviewer import review_post
     from app.services.job_sync import _build_job_fields, _content_hash, _job_fingerprint
@@ -149,6 +156,12 @@ def _run_import_pipeline(*, text: str, url: str, source: str = "manual"):
 
     fields = _build_job_fields(ai_fields, {"url": url, "text": text}, "manual")
     fields["source"] = source
+    if posted_by_user_id is not None:
+        fields["posted_by_user_id"] = posted_by_user_id
+    if posted_by_agency:
+        fields["posted_by_agency"] = posted_by_agency
+        # Agency posting their own job — the recruiting agency IS them.
+        fields["recruiter_agency"] = posted_by_agency
 
     h = _content_hash(text) if text else None
     fields["content_hash"] = h
@@ -243,13 +256,25 @@ async def import_job(request: Request, payload: ImportJobRequest):
     return _shape_import_response(result)
 
 
-def _save_job_from_ai_fields(*, ai_fields: dict, url: str, source: str = "manual_screenshot"):
+def _save_job_from_ai_fields(
+    *,
+    ai_fields: dict,
+    url: str,
+    source: str = "manual_screenshot",
+    posted_by_user_id: int | None = None,
+    posted_by_agency: str | None = None,
+):
     """Build Job row from AI-extracted fields and save to DB (dedup-aware)."""
     from app.models import Job
     from app.services.job_sync import _build_job_fields, _job_fingerprint
 
     fields = _build_job_fields(ai_fields, {"url": url}, "manual")
     fields["source"] = source
+    if posted_by_user_id is not None:
+        fields["posted_by_user_id"] = posted_by_user_id
+    if posted_by_agency:
+        fields["posted_by_agency"] = posted_by_agency
+        fields["recruiter_agency"] = posted_by_agency
     fp = _job_fingerprint(
         fields.get("role"),
         fields.get("location"),

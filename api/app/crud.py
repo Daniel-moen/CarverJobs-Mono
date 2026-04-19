@@ -113,6 +113,23 @@ def create_user(db: Session, payload: schemas.UserCreate):
   return user
 
 
+def create_agency_user(db: Session, email: str, full_name: str, agency_name: str, password: str):
+  """Create an agency user (role='agency') with bcrypt-hashed password."""
+  user = models.User(
+    email=email.lower().strip(),
+    full_name=full_name.strip(),
+    role="agency",
+    agency_name=agency_name.strip(),
+    is_active=True,
+    password_hash=hash_password(password),
+    early_bird=_is_early_bird(db),
+  )
+  db.add(user)
+  db.commit()
+  db.refresh(user)
+  return user
+
+
 def create_google_user(db: Session, email: str, full_name: str):
   """Create a crew user for Google login with an unusable random password."""
   user = models.User(

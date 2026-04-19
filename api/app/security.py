@@ -118,3 +118,29 @@ def require_crew_or_admin_session(session: SessionPayload = Depends(require_sess
       headers={"X-Error-Code": CRV_2005},
     )
   return session
+
+
+def require_poster_session(session: SessionPayload = Depends(require_session)) -> SessionPayload:
+  """Allow any logged-in role that may post jobs: crew, agency, or admin."""
+  role = session.get("role")
+  if role not in ("crew", "agency", "admin"):
+    log.warning("Poster access denied | sub=%s | role=%s", session.get("sub"), role)
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Sign in to submit jobs.",
+      headers={"X-Error-Code": CRV_2005},
+    )
+  return session
+
+
+def require_agency_or_admin_session(session: SessionPayload = Depends(require_session)) -> SessionPayload:
+  """Allow agency users (or admin) — used for agency-only views like 'my submissions'."""
+  role = session.get("role")
+  if role not in ("agency", "admin"):
+    log.warning("Agency/admin access denied | sub=%s | role=%s", session.get("sub"), role)
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Sign in as an agency to use this feature.",
+      headers={"X-Error-Code": CRV_2005},
+    )
+  return session
