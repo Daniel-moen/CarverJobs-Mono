@@ -25,7 +25,6 @@
   import { trackEvent } from '../../config/analytics'
   import { whatsapp } from '../../config/site'
   import TypingChat from '../sections/TypingChat.svelte'
-  import FleetTicker from '../sections/FleetTicker.svelte'
   import BridgeConsole from '../sections/BridgeConsole.svelte'
   import RouteMap from '../sections/RouteMap.svelte'
   import AgencySection from '../sections/AgencySection.svelte'
@@ -37,13 +36,10 @@
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let { onSignIn = () => {}, onAgencySignup = () => {}, onStartMatch = () => {} } = $props()
 
-  // Pause expensive sections when off-screen.
+  // Pause the typing chat when it scrolls out of view.
   let chatPaused = $state(false)
-  let bridgePaused = $state(true)
   /** @type {HTMLElement|null} */
   let chatHost = $state(null)
-  /** @type {HTMLElement|null} */
-  let bridgeHost = $state(null)
 
   // Live clock for the chat status bar — locale-aware, 24h.
   let nowText = $state(currentTime())
@@ -52,30 +48,49 @@
   }
 
   onMount(() => {
-    // Reveal-on-scroll for marketing copy
+    // Respect users who prefer reduced motion: reveal everything immediately.
+    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (prefersReduced) {
+      document.querySelectorAll('[data-animate]').forEach((el) => {
+        /** @type {HTMLElement} */ (el).dataset.visible = 'true'
+      })
+    }
+
+    // Reveal-on-scroll. Honours `data-stagger` for child sequencing and
+    // `data-animate="left|right|up|scale"` for direction; default is "up".
     const reveal = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
+          if (!entry.isIntersecting) continue
           const target = /** @type {HTMLElement} */ (entry.target)
-          if (entry.isIntersecting) target.dataset.visible = 'true'
+          target.dataset.visible = 'true'
+          if (target.hasAttribute('data-stagger')) {
+            const children = target.querySelectorAll(':scope > *')
+            children.forEach((child, idx) => {
+              const c = /** @type {HTMLElement} */ (child)
+              c.style.transitionDelay = `${idx * 90}ms`
+              c.dataset.visible = 'true'
+            })
+          }
+          reveal.unobserve(target)
         }
       },
-      { threshold: 0.08, rootMargin: '0px 0px -8% 0px' },
+      { threshold: 0.12, rootMargin: '0px 0px -6% 0px' },
     )
-    document.querySelectorAll('[data-animate]').forEach((el) => reveal.observe(el))
+    if (!prefersReduced) {
+      document.querySelectorAll('[data-animate]').forEach((el) => reveal.observe(el))
+    }
 
     // Pause/resume the typing chat based on visibility
     const visibilityObs = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (entry.target === chatHost)   chatPaused   = !entry.isIntersecting
-          if (entry.target === bridgeHost) bridgePaused = !entry.isIntersecting
+          if (entry.target === chatHost) chatPaused = !entry.isIntersecting
         }
       },
       { threshold: 0.15 },
     )
-    if (chatHost)   visibilityObs.observe(chatHost)
-    if (bridgeHost) visibilityObs.observe(bridgeHost)
+    if (chatHost) visibilityObs.observe(chatHost)
 
     // Live clock + scroll depth analytics
     const clockTimer = setInterval(() => { nowText = currentTime() }, 30_000)
@@ -137,26 +152,20 @@
     </div>
 
     <div class="hero-inner">
-      <!-- Top status line: feels like a ship's NMEA readout -->
+      <!-- Slim status line — just live clock + private beta pip -->
       <div class="hero-status">
         <span class="hero-status-cell">
           <span class="status-dot" aria-hidden="true"></span>
           <span class="engraved">UTC · {nowText}</span>
         </span>
-        <span class="hero-status-cell hidden md:inline-flex">
-          <span class="engraved">43°34′N · 07°07′E · Antibes</span>
-        </span>
-        <span class="hero-status-cell hidden lg:inline-flex">
-          <span class="engraved">trade winds · ENE 12 kn</span>
-        </span>
         <span class="hero-status-cell ml-auto">
-          <span class="engraved text-radium">private beta · superyacht crew</span>
+          <span class="engraved text-brass">private beta · superyacht crew</span>
         </span>
       </div>
 
       <!-- Two-column hero: editorial copy left, live chat right -->
       <div class="hero-grid-cols">
-        <div class="hero-copy">
+        <div class="hero-copy" data-animate data-stagger>
           <h1 class="hero-title">
             <span class="hero-title-line">Text</span>
             <span class="hero-title-line">
@@ -222,7 +231,7 @@
         </div>
 
         <!-- The live chat — real bot script types itself out here -->
-        <aside class="hero-chat" bind:this={chatHost}>
+        <aside class="hero-chat" data-animate="right" bind:this={chatHost}>
           <p class="hero-chat-tag">
             <span class="hero-chat-tag-dot"></span>
             Live demo · real bot replies
@@ -236,24 +245,22 @@
       </div>
     </div>
 
-    <!-- Slim brass rule + fleet ticker — the bridge of the hero -->
-    <div class="hero-ticker">
-      <FleetTicker variant="wide" />
-    </div>
   </section>
 
-  <!-- ── BRIDGE — three brass instruments ────────────────────────────── -->
-  <div bind:this={bridgeHost}>
-    <BridgeConsole paused={bridgePaused} />
+  <!-- ── BRIDGE — two instrument cards ──────────────────────────────── -->
+  <div data-animate>
+    <BridgeConsole />
   </div>
 
   <!-- ── ROUTE — from signal to berth ────────────────────────────────── -->
-  <div id="route">
+  <div id="route" data-animate>
     <RouteMap />
   </div>
 
   <!-- ── AGENCIES — post a role ──────────────────────────────────────── -->
-  <AgencySection {onAgencySignup} />
+  <div data-animate>
+    <AgencySection {onAgencySignup} />
+  </div>
 
   <!-- ── FINAL CTA — calm, single line ───────────────────────────────── -->
   <section class="finale" data-animate>
@@ -657,10 +664,6 @@
   }
   .hero-chat-link:hover { color: #b9f5d6; border-bottom-color: rgba(141, 240, 196, 0.7); }
 
-  /* Ticker — sits flush against the bridge for handoff weight */
-  .hero-ticker { margin-top: 4rem; }
-  @media (min-width: 768px) { .hero-ticker { margin-top: 5rem; } }
-
   /* ── Final CTA ────────────────────────────────────────────────── */
   .finale {
     position: relative;
@@ -778,11 +781,41 @@
   /* ── Reveal-on-scroll ─────────────────────────────────────────── */
   [data-animate] {
     opacity: 0;
-    transform: translateY(20px);
-    transition: opacity 0.7s ease, transform 0.7s ease;
+    transform: translateY(24px);
+    transition:
+      opacity 0.75s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
   }
+  [data-animate="right"] { transform: translateX(28px); }
+  :global([data-animate="left"])  { transform: translateX(-28px); }
+  :global([data-animate="scale"]) { transform: scale(0.96); }
+
+  /* Children of a stagger container start hidden too — the observer
+     hands them their own visible flag with a per-index transition delay. */
+  [data-stagger] > * {
+    opacity: 0;
+    transform: translateY(16px);
+    transition:
+      opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
   :global([data-animate][data-visible='true']) {
     opacity: 1;
+    transform: translateY(0) translateX(0) scale(1);
+  }
+  :global([data-stagger] > [data-visible='true']) {
+    opacity: 1;
     transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-animate],
+    [data-stagger] > * {
+      opacity: 1 !important;
+      transform: none !important;
+      transition: none !important;
+    }
   }
 </style>

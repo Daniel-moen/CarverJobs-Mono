@@ -6,15 +6,14 @@
    * stacked vertically and the chat moves *above* the headline so the
    * first thing on screen is the live demo doing its thing.
    *
-   * The same TypingChat / FleetTicker / BridgeConsole / RouteMap /
-   * AgencySection components are reused; no logic is forked between the
-   * two marketing surfaces.
+   * The same TypingChat / BridgeConsole / RouteMap / AgencySection
+   * components are reused; no logic is forked between the two
+   * marketing surfaces.
    */
   import { onMount } from 'svelte'
   import { trackEvent } from '../../config/analytics'
   import { whatsapp } from '../../config/site'
   import TypingChat from '../sections/TypingChat.svelte'
-  import FleetTicker from '../sections/FleetTicker.svelte'
   import BridgeConsole from '../sections/BridgeConsole.svelte'
   import RouteMap from '../sections/RouteMap.svelte'
   import AgencySection from '../sections/AgencySection.svelte'
@@ -25,11 +24,8 @@
   let { onSignIn = () => {}, onAgencySignup = () => {}, onStartMatch = () => {} } = $props()
 
   let chatPaused = $state(false)
-  let bridgePaused = $state(true)
   /** @type {HTMLElement|null} */
   let chatHost = $state(null)
-  /** @type {HTMLElement|null} */
-  let bridgeHost = $state(null)
 
   let nowText = $state(currentTime())
   function currentTime() {
@@ -37,27 +33,44 @@
   }
 
   onMount(() => {
+    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (prefersReduced) {
+      document.querySelectorAll('[data-animate]').forEach((el) => {
+        /** @type {HTMLElement} */ (el).dataset.visible = 'true'
+      })
+    }
+
     const reveal = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
-          if (e.isIntersecting) /** @type {HTMLElement} */ (e.target).dataset.visible = 'true'
+          if (!e.isIntersecting) continue
+          const target = /** @type {HTMLElement} */ (e.target)
+          target.dataset.visible = 'true'
+          if (target.hasAttribute('data-stagger')) {
+            target.querySelectorAll(':scope > *').forEach((child, idx) => {
+              const c = /** @type {HTMLElement} */ (child)
+              c.style.transitionDelay = `${idx * 80}ms`
+              c.dataset.visible = 'true'
+            })
+          }
+          reveal.unobserve(target)
         }
       },
-      { threshold: 0.05 },
+      { threshold: 0.08, rootMargin: '0px 0px -4% 0px' },
     )
-    document.querySelectorAll('[data-animate]').forEach((el) => reveal.observe(el))
+    if (!prefersReduced) {
+      document.querySelectorAll('[data-animate]').forEach((el) => reveal.observe(el))
+    }
 
     const visibility = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
-          if (e.target === chatHost)   chatPaused   = !e.isIntersecting
-          if (e.target === bridgeHost) bridgePaused = !e.isIntersecting
+          if (e.target === chatHost) chatPaused = !e.isIntersecting
         }
       },
       { threshold: 0.1 },
     )
-    if (chatHost)   visibility.observe(chatHost)
-    if (bridgeHost) visibility.observe(bridgeHost)
+    if (chatHost) visibility.observe(chatHost)
 
     const clockTimer = setInterval(() => { nowText = currentTime() }, 30_000)
     const depths = new Set()
@@ -116,7 +129,7 @@
         <span class="engraved">UTC · {nowText}</span>
       </span>
       <span class="m-status-cell">
-        <span class="engraved text-radium">private beta</span>
+        <span class="engraved text-brass">private beta</span>
       </span>
     </div>
 
@@ -192,19 +205,20 @@
     </ul>
   </section>
 
-  <!-- Fleet ticker bridges hero → bridge -->
-  <FleetTicker variant="compact" />
-
   <!-- Bridge -->
-  <div bind:this={bridgeHost}>
-    <BridgeConsole paused={bridgePaused} />
+  <div data-animate>
+    <BridgeConsole />
   </div>
 
   <!-- Route -->
-  <RouteMap />
+  <div data-animate>
+    <RouteMap />
+  </div>
 
   <!-- Agencies -->
-  <AgencySection {onAgencySignup} />
+  <div data-animate>
+    <AgencySection {onAgencySignup} />
+  </div>
 
   <!-- Final CTA -->
   <section class="m-finale" data-animate>
@@ -545,11 +559,38 @@
 
   [data-animate] {
     opacity: 0;
-    transform: translateY(16px);
-    transition: opacity 0.6s ease, transform 0.6s ease;
+    transform: translateY(20px);
+    transition:
+      opacity 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
   }
+  :global([data-animate="right"]) { transform: translateX(20px); }
+  :global([data-animate="left"])  { transform: translateX(-20px); }
+
+  :global([data-stagger] > *) {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
   :global([data-animate][data-visible='true']) {
     opacity: 1;
+    transform: translateY(0) translateX(0);
+  }
+  :global([data-stagger] > [data-visible='true']) {
+    opacity: 1;
     transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global([data-animate]),
+    :global([data-stagger] > *) {
+      opacity: 1 !important;
+      transform: none !important;
+      transition: none !important;
+    }
   }
 </style>

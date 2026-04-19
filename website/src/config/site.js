@@ -15,14 +15,19 @@ export const supportEmail =
  */
 const _waRaw = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WHATSAPP_NUMBER)
   ? String(import.meta.env.VITE_WHATSAPP_NUMBER).replace(/[^0-9]/g, '')
-  : '447000000000'
+  : '27688516141'
 
 export const whatsapp = {
   /** E.164 digits, no plus. Used to build wa.me/ links. */
   number: _waRaw,
-  /** Pretty display (e.g. "+44 7000 000000"). */
+  /**
+   * Pretty display, e.g. "+27 68 851 6141".
+   * Formats SA mobile numbers nicely; falls back to a sane default for others.
+   */
   display: _waRaw
-    ? '+' + _waRaw.replace(/^(\d{1,3})(\d{3,4})(\d+)$/, '$1 $2 $3')
+    ? (_waRaw.startsWith('27') && _waRaw.length === 11
+        ? '+27 ' + _waRaw.slice(2, 4) + ' ' + _waRaw.slice(4, 7) + ' ' + _waRaw.slice(7)
+        : '+' + _waRaw.replace(/^(\d{1,3})(\d{3,4})(\d+)$/, '$1 $2 $3'))
     : '',
   /** Build a wa.me link with an optional pre-filled message. */
   link(message = '') {

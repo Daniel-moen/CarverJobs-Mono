@@ -1,31 +1,13 @@
 <script>
   /**
-   * BridgeConsole — three "bridge instrument" cards.
+   * BridgeConsole — two plain-language cards explaining what Carver does.
    *
-   * Card 1 — Compass: ambient decorative dial with a slowly drifting needle
-   *          and a rotating list of common Med / Caribbean ports. No metrics.
-   * Card 2 — How matching works: plain-language description of the matching
-   *          loop. No fabricated counts or scan times.
-   * Card 3 — Where listings come from: labelled list of source categories.
-   *          No percentages, no fake "last 24h" totals.
+   * Card 1 — How matching works: 3-step description of the matching loop.
+   * Card 2 — Where listings come from: labelled list of source categories.
    *
-   * Rule: nothing in this component should look like product telemetry unless
-   * it is actually wired to a real data source.
+   * Rule: nothing in this component should look like product telemetry
+   * unless it is wired to a real data source.
    */
-  import { onDestroy, onMount } from 'svelte'
-
-  /** @type {{ paused?: boolean }} */
-  let { paused = false } = $props()
-
-  const portRotation = [
-    { name: 'Antibes',           coord: '43°34′N · 07°07′E' },
-    { name: 'Palma de Mallorca', coord: '39°34′N · 02°39′E' },
-    { name: 'Monaco',            coord: '43°44′N · 07°25′E' },
-    { name: 'Genoa',             coord: '44°25′N · 08°56′E' },
-    { name: 'Fort Lauderdale',   coord: '26°07′N · 80°08′W' },
-    { name: 'Gustavia',          coord: '17°54′N · 62°51′W' },
-    { name: 'Viareggio',         coord: '43°52′N · 10°15′E' },
-  ]
 
   const sources = [
     'Captains hiring directly',
@@ -48,36 +30,6 @@
       body: 'Each match arrives with an introduction email Carver wrote for you. Tap “Open in Mail”, review, send.',
     },
   ]
-
-  let portIdx = $state(0)
-  let heading = $state(127)
-
-  /** @type {ReturnType<typeof setInterval>[]} */
-  let timers = []
-
-  function start() {
-    stop()
-    timers.push(setInterval(() => { portIdx = (portIdx + 1) % portRotation.length }, 3200))
-    timers.push(setInterval(() => {
-      const drift = (Math.random() - 0.5) * 14
-      heading = Math.max(60, Math.min(160, heading + drift))
-    }, 1800))
-  }
-
-  function stop() {
-    timers.forEach(clearInterval)
-    timers = []
-  }
-
-  onMount(start)
-  onDestroy(stop)
-
-  $effect(() => {
-    if (paused) stop()
-    else if (timers.length === 0) start()
-  })
-
-  const port = $derived(portRotation[portIdx])
 </script>
 
 <section class="bridge" aria-labelledby="bridge-title">
@@ -95,61 +47,6 @@
     </header>
 
     <div class="instruments">
-      <article class="instrument compass">
-        <div class="instrument-head">
-          <span class="engraved">Compass</span>
-          <span class="readout text-sm">{Math.round(heading).toString().padStart(3, '0')}°</span>
-        </div>
-
-        <div class="compass-dial" aria-hidden="true">
-          <svg viewBox="0 0 200 200">
-            <g fill="none" stroke="currentColor" class="text-brass" opacity="0.65">
-              <circle cx="100" cy="100" r="92" stroke-width="0.6"/>
-              <circle cx="100" cy="100" r="74" stroke-width="0.4" stroke-dasharray="1 4"/>
-              <circle cx="100" cy="100" r="58" stroke-width="0.4"/>
-              {#each Array.from({ length: 36 }) as _, i}
-                {@const a = (i * 10 * Math.PI) / 180}
-                {@const x1 = 100 + 86 * Math.sin(a)}
-                {@const y1 = 100 - 86 * Math.cos(a)}
-                {@const x2 = 100 + (i % 9 === 0 ? 70 : 78) * Math.sin(a)}
-                {@const y2 = 100 - (i % 9 === 0 ? 70 : 78) * Math.cos(a)}
-                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke-width={i % 9 === 0 ? 1.2 : 0.4}
-                      opacity={i % 9 === 0 ? 1 : 0.55} />
-              {/each}
-            </g>
-            <g class="text-brass" font-family="DM Mono, ui-monospace, monospace" font-size="9" letter-spacing="2">
-              <text x="100" y="22"  text-anchor="middle" fill="currentColor">N</text>
-              <text x="180" y="103" text-anchor="middle" fill="currentColor">E</text>
-              <text x="100" y="184" text-anchor="middle" fill="currentColor">S</text>
-              <text x="20"  y="103" text-anchor="middle" fill="currentColor">W</text>
-            </g>
-            <g style="transform: rotate({heading}deg); transform-origin: 100px 100px; transition: transform 1.6s ease;">
-              <polygon points="100,18 104,100 100,104 96,100" fill="var(--radium)" opacity="0.9"/>
-              <polygon points="100,182 104,100 100,96 96,100" fill="var(--brass-deep)" opacity="0.7"/>
-              <circle cx="100" cy="100" r="5" fill="var(--brass-bright)"/>
-              <circle cx="100" cy="100" r="2.2" fill="#0a0d12"/>
-            </g>
-            <g class="radar-sweep" style="transform-origin: 100px 100px;">
-              <defs>
-                <linearGradient id="sweep" x1="100" y1="100" x2="100" y2="20" gradientUnits="userSpaceOnUse">
-                  <stop offset="0" stop-color="var(--radium)" stop-opacity="0"/>
-                  <stop offset="1" stop-color="var(--radium)" stop-opacity="0.45"/>
-                </linearGradient>
-              </defs>
-              <path d="M100,100 L100,16 A84,84 0 0 1 168,72 Z" fill="url(#sweep)"/>
-            </g>
-          </svg>
-        </div>
-
-        <div class="compass-foot">
-          <p class="engraved">Charter waypoint</p>
-          {#key portIdx}
-            <p class="port-name">{port.name}</p>
-            <p class="port-coord readout">{port.coord}</p>
-          {/key}
-        </div>
-      </article>
-
       <article class="instrument flow">
         <div class="instrument-head">
           <span class="engraved">How matching works</span>
@@ -210,7 +107,7 @@
   @media (min-width: 768px) { .bridge { padding: 8rem 1.5rem 9rem; } }
 
   .bridge-inner {
-    max-width: 1180px;
+    max-width: 1080px;
     margin: 0 auto;
   }
   .bridge-head {
@@ -236,57 +133,31 @@
     grid-template-columns: 1fr;
     gap: 1.25rem;
   }
-  @media (min-width: 900px) {
+  @media (min-width: 820px) {
     .instruments {
-      grid-template-columns: 1.05fr 1fr 0.95fr;
-      gap: 1.5rem;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 1.75rem;
     }
   }
 
   .instrument {
-    padding: 1.5rem 1.4rem 1.6rem;
+    padding: 1.75rem 1.6rem 1.85rem;
     display: flex;
     flex-direction: column;
-    gap: 1.1rem;
+    gap: 1.25rem;
     color: var(--text-primary);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    background:
+      radial-gradient(80% 80% at 50% 0%, rgba(255, 255, 255, 0.02), transparent 70%),
+      rgba(10, 13, 18, 0.5);
   }
   .instrument-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px dashed rgba(201, 169, 110, 0.18);
-    padding-bottom: 0.65rem;
-  }
-
-  .compass-dial {
-    aspect-ratio: 1 / 1;
-    width: 70%;
-    align-self: center;
-    color: var(--brass);
-  }
-  .compass-foot {
-    border-top: 1px dashed rgba(201, 169, 110, 0.18);
-    padding-top: 0.85rem;
-    text-align: center;
-  }
-  .port-name {
-    margin: 0.4rem 0 0.15rem;
-    font-family: var(--font-serif);
-    font-style: italic;
-    color: var(--ivory);
-    font-size: 1.4rem;
-    letter-spacing: -0.005em;
-    animation: port-fade 0.5s ease-out;
-  }
-  .port-coord {
-    margin: 0;
-    font-size: 0.78rem;
-    letter-spacing: 0.18em;
-    animation: port-fade 0.5s ease-out;
-  }
-  @keyframes port-fade {
-    from { opacity: 0; transform: translateY(2px); }
-    to   { opacity: 1; transform: translateY(0); }
+    padding-bottom: 0.75rem;
   }
 
   .flow-list {
@@ -295,12 +166,12 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 1.1rem;
   }
   .flow-step {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 0.85rem;
+    gap: 0.95rem;
     align-items: start;
   }
   .flow-num {
@@ -308,27 +179,27 @@
     font-size: 0.72rem;
     letter-spacing: 0.22em;
     color: var(--brass);
-    padding-top: 0.1rem;
+    padding-top: 0.15rem;
   }
   .flow-title {
     margin: 0;
     color: var(--ivory);
     font-family: var(--font-serif);
-    font-size: 1.05rem;
+    font-size: 1.1rem;
     font-weight: 400;
     letter-spacing: -0.005em;
   }
   .flow-body {
-    margin: 0.2rem 0 0;
+    margin: 0.25rem 0 0;
     color: var(--text-secondary);
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     line-height: 1.55;
   }
   .flow-foot {
     margin-top: auto;
-    padding-top: 0.9rem;
+    padding-top: 1rem;
     border-top: 1px dashed rgba(201, 169, 110, 0.18);
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     color: var(--text-secondary);
     line-height: 1.55;
   }
@@ -339,16 +210,21 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.9rem;
+    gap: 0.7rem;
   }
   .src-row {
     display: inline-flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.55rem 0.7rem;
-    border-radius: 8px;
+    gap: 0.65rem;
+    padding: 0.65rem 0.8rem;
+    border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.04);
     background: rgba(0, 0, 0, 0.18);
+    transition: border-color 0.2s ease, background 0.2s ease;
+  }
+  .src-row:hover {
+    border-color: rgba(201, 169, 110, 0.3);
+    background: rgba(201, 169, 110, 0.04);
   }
   .src-marker {
     width: 6px;
@@ -359,14 +235,14 @@
   }
   .src-name {
     color: var(--ivory);
-    font-size: 0.92rem;
+    font-size: 0.95rem;
     letter-spacing: -0.005em;
   }
   .sources-foot {
     margin-top: auto;
-    padding-top: 0.9rem;
+    padding-top: 1rem;
     border-top: 1px dashed rgba(201, 169, 110, 0.18);
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     color: var(--text-secondary);
     line-height: 1.55;
   }
