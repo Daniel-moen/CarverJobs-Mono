@@ -1,805 +1,788 @@
 <script>
+  /**
+   * LandingPage — "The Bridge" rebuild.
+   *
+   * Direction: a maritime command-bridge experience. Every section is a
+   * deliberate beat in the journey from "first text" to "next berth":
+   *
+   *   1. Hero          — a WhatsApp conversation with the real bot script
+   *                      alongside an editorial headline.
+   *   2. Fleet ticker  — AIS-style scrolling vessel marquee under the hero
+   *                      (transitions hero → bridge with maritime weight).
+   *   3. Bridge        — three brass instrument cards: compass, how
+   *                      matching works, and where listings come from.
+   *   4. Route         — "From signal to berth" — a four-stop charter
+   *                      route on a curved nautical course.
+   *   5. Agencies      — proper section for captains/agencies to post a
+   *                      role, with three plain value props and one CTA.
+   *   6. Final CTA     — a single, calm closing line.
+   *
+   * Animation budget is tight — heavy effects (chat typing, compass
+   * needle, sweeping radar) only run while the section is on screen,
+   * driven by an IntersectionObserver that flips a `paused` prop.
+   */
   import { onMount } from 'svelte'
   import { trackEvent } from '../../config/analytics'
+  import { whatsapp } from '../../config/site'
+  import TypingChat from '../sections/TypingChat.svelte'
+  import FleetTicker from '../sections/FleetTicker.svelte'
+  import BridgeConsole from '../sections/BridgeConsole.svelte'
+  import RouteMap from '../sections/RouteMap.svelte'
+  import AgencySection from '../sections/AgencySection.svelte'
+  import WhatsAppFab from '../sections/WhatsAppFab.svelte'
 
-  let { onSignIn = () => {}, onStartMatch = () => {}, onAgencySignup = () => {} } = $props()
-  const isFinePointer = window.matchMedia('(pointer:fine)').matches
-  const isMobileViewport = window.matchMedia('(max-width: 768px)').matches
+  // `onStartMatch` is accepted for API compatibility with the router but
+  // intentionally ignored: the new design routes everyone through WhatsApp
+  // or sign-in instead of jumping straight to the matching engine.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  let { onSignIn = () => {}, onAgencySignup = () => {}, onStartMatch = () => {} } = $props()
 
-  // Hero mouse tracking — mousemove only (touch devices stay centered, no lag)
-  let heroEl = $state(null)
-  let mx = $state(50)
-  let my = $state(50)
+  // Pause expensive sections when off-screen.
+  let chatPaused = $state(false)
+  let bridgePaused = $state(true)
+  /** @type {HTMLElement|null} */
+  let chatHost = $state(null)
+  /** @type {HTMLElement|null} */
+  let bridgeHost = $state(null)
 
-  function handleHeroMouseMove(e) {
-    if (!isFinePointer || isMobileViewport) return
-    if (!heroEl) return
-    const rect = heroEl.getBoundingClientRect()
-    mx = ((e.clientX - rect.left) / rect.width) * 100
-    my = ((e.clientY - rect.top) / rect.height) * 100
+  // Live clock for the chat status bar — locale-aware, 24h.
+  let nowText = $state(currentTime())
+  function currentTime() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
   }
 
   onMount(() => {
-    const observer = new IntersectionObserver(
+    // Reveal-on-scroll for marketing copy
+    const reveal = new IntersectionObserver(
       (entries) => {
-        entries.forEach((entry) => {
+        for (const entry of entries) {
           const target = /** @type {HTMLElement} */ (entry.target)
-          if (entry.isIntersecting) {
-            target.dataset.visible = 'true'
-          }
-        })
+          if (entry.isIntersecting) target.dataset.visible = 'true'
+        }
       },
-      { threshold: 0.12 },
+      { threshold: 0.08, rootMargin: '0px 0px -8% 0px' },
     )
+    document.querySelectorAll('[data-animate]').forEach((el) => reveal.observe(el))
 
-    document.querySelectorAll('[data-animate]').forEach((el) => observer.observe(el))
+    // Pause/resume the typing chat based on visibility
+    const visibilityObs = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.target === chatHost)   chatPaused   = !entry.isIntersecting
+          if (entry.target === bridgeHost) bridgePaused = !entry.isIntersecting
+        }
+      },
+      { threshold: 0.15 },
+    )
+    if (chatHost)   visibilityObs.observe(chatHost)
+    if (bridgeHost) visibilityObs.observe(bridgeHost)
 
+    // Live clock + scroll depth analytics
+    const clockTimer = setInterval(() => { nowText = currentTime() }, 30_000)
     const depths = new Set()
-    if (isMobileViewport) {
-      return () => observer.disconnect()
-    }
     function onScroll() {
-      const pct = Math.round((window.scrollY + window.innerHeight) / document.body.scrollHeight * 100)
-      for (const threshold of [25, 50, 75, 100]) {
-        if (pct >= threshold && !depths.has(threshold)) {
-          depths.add(threshold)
-          trackEvent('scroll_depth', { page: 'landing', value: String(threshold) })
+      const denom = document.body.scrollHeight || 1
+      const pct = Math.round(((window.scrollY + window.innerHeight) / denom) * 100)
+      for (const t of [25, 50, 75, 100]) {
+        if (pct >= t && !depths.has(t)) {
+          depths.add(t)
+          trackEvent('scroll_depth', { page: 'landing', value: String(t) })
         }
       }
     }
     window.addEventListener('scroll', onScroll, { passive: true })
 
     return () => {
-      observer.disconnect()
+      reveal.disconnect()
+      visibilityObs.disconnect()
+      clearInterval(clockTimer)
       window.removeEventListener('scroll', onScroll)
     }
   })
-
-  const features = [
-    {
-      icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>`,
-      title: 'Auto-Apply Engine',
-      desc: 'CARVER scans live listings and submits your application automatically — while you sleep.',
-    },
-    {
-      icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg>`,
-      title: 'Smart Matching',
-      desc: 'AI-powered compatibility scoring ensures you only apply where you genuinely fit the brief.',
-    },
-    {
-      icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
-      title: 'Document Vault',
-      desc: 'Upload your CV, STCW, ENG1, and passport once. CARVER handles the rest every time.',
-    },
-    {
-      icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
-      title: 'Live Job Board',
-      desc: 'Real-time superyacht vacancies aggregated from top sources, filtered for your profile.',
-    },
-  ]
-
-  const steps = [
-    {
-      num: '01',
-      title: 'Build your profile',
-      desc: 'Upload your documents and set your experience, certifications, and preferences.',
-    },
-    {
-      num: '02',
-      title: 'Set your criteria',
-      desc: "Tell CARVER what you're looking for — vessel type, role, region, and salary range.",
-    },
-    {
-      num: '03',
-      title: 'Activate Auto-Apply',
-      desc: 'CARVER matches and applies on your behalf to relevant openings in real time.',
-    },
-    {
-      num: '04',
-      title: 'Track & respond',
-      desc: 'Monitor your application pipeline and respond to interview invites from your dashboard.',
-    },
-  ]
-
-  const roles = [
-    'Captain',
-    'First Officer',
-    'Chief Engineer',
-    'Bosun',
-    'Stewardess',
-    'Head Chef',
-    'Deckhand',
-    'Second Engineer',
-    'Purser',
-    'Chief Steward/ess',
-    'Mate',
-    'ETO',
-  ]
-
-  const particles = Array.from({ length: 10 }, () => ({
-    x: Math.random() * 100,
-    startY: 75 + Math.random() * 25,
-    size: Math.random() * 2 + 0.8,
-    dur: Math.random() * 25 + 18,
-    delay: Math.random() * -40,
-    opacity: Math.random() * 0.35 + 0.08,
-  }))
 </script>
 
-<div class="min-h-screen bg-[#04070b] text-slate-100">
-  <!-- ── NAV ─────────────────────────────────────────────────────────── -->
-  <nav class="fixed top-0 z-50 w-full border-b border-white/[0.06] bg-[#04070b]/70 backdrop-blur-xl supports-[backdrop-filter]:bg-[#04070b]/55">
-    <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
-      <a href="/" class="flex items-center gap-2.5">
-        <span class="relative flex h-2 w-2 items-center justify-center">
-          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400/50 opacity-60"></span>
-          <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
-        </span>
-        <span class="font-display text-[15px] tracking-[0.42em] text-ivory">CARVER</span>
+<div class="landing">
+  <!-- ── NAV — stays minimal so the chat does the work ───────────────── -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">
+        <span class="brand-pip" aria-hidden="true"></span>
+        <span class="wordmark text-[14px] text-ivory">CARVER</span>
+        <span class="brand-suffix font-display italic text-[13px] text-brass">v3</span>
       </a>
-      <div class="flex items-center gap-2 sm:gap-3">
+      <div class="nav-links">
+        <a href="#route" class="nav-link">How it works</a>
+        <a href="#agencies" class="nav-link">For agencies</a>
         <a
-          href="#how-it-works"
-          class="hidden rounded-full px-3 py-2 text-[12px] font-medium text-slate-400 transition hover:text-white sm:inline-block"
+          href={whatsapp.link('help')}
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={() => trackEvent('nav_whatsapp_cta')}
+          class="nav-wa"
         >
-          How it works
+          <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
+          Open chat
         </a>
-        <button
-          onclick={() => onSignIn('nav')}
-          class="rounded-full border border-white/15 bg-white/[0.03] px-5 py-2 text-[12px] font-medium text-slate-200 transition-all duration-200 hover:border-cyan-300/50 hover:bg-cyan-300/[0.06] hover:text-white"
-        >
-          Sign in
-        </button>
+        <button onclick={() => onSignIn('nav')} class="nav-signin">Sign in</button>
       </div>
     </div>
   </nav>
 
-  <!-- ── HERO ───────────────────────────────────────────────────────── -->
-  <section
-    bind:this={heroEl}
-    class="relative flex min-h-[100svh] flex-col items-center justify-start overflow-hidden px-4 pb-10 pt-24 sm:min-h-screen sm:justify-center sm:px-6 sm:pb-0 sm:pt-20"
-    onmousemove={handleHeroMouseMove}
-    role="banner"
-  >
-    <!-- Background layers -->
-    <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-      <!-- Pulsing line grid -->
-      <div class="grid-bg absolute inset-0"></div>
-
-      <!-- Floating particles -->
-      {#each particles as p}
-        <div
-          class="particle"
-          style="left:{p.x}%; top:{p.startY}%; width:{p.size}px; height:{p.size}px; --op:{p.opacity}; animation-duration:{p.dur}s; animation-delay:{p.delay}s;"
-        ></div>
-      {/each}
-
-      <!-- Orbs -->
-      <div class="orb orb-1"></div>
-      <div class="orb orb-2"></div>
-      <div class="orb orb-3"></div>
-      <div class="orb orb-4"></div>
-      <div class="orb orb-5"></div>
-
-      <!-- Horizontal scan line -->
-      <div class="scan-line"></div>
-
-      <!-- Mouse spotlight -->
-      <div
-        class="absolute inset-0 transition-[background] duration-100"
-        style="background: radial-gradient(700px circle at {mx}% {my}%, rgba(34,211,238,0.06), transparent 60%);"
-      ></div>
+  <!-- ── HERO ────────────────────────────────────────────────────────── -->
+  <section class="hero" role="banner">
+    <!-- Decorative background — quiet, no neon -->
+    <div class="hero-bg" aria-hidden="true">
+      <div class="hero-grid"></div>
+      <div class="hero-glow"></div>
     </div>
 
-    <div class="relative z-10 mx-auto max-w-5xl text-center">
-      <!-- Pill badge -->
-      <div
-        class="mb-8 inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/[0.025] px-4 py-1.5"
-      >
-        <span class="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-cyan-400"></span>
-        <span class="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-300 sm:text-[11px]">
-          <span class="sm:hidden">Superyacht crew &middot; Beta</span>
-          <span class="hidden sm:inline">Automated superyacht crew recruitment &middot; Beta</span>
+    <div class="hero-inner">
+      <!-- Top status line: feels like a ship's NMEA readout -->
+      <div class="hero-status">
+        <span class="hero-status-cell">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="engraved">UTC · {nowText}</span>
+        </span>
+        <span class="hero-status-cell hidden md:inline-flex">
+          <span class="engraved">43°34′N · 07°07′E · Antibes</span>
+        </span>
+        <span class="hero-status-cell hidden lg:inline-flex">
+          <span class="engraved">trade winds · ENE 12 kn</span>
+        </span>
+        <span class="hero-status-cell ml-auto">
+          <span class="engraved text-radium">private beta · superyacht crew</span>
         </span>
       </div>
 
-      <!-- Headline -->
-      <h1 class="font-display text-[clamp(2.4rem,11vw,6.4rem)] font-light leading-[1.02] text-white">
-        Every yacht job.<br />
-        <em class="gradient-text font-light italic">One place.</em><br />
-        Auto-matched.
-      </h1>
+      <!-- Two-column hero: editorial copy left, live chat right -->
+      <div class="hero-grid-cols">
+        <div class="hero-copy">
+          <h1 class="hero-title">
+            <span class="hero-title-line">Text</span>
+            <span class="hero-title-line">
+              <span class="hero-title-mark">“match”</span>
+            </span>
+            <span class="hero-title-line">
+              <span class="font-hand text-brass hero-title-hand">— and</span>
+              get the yacht.
+            </span>
+          </h1>
 
-      <p class="mx-auto mt-8 max-w-2xl text-[15px] leading-relaxed text-slate-300/85 sm:text-[17px]">
-        We aggregate listings from 50+ crew groups, agencies, and any source with a contact email —
-        so you stop scrolling and start applying. Captains hiring? Post directly.
-      </p>
+          <p class="hero-lede">
+            Carver runs the entire superyacht crew job hunt over WhatsApp.
+            <strong class="text-ivory">Build your profile, match against every live role, and apply</strong> —
+            no app to install, no website to log into, no inbox to sort.
+          </p>
 
-      <!-- CTAs -->
-      <div class="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-        <button
-          onclick={() => onSignIn('hero')}
-          class="cta-primary group inline-flex items-center gap-2 rounded-full px-8 py-3.5 text-[13px] font-semibold text-[#04070b] transition-all duration-200"
-        >
-          Join the Beta
-          <span class="font-mono text-[10px] uppercase tracking-[0.22em] text-[#04070b]/70 group-hover:text-[#04070b]">First 100 &middot; discount</span>
-        </button>
-        <a
-          href="#how-it-works"
-          class="rounded-full border border-white/15 px-8 py-3.5 text-[13px] font-medium text-slate-300 transition-all duration-200 hover:border-white/30 hover:text-white"
-        >
-          How it works →
-        </a>
-      </div>
-
-      <!-- Trust strip -->
-      <div class="mx-auto mt-10 flex max-w-2xl flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[11px] text-slate-500">
-        <span class="inline-flex items-center gap-1.5">
-          <svg class="h-3.5 w-3.5 text-emerald-300/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          TLS encrypted
-        </span>
-        <span class="text-slate-700">·</span>
-        <span class="inline-flex items-center gap-1.5">
-          <svg class="h-3.5 w-3.5 text-cyan-300/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M2 12h20M12 2a14 14 0 0 1 0 20M12 2a14 14 0 0 0 0 20"/></svg>
-          EU data residency
-        </span>
-        <span class="text-slate-700">·</span>
-        <span class="inline-flex items-center gap-1.5">
-          <svg class="h-3.5 w-3.5 text-cyan-300/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-          Used by crew in Med &amp; Caribbean
-        </span>
-      </div>
-
-      <!-- Role ticker -->
-      <div class="mt-14 overflow-hidden">
-        <p class="eyebrow mb-3 text-slate-500">Roles we cover</p>
-        <div class="ticker-mask">
-          <div class="ticker">
-            {#each [...roles, ...roles] as role}
-              <span class="ticker-item">{role}</span>
-            {/each}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Scroll arrow -->
-    <div class="absolute bottom-10 left-1/2 hidden -translate-x-1/2 animate-bounce sm:block" aria-hidden="true">
-      <svg class="h-5 w-5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 9l-7 7-7-7" />
-      </svg>
-    </div>
-  </section>
-
-  <!-- ── SEE ONE WE MISSED? ─────────────────────────────────────────── -->
-  <section class="px-4 py-16 sm:px-6 sm:py-28" data-animate>
-    <div class="mx-auto max-w-3xl text-center">
-      <p class="eyebrow">Community-powered</p>
-      <h2 class="mt-3 font-display text-4xl font-light text-white sm:text-5xl">See one we missed?</h2>
-      <p class="mx-auto mt-5 max-w-xl text-[15px] leading-relaxed text-slate-400">
-        Saw a job in a crew group or social post? Submit it with a screenshot or pasted text — we add it to the board
-        and you earn a token to match roles that fit your profile. Hiring managers can post positions directly too.
-      </p>
-    </div>
-  </section>
-
-  <!-- ── FEATURES ───────────────────────────────────────────────────── -->
-  <section id="features" class="px-4 py-16 sm:px-6 sm:py-28">
-    <div class="mx-auto max-w-7xl">
-      <div class="mb-16 text-center" data-animate>
-        <p class="eyebrow">Features</p>
-        <h2 class="mt-3 font-display text-4xl font-light text-white sm:text-5xl">Built for superyacht crew</h2>
-        <p class="mx-auto mt-4 max-w-lg text-[15px] leading-relaxed text-slate-400">
-          Every feature designed around the realities of working on the water.
-        </p>
-      </div>
-
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {#each features as feature, i}
-          <article
-            class="feature-card group relative overflow-hidden rounded-2xl border border-white/8 bg-zinc-950 p-6 transition-all duration-300"
-            style="--mx:50%; --my:50%; transition-delay: {i * 80}ms"
-            data-animate
-            onmousemove={(e) => {
-              if (!isFinePointer || isMobileViewport) return
-              const r = e.currentTarget.getBoundingClientRect()
-              e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`)
-              e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`)
-            }}
-            onmouseleave={(e) => {
-              if (!isFinePointer || isMobileViewport) return
-              e.currentTarget.style.setProperty('--mx', '50%')
-              e.currentTarget.style.setProperty('--my', '50%')
-            }}
-          >
-            <div
-              class="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-              style="background: radial-gradient(180px circle at var(--mx) var(--my), rgba(34,211,238,0.12), transparent 70%);"
-              aria-hidden="true"
-            ></div>
-            <div class="relative z-10">
-              <div
-                class="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-cyan-300"
-              >
-                {@html feature.icon}
-              </div>
-              <h3 class="font-semibold text-white">{feature.title}</h3>
-              <p class="mt-2 text-sm leading-relaxed text-slate-400">{feature.desc}</p>
-            </div>
-          </article>
-        {/each}
-      </div>
-    </div>
-  </section>
-
-  <!-- ── MATCHING ENGINE ─────────────────────────────────────────────── -->
-  <section id="matching" class="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-28">
-    <div class="pointer-events-none absolute inset-0 matching-bg-glow" aria-hidden="true"></div>
-
-    <div class="relative z-10 mx-auto max-w-5xl">
-      <div class="mb-14 text-center" data-animate>
-        <p class="eyebrow">Matching Engine</p>
-        <h2 class="mt-3 font-display text-4xl font-light text-white sm:text-5xl">
-          Job matching, in <em class="italic text-cyan-200/90">seconds.</em>
-        </h2>
-        <p class="mx-auto mt-4 max-w-lg text-[15px] leading-relaxed text-slate-400">
-          The engine analyses your profile against every open position and returns the best fit, with the reasoning shown.
-        </p>
-      </div>
-
-      <div class="mx-auto max-w-2xl" data-animate>
-        <div class="match-demo group relative overflow-hidden rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-sky-950/60 via-indigo-950/50 to-cyan-950/40 p-4 sm:p-8">
-          <div class="match-demo-orb match-demo-orb-1 pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-cyan-400/12 blur-3xl" style="animation: match-orb-pulse 4s ease-in-out infinite;" aria-hidden="true"></div>
-          <div class="match-demo-orb match-demo-orb-2 pointer-events-none absolute -bottom-12 -left-12 h-36 w-36 rounded-full bg-indigo-400/8 blur-2xl" style="animation: match-orb-pulse 4s ease-in-out infinite; animation-delay:-2s;" aria-hidden="true"></div>
-
-          <div class="relative z-10">
-            <div class="flex items-center gap-2">
-              <span class="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-              <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-cyan-300/60">Live Engine</p>
-            </div>
-            <h3 class="mt-3 text-2xl font-black text-white">Find Your Match</h3>
-            <p class="mt-2 text-sm leading-relaxed text-slate-400">
-              Sign in to run the matching engine against your crew profile. We'll scan every open position and find the one that fits you best.
-            </p>
-
-            <div class="mt-6 grid grid-cols-3 gap-3">
-              <div class="rounded-xl border border-white/6 bg-black/30 px-4 py-3 text-center">
-                <p class="text-lg font-black text-cyan-300">All</p>
-                <p class="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Recent posts</p>
-              </div>
-              <div class="rounded-xl border border-white/6 bg-black/30 px-4 py-3 text-center">
-                <p class="text-lg font-black text-cyan-300">~1s</p>
-                <p class="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Per job</p>
-              </div>
-              <div class="rounded-xl border border-white/6 bg-black/30 px-4 py-3 text-center">
-                <p class="text-lg font-black text-cyan-300">6</p>
-                <p class="mt-0.5 text-[10px] uppercase tracking-wider text-slate-500">Factors scored</p>
-              </div>
-            </div>
-
-            <div class="mt-6 rounded-xl border border-white/6 bg-black/20 p-4">
-              <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">How it works</p>
-              <div class="mt-3 space-y-2.5">
-                <div class="flex items-center gap-3">
-                  <span class="flex h-6 w-6 flex-none items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-400/10 text-[10px] font-bold text-cyan-300">1</span>
-                  <p class="text-sm text-slate-300">Your profile is analysed — role, certs, location, salary range</p>
-                </div>
-                <div class="flex items-center gap-3">
-                  <span class="flex h-6 w-6 flex-none items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-400/10 text-[10px] font-bold text-cyan-300">2</span>
-                  <p class="text-sm text-slate-300">Every open position is scored on compatibility factors</p>
-                </div>
-                <div class="flex items-center gap-3">
-                  <span class="flex h-6 w-6 flex-none items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-400/10 text-[10px] font-bold text-cyan-300">3</span>
-                  <p class="text-sm text-slate-300">Your best match is returned with a personalised reason</p>
-                </div>
-              </div>
-            </div>
-
+          <div class="hero-ctas">
+            <a
+              href={whatsapp.link("Hi Carver — I'd like to start matching to yacht roles.")}
+              target="_blank"
+              rel="noopener noreferrer"
+              onclick={() => trackEvent('hero_whatsapp_cta')}
+              class="cta-wa hero-cta-primary"
+            >
+              <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+                <path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/>
+              </svg>
+              <span>Open WhatsApp</span>
+              <span class="hero-cta-meta">free · no signup</span>
+            </a>
+            <span class="hero-cta-or" aria-hidden="true">or</span>
             <button
               type="button"
-              onclick={() => onStartMatch()}
-              class="mt-6 w-full relative overflow-hidden rounded-xl border border-cyan-300/35 bg-cyan-300/10 px-6 py-4 text-sm font-bold text-cyan-100 transition-all duration-200 hover:border-cyan-300/60 hover:bg-cyan-300/20 hover:text-white hover:shadow-[0_0_40px_rgba(34,211,238,0.2)] active:scale-[0.98]"
+              onclick={() => onSignIn('hero')}
+              class="cta-ivory hero-cta-secondary"
             >
-              <span class="flex items-center justify-center gap-2.5">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                Start Matching Engine
-              </span>
+              Use the website
             </button>
           </div>
+
+          <!-- Three trust pips: small, paper-coloured, no neon -->
+          <ul class="hero-trust">
+            <li>
+              <span class="trust-seal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <p>End-to-end encrypted · TLS + at-rest</p>
+            </li>
+            <li>
+              <span class="trust-seal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M2 12h20M12 2a14 14 0 0 1 0 20M12 2a14 14 0 0 0 0 20"/></svg>
+              </span>
+              <p>EU-hosted, GDPR by design</p>
+            </li>
+            <li>
+              <span class="trust-seal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </span>
+              <p>Real listings · captains & verified agencies</p>
+            </li>
+          </ul>
         </div>
+
+        <!-- The live chat — real bot script types itself out here -->
+        <aside class="hero-chat" bind:this={chatHost}>
+          <p class="hero-chat-tag">
+            <span class="hero-chat-tag-dot"></span>
+            Live demo · real bot replies
+          </p>
+          <TypingChat paused={chatPaused} />
+          <p class="hero-chat-foot">
+            What you see is what you get — script pulled directly from the
+            production bot. <a class="hero-chat-link" href={whatsapp.link('match')} target="_blank" rel="noopener noreferrer">Try “match” yourself →</a>
+          </p>
+        </aside>
       </div>
+    </div>
+
+    <!-- Slim brass rule + fleet ticker — the bridge of the hero -->
+    <div class="hero-ticker">
+      <FleetTicker variant="wide" />
     </div>
   </section>
 
-  <!-- ── HOW IT WORKS ───────────────────────────────────────────────── -->
-  <section id="how-it-works" class="bg-[#080c11] px-4 py-16 sm:px-6 sm:py-28">
-    <div class="mx-auto max-w-5xl">
-      <div class="mb-16 text-center" data-animate>
-        <p class="eyebrow">Process</p>
-        <h2 class="mt-3 font-display text-4xl font-light text-white sm:text-5xl">
-          Four steps to your <em class="italic">next berth.</em>
-        </h2>
-      </div>
+  <!-- ── BRIDGE — three brass instruments ────────────────────────────── -->
+  <div bind:this={bridgeHost}>
+    <BridgeConsole paused={bridgePaused} />
+  </div>
 
-      <div class="grid gap-10 sm:grid-cols-2">
-        {#each steps as step, i}
-          <div class="group flex gap-6" data-animate style="transition-delay: {i * 100}ms">
-            <div class="flex-none select-none pt-0.5">
-              <span class="text-5xl font-black leading-none tracking-tighter text-white/8 transition duration-300 group-hover:text-cyan-400/20 sm:text-6xl"
-                >{step.num}</span
-              >
-            </div>
-            <div class="border-l border-white/8 pl-6 transition-colors duration-300 group-hover:border-cyan-400/20">
-              <h3 class="font-semibold text-white">{step.title}</h3>
-              <p class="mt-2 text-sm leading-relaxed text-slate-400">{step.desc}</p>
-            </div>
-          </div>
-        {/each}
-      </div>
-    </div>
-  </section>
+  <!-- ── ROUTE — from signal to berth ────────────────────────────────── -->
+  <div id="route">
+    <RouteMap />
+  </div>
 
-  <!-- ── CTA BANNER ─────────────────────────────────────────────────── -->
-  <section class="relative overflow-hidden px-4 py-20 sm:px-6 sm:py-32">
-    <div class="pointer-events-none absolute inset-0" aria-hidden="true">
-      <div class="orb-cta"></div>
-      <div
-        class="absolute inset-0"
-        style="background-image: radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px); background-size: 40px 40px;"
-      ></div>
-    </div>
+  <!-- ── AGENCIES — post a role ──────────────────────────────────────── -->
+  <AgencySection {onAgencySignup} />
 
-    <div class="relative z-10 mx-auto max-w-2xl text-center" data-animate>
-      <p class="eyebrow">Set sail</p>
-      <h2 class="mt-3 font-display text-5xl font-light leading-[1.05] text-white sm:text-6xl">
-        Ready to go <em class="italic">offshore?</em>
+  <!-- ── FINAL CTA — calm, single line ───────────────────────────────── -->
+  <section class="finale" data-animate>
+    <div class="finale-inner">
+      <p class="engraved text-radium">All hands</p>
+      <h2 class="finale-title">
+        Your next berth is one
+        <span class="font-hand text-brass">message</span>
+        away.
       </h2>
-      <p class="mx-auto mt-5 max-w-md text-[15px] leading-relaxed text-slate-400">
-        Let CARVER do the legwork. Your next superyacht position is closer than you think.
-      </p>
-      <button
-        onclick={() => onSignIn('cta_bottom')}
-        class="mt-8 inline-flex items-center gap-2 rounded-full bg-ivory px-9 py-3.5 text-[13px] font-semibold text-[#04070b] transition-all duration-200 hover:shadow-[0_0_60px_rgba(243,234,216,0.18)]"
-        style="background: var(--ivory);"
-      >
-        Join the Beta
-        <span class="font-mono text-[10px] uppercase tracking-[0.22em] text-[#04070b]/70">First 100 &middot; discount</span>
-      </button>
-      <p class="mx-auto mt-5 inline-flex items-center gap-2 text-[11px] text-slate-500">
-        <svg class="h-3.5 w-3.5 text-emerald-300/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        No card required &middot; cancel anytime
+      <div class="finale-ctas">
+        <a
+          href={whatsapp.link("Hi Carver — I'd like to start matching to yacht roles.")}
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={() => trackEvent('finale_whatsapp_cta')}
+          class="cta-wa finale-primary"
+        >
+          <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+            <path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/>
+          </svg>
+          Open WhatsApp
+        </a>
+        <span class="finale-or" aria-hidden="true">or</span>
+        <button
+          type="button"
+          onclick={() => onSignIn('finale')}
+          class="cta-ivory finale-secondary"
+        >
+          Use the website
+        </button>
+      </div>
+      <p class="finale-foot">
+        First 100 crew get founders rate · cancel anytime · {whatsapp.configured ? whatsapp.display : 'WhatsApp number live in production'}
       </p>
     </div>
   </section>
 
-  <!-- ── AGENCY STRIP ───────────────────────────────────────────────── -->
-  <section class="border-t border-white/[0.06] px-4 py-12 sm:px-6 sm:py-16">
-    <div
-      class="mx-auto flex max-w-5xl flex-col items-start justify-between gap-6 rounded-2xl border border-white/10 bg-white/[0.025] p-6 sm:flex-row sm:items-center sm:p-8"
-      data-animate
-    >
-      <div class="max-w-xl">
-        <p class="eyebrow">For agencies</p>
-        <h3 class="mt-2 font-display text-3xl font-light text-white sm:text-4xl">
-          Are you a yachting agency?
-        </h3>
-        <p class="mt-3 text-[14px] leading-relaxed text-slate-400">
-          Post jobs straight to qualified crew in seconds. Free to use during beta — no tokens, no fees.
-        </p>
+  <!-- ── FOOTER — the engraved brass plate ──────────────────────────── -->
+  <footer class="foot">
+    <div class="foot-inner">
+      <div class="foot-brand">
+        <span class="brand-pip" aria-hidden="true"></span>
+        <span class="wordmark text-[12px] text-ivory">CARVER</span>
+        <span class="font-display italic text-[12px] text-brass">v3</span>
       </div>
-      <button
-        type="button"
-        onclick={() => onAgencySignup('agency_strip')}
-        class="shrink-0 rounded-full border border-white/20 bg-white/[0.04] px-7 py-3 text-[13px] font-semibold text-white transition-all duration-200 hover:border-white/35 hover:bg-white/[0.08]"
-      >
-        Post a job →
-      </button>
-    </div>
-  </section>
-
-  <!-- ── FOOTER ─────────────────────────────────────────────────────── -->
-  <footer class="border-t border-white/[0.06] px-4 py-8 sm:px-6">
-    <div class="mx-auto flex max-w-7xl flex-col items-center gap-3 text-[11px] text-slate-500 sm:flex-row sm:justify-between">
-      <div class="flex items-center gap-2">
-        <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
-        <span class="font-display tracking-[0.42em] text-slate-300">CARVER</span>
+      <p class="foot-tag font-hand text-brass text-lg">For the crew, by the crew.</p>
+      <div class="foot-links">
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/data-deletion">Delete data</a>
       </div>
-      <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
-        <a href="/privacy" class="transition hover:text-slate-300">Privacy</a>
-        <a href="/terms" class="transition hover:text-slate-300">Terms</a>
-        <a href="/data-deletion" class="transition hover:text-slate-300">Delete my data</a>
-      </div>
-      <span>© {new Date().getFullYear()} Carver</span>
+      <p class="foot-meta">
+        © {new Date().getFullYear()} Carver · made on the dock
+      </p>
     </div>
   </footer>
+
+  <!-- Sticky WhatsApp action — shows on every section -->
+  <WhatsAppFab />
 </div>
 
 <style>
-  /* ── Gradient headline ── */
-  .gradient-text {
-    background: linear-gradient(130deg, #22d3ee 0%, #38bdf8 40%, #818cf8 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  .landing {
+    background: var(--bg-base);
+    color: var(--text-primary);
+    overflow-x: hidden;
+    min-height: 100vh;
   }
 
-  /* ── Primary CTA — refined, not neon ── */
-  .cta-primary {
-    background: linear-gradient(135deg, #67e8f9 0%, #38bdf8 55%, #818cf8 100%);
-    box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.4) inset,
-      0 0 0 1px rgba(34, 211, 238, 0.15),
-      0 18px 40px -16px rgba(34, 211, 238, 0.45);
+  /* ── Nav ────────────────────────────────────────────────────────── */
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(14px);
+    background: rgba(4, 7, 11, 0.62);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   }
-  .cta-primary:hover {
-    box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.4) inset,
-      0 0 0 1px rgba(34, 211, 238, 0.25),
-      0 22px 60px -18px rgba(34, 211, 238, 0.55);
-    transform: translateY(-1px);
+  .nav-inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0.85rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  @media (min-width: 768px) { .nav-inner { padding: 1rem 1.5rem; } }
+
+  .nav-brand {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    text-decoration: none;
+  }
+  .brand-pip {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--brass-bright);
+    box-shadow: 0 0 8px rgba(201, 169, 110, 0.55);
+    align-self: center;
+  }
+  .brand-suffix { letter-spacing: -0.02em; }
+
+  .nav-links {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .nav-link {
+    display: none;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    padding: 0.5rem 0.85rem;
+    border-radius: 9999px;
+    text-decoration: none;
+    transition: color 0.18s ease;
+  }
+  .nav-link:hover { color: var(--ivory); }
+  @media (min-width: 768px) { .nav-link { display: inline-flex; } }
+
+  .nav-wa {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.85rem;
+    border-radius: 9999px;
+    background: rgba(37, 211, 102, 0.1);
+    border: 1px solid rgba(37, 211, 102, 0.35);
+    color: #6ee7a8;
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  .nav-wa:hover { background: rgba(37, 211, 102, 0.18); color: #a7f3c4; }
+  .nav-wa svg { width: 13px; height: 13px; }
+
+  .nav-signin {
+    padding: 0.5rem 1rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(243, 234, 216, 0.22);
+    background: rgba(243, 234, 216, 0.04);
+    color: var(--ivory);
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 0.2s ease, border-color 0.2s ease;
+    cursor: pointer;
+  }
+  .nav-signin:hover {
+    background: rgba(243, 234, 216, 0.1);
+    border-color: rgba(243, 234, 216, 0.35);
   }
 
-  /* ── Pulsing line grid — static on mobile for performance ── */
-  .grid-bg {
-    background-image:
-      linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
-    background-size: 60px 60px;
-    animation: grid-pulse 5s ease-in-out infinite;
+  /* ── Hero ───────────────────────────────────────────────────────── */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-base);
+    padding-bottom: 0;
   }
-  @media (max-width: 768px) {
-    .grid-bg { animation: none; opacity: 0.6; }
-  }
-  @keyframes grid-pulse {
-    0%, 100% { opacity: 0.5; }
-    50% { opacity: 1; }
-  }
-
-  /* ── Floating particles — hidden on mobile ── */
-  .particle {
+  .hero-bg {
     position: absolute;
-    border-radius: 50%;
-    background: rgba(34, 211, 238, var(--op, 0.2));
-    animation: float-up linear infinite;
-  }
-  @media (max-width: 768px) {
-    .particle { display: none; }
-  }
-  @keyframes float-up {
-    0% {
-      transform: translateY(0) translateX(0);
-      opacity: 0;
-    }
-    10% {
-      opacity: var(--op, 0.2);
-    }
-    80% {
-      opacity: var(--op, 0.2);
-    }
-    100% {
-      transform: translateY(-120vh) translateX(20px);
-      opacity: 0;
-    }
-  }
-
-  /* ── Horizontal scan line — off on mobile ── */
-  .scan-line {
-    position: absolute;
-    top: -2px;
-    left: 0;
-    width: 100%;
-    height: 1px;
-    background: linear-gradient(90deg, transparent 0%, rgba(34, 211, 238, 0.3) 30%, rgba(34, 211, 238, 0.3) 70%, transparent 100%);
-    animation: scan 14s linear infinite;
+    inset: 0;
     pointer-events: none;
   }
-  @media (max-width: 768px) {
-    .scan-line { display: none; }
-  }
-  @keyframes scan {
-    0% { top: -2px; opacity: 0; }
-    5% { opacity: 1; }
-    95% { opacity: 1; }
-    100% { top: 100%; opacity: 0; }
-  }
-
-  /* ── Animated background orbs — lighter blur on mobile ── */
-  .orb {
+  .hero-grid {
     position: absolute;
-    border-radius: 50%;
-    filter: blur(100px);
-    animation: float 10s ease-in-out infinite;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black, transparent 80%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black, transparent 80%);
   }
-  @media (max-width: 768px) {
-    .orb { filter: blur(36px); animation: none; }
-    .orb-4,
-    .orb-5 { display: none; }
-  }
-  .orb-1 {
-    width: 700px;
-    height: 700px;
-    background: radial-gradient(circle, rgba(34, 211, 238, 0.14) 0%, transparent 65%);
-    top: -180px;
-    left: -150px;
-    animation-delay: 0s;
-  }
-  .orb-2 {
-    width: 500px;
-    height: 500px;
-    background: radial-gradient(circle, rgba(14, 165, 233, 0.1) 0%, transparent 65%);
-    bottom: -80px;
-    right: -80px;
-    animation-delay: -4s;
-    animation-direction: reverse;
-  }
-  .orb-3 {
-    width: 350px;
-    height: 350px;
-    background: radial-gradient(circle, rgba(129, 140, 248, 0.08) 0%, transparent 65%);
-    top: 45%;
-    left: 55%;
-    animation-delay: -7s;
-  }
-  .orb-4 {
-    width: 600px;
-    height: 300px;
-    background: radial-gradient(ellipse, rgba(99, 102, 241, 0.1) 0%, transparent 65%);
-    bottom: -60px;
-    left: -100px;
-    animation-delay: -3s;
-    animation-direction: reverse;
-    filter: blur(80px);
-  }
-  .orb-5 {
-    width: 280px;
-    height: 280px;
-    background: radial-gradient(circle, rgba(34, 211, 238, 0.09) 0%, transparent 65%);
-    top: 10%;
-    right: 5%;
-    animation-delay: -11s;
-    filter: blur(70px);
-  }
-  .orb-cta {
+  .hero-glow {
     position: absolute;
     width: 900px;
-    height: 450px;
-    background: radial-gradient(ellipse, rgba(34, 211, 238, 0.07) 0%, transparent 55%);
-    top: 50%;
-    left: 50%;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    filter: blur(60px);
-  }
-  @media (max-width: 768px) {
-    .orb-cta { filter: blur(30px); }
-  }
-  @keyframes float {
-    0%,
-    100% {
-      transform: translate(0, 0) scale(1);
-    }
-    33% {
-      transform: translate(40px, -30px) scale(1.06);
-    }
-    66% {
-      transform: translate(-25px, 20px) scale(0.94);
-    }
-  }
-
-  /* ── Ticker / marquee ── */
-  .ticker-mask {
-    overflow: hidden;
-    mask-image: linear-gradient(90deg, transparent 0%, black 12%, black 88%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 12%, black 88%, transparent 100%);
-  }
-  .ticker {
-    display: flex;
-    width: max-content;
-    animation: ticker 22s linear infinite;
-  }
-  @media (max-width: 768px) {
-    .ticker { animation: none; }
-  }
-  .ticker-item {
-    padding: 0.3rem 1.25rem;
-    margin: 0 0.2rem;
-    border-radius: 9999px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    background: rgba(255, 255, 255, 0.025);
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 0.7rem;
-    letter-spacing: 0.05em;
-    white-space: nowrap;
-  }
-  @keyframes ticker {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(-50%);
-    }
-  }
-
-  /* Matching section glow — reduced blur on mobile */
-  .matching-bg-glow {
-    left: 50%;
-    top: 50%;
     height: 600px;
-    width: 800px;
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    background: rgba(34, 211, 238, 0.05);
-    filter: blur(100px);
+    top: -180px;
+    right: -200px;
+    background: radial-gradient(closest-side, rgba(201, 169, 110, 0.08), transparent 70%);
+    filter: blur(40px);
   }
-  @media (max-width: 768px) {
-    .matching-bg-glow { filter: blur(30px); height: 300px; width: 300px; }
-  }
-
-  /* ── Match demo orb pulse ── */
-  @keyframes match-orb-pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.6; transform: scale(1.1); }
+  @media (max-width: 900px) {
+    .hero-glow { width: 500px; height: 400px; right: -100px; filter: blur(28px); }
   }
 
-  .match-demo {
-    transition: border-color 0.3s, box-shadow 0.3s;
+  .hero-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 4rem;
   }
-  @media (max-width: 768px) {
-    .match-demo-orb { filter: blur(16px) !important; animation: none !important; }
+  @media (min-width: 768px) { .hero-inner { padding: 2.5rem 1.5rem 6rem; } }
+
+  /* Status strip */
+  .hero-status {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0.6rem 0.5rem;
+    border-bottom: 1px dashed rgba(201, 169, 110, 0.18);
+    flex-wrap: wrap;
   }
-  .match-demo:hover {
-    border-color: rgba(34, 211, 238, 0.35);
-    box-shadow: 0 24px 80px -20px rgba(34, 211, 238, 0.15);
+  .hero-status-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--radium);
+    box-shadow: 0 0 0 3px rgba(141, 240, 196, 0.18);
+    animation: pip 2s ease-in-out infinite;
+  }
+  @keyframes pip {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
   }
 
-  /* ── Scroll-reveal animations ── */
+  /* Two-column layout */
+  .hero-grid-cols {
+    margin-top: 2.5rem;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+    align-items: start;
+  }
+  @media (min-width: 1024px) {
+    .hero-grid-cols {
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 4rem;
+      margin-top: 3.5rem;
+      align-items: center;
+    }
+  }
+
+  /* Title — calm, editorial, no excess gradient */
+  .hero-title {
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 100, "opsz" 144;
+    font-weight: 300;
+    color: var(--ivory);
+    font-size: clamp(2.6rem, 7.2vw, 5.5rem);
+    line-height: 0.98;
+    letter-spacing: -0.028em;
+    margin: 0;
+  }
+  .hero-title-line { display: block; }
+  .hero-title-mark {
+    display: inline-block;
+    padding: 0 0.18em 0.05em;
+    background: rgba(201, 169, 110, 0.08);
+    border: 1px solid rgba(201, 169, 110, 0.32);
+    border-radius: 0.4rem;
+    font-style: italic;
+    color: var(--brass-bright);
+    text-shadow: 0 0 24px rgba(201, 169, 110, 0.35);
+  }
+  .hero-title-hand {
+    font-size: 0.7em;
+    font-weight: 600;
+    margin-right: 0.25em;
+    vertical-align: 0.15em;
+  }
+
+  .hero-lede {
+    margin: 1.85rem 0 0;
+    max-width: 36rem;
+    font-size: 1.05rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+  }
+  .hero-lede strong {
+    font-weight: 500;
+    color: var(--ivory);
+  }
+
+  /* CTAs */
+  .hero-ctas {
+    margin-top: 2.4rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+  }
+  .hero-cta-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.95rem 1.35rem;
+    border-radius: 9999px;
+    font-size: 13.5px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .hero-cta-primary svg { width: 16px; height: 16px; }
+  .hero-cta-meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    opacity: 0.7;
+    margin-left: 0.35rem;
+    padding-left: 0.65rem;
+    border-left: 1px solid rgba(0, 0, 0, 0.18);
+  }
+  .hero-cta-or,
+  .finale-or {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    padding: 0 0.25rem;
+    align-self: center;
+  }
+  .hero-cta-secondary {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.95rem 1.35rem;
+    border-radius: 9999px;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+
+  /* Trust pips */
+  .hero-trust {
+    list-style: none;
+    margin: 2.5rem 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.9rem;
+    max-width: 30rem;
+  }
+  @media (min-width: 540px) {
+    .hero-trust { grid-template-columns: 1fr; gap: 0.8rem; }
+  }
+  .hero-trust li {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+  }
+  .hero-trust p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+  }
+  .hero-trust svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* Right column — chat */
+  .hero-chat {
+    position: relative;
+  }
+  .hero-chat-tag {
+    margin: 0 0 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(141, 240, 196, 0.25);
+    background: rgba(141, 240, 196, 0.05);
+    color: var(--radium);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+  .hero-chat-tag-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--radium);
+    box-shadow: 0 0 0 3px rgba(141, 240, 196, 0.18);
+    animation: pip 2s ease-in-out infinite;
+  }
+  .hero-chat-foot {
+    margin: 0.85rem 0 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+  .hero-chat-link {
+    color: var(--radium);
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(141, 240, 196, 0.4);
+  }
+  .hero-chat-link:hover { color: #b9f5d6; border-bottom-color: rgba(141, 240, 196, 0.7); }
+
+  /* Ticker — sits flush against the bridge for handoff weight */
+  .hero-ticker { margin-top: 4rem; }
+  @media (min-width: 768px) { .hero-ticker { margin-top: 5rem; } }
+
+  /* ── Final CTA ────────────────────────────────────────────────── */
+  .finale {
+    position: relative;
+    padding: 7rem 1rem 8rem;
+    text-align: center;
+    background:
+      radial-gradient(70% 60% at 50% 50%, rgba(201, 169, 110, 0.06), transparent 70%),
+      var(--bg-base);
+    overflow: hidden;
+  }
+  @media (min-width: 768px) { .finale { padding: 9rem 1.5rem 10rem; } }
+  .finale::before, .finale::after {
+    content: "";
+    position: absolute;
+    height: 1px;
+    left: 10%;
+    right: 10%;
+    background-image: linear-gradient(
+      90deg, transparent, rgba(201, 169, 110, 0.5), transparent
+    );
+  }
+  .finale::before { top: 0; }
+  .finale::after  { bottom: 0; }
+
+  .finale-inner { max-width: 760px; margin: 0 auto; }
+  .finale-title {
+    margin: 1.25rem 0 0;
+    font-family: var(--font-serif);
+    font-weight: 300;
+    color: var(--ivory);
+    font-size: clamp(2.4rem, 5.8vw, 4.4rem);
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+  }
+  .finale-ctas {
+    margin-top: 2.5rem;
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.85rem;
+  }
+  .finale-primary,
+  .finale-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 1rem 1.6rem;
+    border-radius: 9999px;
+    font-size: 13.5px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .finale-primary svg { width: 16px; height: 16px; }
+  .finale-foot {
+    margin-top: 1.75rem;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.06em;
+  }
+
+  /* ── Footer ───────────────────────────────────────────────────── */
+  .foot {
+    background: var(--bg-bridge);
+    border-top: 1px solid rgba(201, 169, 110, 0.18);
+    padding: 2.5rem 1rem 3rem;
+  }
+  .foot-inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+    align-items: center;
+    justify-items: center;
+    text-align: center;
+  }
+  @media (min-width: 768px) {
+    .foot-inner {
+      grid-template-columns: auto 1fr auto auto;
+      gap: 2rem;
+      justify-items: start;
+      text-align: left;
+    }
+  }
+  .foot-brand {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.55rem;
+  }
+  .foot-tag {
+    color: var(--brass);
+  }
+  .foot-links {
+    display: inline-flex;
+    gap: 1.25rem;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .foot-links a {
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.18s ease;
+  }
+  .foot-links a:hover { color: var(--ivory); }
+  .foot-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.06em;
+    margin: 0;
+  }
+
+  /* ── Reveal-on-scroll ─────────────────────────────────────────── */
   [data-animate] {
     opacity: 0;
-    transform: translateY(24px);
-    transition:
-      opacity 0.65s ease,
-      transform 0.65s ease;
+    transform: translateY(20px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
   }
   :global([data-animate][data-visible='true']) {
     opacity: 1;
     transform: translateY(0);
-  }
-
-  /* Feature cards: also animate-on-scroll, plus hover effects */
-  .feature-card {
-    opacity: 0;
-    transform: translateY(24px);
-    transition:
-      opacity 0.55s ease,
-      transform 0.55s ease,
-      border-color 0.3s,
-      box-shadow 0.3s,
-      translate 0.2s;
-  }
-  :global(.feature-card[data-visible='true']) {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  .feature-card:hover {
-    border-color: rgba(34, 211, 238, 0.25);
-    box-shadow: 0 24px 60px -20px rgba(34, 211, 238, 0.25);
-    translate: 0 -3px;
-  }
-  @media (max-width: 768px), (pointer: coarse) {
-    .feature-card:hover {
-      border-color: rgba(255, 255, 255, 0.08);
-      box-shadow: none;
-      translate: 0;
-    }
-    .match-demo:hover {
-      border-color: rgba(34, 211, 238, 0.2);
-      box-shadow: none;
-    }
-  }
-
-  /* SVG icons in feature cards */
-  :global(.feature-card svg) {
-    width: 1.2rem;
-    height: 1.2rem;
   }
 </style>

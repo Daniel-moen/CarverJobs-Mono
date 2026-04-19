@@ -8,22 +8,38 @@
 :root {
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-serif: "Fraunces", "Cormorant Garamond", ui-serif, Georgia, serif;
-  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-mono: "DM Mono", "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-hand: "Caveat", "Bradley Hand", "Brush Script MT", cursive;
 
-  /* Neutral surface ladder — slightly cool near-black, never pure #000 in panels */
+  /* Neutral surface ladder — deep ink, never pure #000 in panels */
   --bg-base: #04070b;
   --bg-surface: #0a0e14;
   --bg-elevated: #10151c;
+  --bg-bridge: #060a0f;
   --border-soft: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
 
-  /* Accent — a more refined ocean teal, less neon than pure cyan */
+  /* Bridge instruments — antique brass that glows under deck lighting */
+  --brass: #c9a96e;
+  --brass-bright: #e6c98c;
+  --brass-deep: #8a7245;
+  --brass-glow: rgba(201, 169, 110, 0.22);
+
+  /* Glowing radium-green — old marine compass needle, not WhatsApp green */
+  --radium: #8df0c4;
+  --radium-deep: #34d39c;
+
+  /* WhatsApp brand green — only used in chat UI */
+  --wa-green: #25d366;
+  --wa-green-deep: #1ebd5d;
+
+  /* Subtle teal highlight, replaces neon cyan everywhere we don't need WhatsApp */
   --accent: #67e8f9;
   --accent-strong: #22d3ee;
   --accent-deep: #0891b2;
   --accent-glow: rgba(34, 211, 238, 0.18);
 
-  /* Warm ivory highlight — a touch of brass to feel premium, not "AI startup" */
+  /* Warm ivory highlight — parchment, paper, charts */
   --ivory: #f3ead8;
   --ivory-soft: rgba(243, 234, 216, 0.72);
 
@@ -116,6 +132,318 @@ body {
     transparent 100%
   );
   height: 1px;
+}
+
+/* Editorial serif accent — warm italic emphasis, used in display headlines.
+   Replaces the more generic neon gradient text for a calmer, more trustworthy feel. */
+.serif-accent {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-variation-settings: "SOFT" 100, "opsz" 144;
+  color: var(--ivory);
+  position: relative;
+  background: linear-gradient(180deg, #f7eed9 0%, #d8c69a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Premium ivory CTA — the most trust-forward primary action.
+   Warm ivory, a hairline brass border, deep diffuse shadow. */
+.cta-ivory {
+  color: #06090d;
+  background: linear-gradient(180deg, #fbf3df 0%, #ead7a7 100%);
+  border: 1px solid rgba(216, 198, 154, 0.55);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.55) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 16px 40px -18px rgba(216, 198, 154, 0.45);
+  transition: transform 0.2s ease, box-shadow 0.25s ease, filter 0.2s ease;
+}
+.cta-ivory:hover {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 22px 60px -18px rgba(216, 198, 154, 0.55);
+}
+
+/* Trust seal — small ivory disc used to anchor compliance signals.
+   Communicates "stamped, audited, real" rather than generic "secure" copy. */
+.trust-seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 30% 30%, rgba(243, 234, 216, 0.18), rgba(243, 234, 216, 0.04) 70%);
+  border: 1px solid rgba(243, 234, 216, 0.22);
+  color: var(--ivory);
+}
+
+/* Soft elevated card surface — used for premium content panels. */
+.panel-elevated {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(103, 232, 249, 0.04), transparent 55%),
+    radial-gradient(120% 80% at 100% 100%, rgba(243, 234, 216, 0.03), transparent 55%),
+    linear-gradient(180deg, #0c1117 0%, #080c11 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 30px 80px -40px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Bridge / instrument utilities ─────────────────────────────────────── */
+
+.text-brass {
+  color: var(--brass);
+}
+.text-radium {
+  color: var(--radium);
+}
+
+/* Handwritten captain's-log accent. */
+.font-hand {
+  font-family: var(--font-hand);
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+/* Brass-cornered instrument card — rivet-and-rule frame. */
+.instrument {
+  position: relative;
+  background:
+    radial-gradient(80% 60% at 50% 0%, rgba(201, 169, 110, 0.06), transparent 70%),
+    linear-gradient(180deg, #0a1015 0%, #050a0e 100%);
+  border: 1px solid rgba(201, 169, 110, 0.18);
+  border-radius: 0.75rem;
+  box-shadow:
+    inset 0 1px 0 rgba(201, 169, 110, 0.08),
+    inset 0 0 30px -10px rgba(201, 169, 110, 0.05),
+    0 30px 60px -40px rgba(0, 0, 0, 0.7);
+}
+.instrument::before,
+.instrument::after {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--brass-deep);
+  opacity: 0.6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.instrument::before {
+  top: 8px;
+  left: 8px;
+}
+.instrument::after {
+  top: 8px;
+  right: 8px;
+}
+
+/* Engraved label inside instrument cards — etched brass plate vibe. */
+.engraved {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brass);
+  opacity: 0.75;
+}
+
+/* Big bridge readouts — large brass digits like a Bloomberg terminal. */
+.readout {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--brass-bright);
+  text-shadow: 0 0 18px rgba(201, 169, 110, 0.35);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* WhatsApp chat bubble — incoming (carver). */
+.bubble-bot {
+  background: #1f2a30;
+  color: #e9edef;
+  border-radius: 14px 14px 14px 4px;
+  padding: 0.55rem 0.75rem 0.45rem;
+  font-size: 0.86rem;
+  line-height: 1.42;
+  max-width: 84%;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  position: relative;
+}
+.bubble-bot strong {
+  color: var(--ivory);
+}
+/* Outgoing — user. WhatsApp dark uses #005c4b */
+.bubble-me {
+  background: #005c4b;
+  color: #e9edef;
+  border-radius: 14px 14px 4px 14px;
+  padding: 0.55rem 0.75rem 0.45rem;
+  font-size: 0.86rem;
+  line-height: 1.42;
+  max-width: 80%;
+  margin-left: auto;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+.bubble-time {
+  font-size: 0.62rem;
+  opacity: 0.65;
+  margin-left: 0.4rem;
+}
+.bubble-tick {
+  color: #53bdeb;
+  font-size: 0.7rem;
+  margin-left: 0.25rem;
+  letter-spacing: -0.05em;
+}
+
+/* The chat surface — a dark WhatsApp-style background with a faint paper grain. */
+.chat-surface {
+  background:
+    radial-gradient(60% 80% at 50% 0%, rgba(255, 255, 255, 0.025), transparent 60%),
+    linear-gradient(180deg, #0a141a 0%, #060d12 100%);
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 12px 12px;
+}
+
+/* Typing dots — used inside a bot bubble while it "thinks". */
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.15rem 0.1rem;
+}
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(233, 237, 239, 0.55);
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Caret used while a message is "being typed". */
+.caret-blink::after {
+  content: "▍";
+  margin-left: 1px;
+  color: rgba(255, 255, 255, 0.5);
+  animation: caret 1s steps(1) infinite;
+}
+@keyframes caret {
+  50% { opacity: 0; }
+}
+
+/* Slim ticker rule — dotted brass line used to separate fleet ticker from hero. */
+.brass-rule {
+  height: 1px;
+  background-image:
+    linear-gradient(90deg,
+      transparent 0%,
+      rgba(201, 169, 110, 0.35) 18%,
+      rgba(201, 169, 110, 0.35) 82%,
+      transparent 100%);
+}
+
+/* Compass needle — used by the bridge instrument. */
+.needle-spin {
+  animation: needle 14s linear infinite;
+  transform-origin: center;
+}
+@keyframes needle {
+  0%   { transform: rotate(-12deg); }
+  25%  { transform: rotate(38deg); }
+  50%  { transform: rotate(-22deg); }
+  75%  { transform: rotate(54deg); }
+  100% { transform: rotate(-12deg); }
+}
+
+/* Marquee — endless horizontal scroll for the fleet ticker. */
+.marquee {
+  display: flex;
+  gap: 3rem;
+  white-space: nowrap;
+  animation: marquee 60s linear infinite;
+  width: max-content;
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Sweeping radar arc — used in the bridge "live" panel. */
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.radar-sweep {
+  animation: radar-sweep 6s linear infinite;
+  transform-origin: center;
+}
+
+/* Brass focus ring used by primary maritime CTAs. */
+.focus-brass:focus-visible {
+  outline: 2px solid var(--brass-bright);
+  outline-offset: 3px;
+}
+
+/* CTA — antique brass, paired with cta-ivory. */
+.cta-brass {
+  color: #1a1206;
+  background: linear-gradient(180deg, #f0d59a 0%, #b48a4d 100%);
+  border: 1px solid rgba(180, 138, 77, 0.7);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 16px 40px -18px rgba(180, 138, 77, 0.5);
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+.cta-brass:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+/* WhatsApp green CTA — used on the conversation entry points. */
+.cta-wa {
+  color: #06170d;
+  background: linear-gradient(180deg, #2cd86c 0%, #16a653 100%);
+  border: 1px solid rgba(22, 166, 83, 0.7);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 16px 40px -18px rgba(37, 211, 102, 0.45);
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+.cta-wa:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+  /* Slow, low-cost loops on mobile rather than killing them entirely. */
+  .needle-spin {
+    animation-duration: 24s !important;
+  }
+  .radar-sweep {
+    animation-duration: 10s !important;
+  }
+  .marquee {
+    animation-duration: 90s !important;
+  }
 }
 
 /* ── Mobile niceties ───────────────────────────────────────────────────── */

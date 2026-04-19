@@ -44,15 +44,16 @@
       <a
         href="/"
         onclick={(e) => { e.preventDefault(); navigate('auto-apply') }}
-        class="group flex items-center justify-center gap-2.5 select-none"
+        class="group flex items-center justify-center gap-3 select-none"
         aria-label="Carver home"
       >
         <span class="relative flex h-2 w-2 items-center justify-center">
           <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400/50 opacity-60"></span>
           <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
         </span>
-        <span class="font-display text-[15px] tracking-[0.42em] text-ivory transition group-hover:text-white">
-          CARVER
+        <span class="flex items-baseline gap-1.5">
+          <span class="wordmark text-[14px] text-ivory transition group-hover:text-white">CARVER</span>
+          <span class="font-display text-[12px] italic text-cyan-200/60 transition group-hover:text-cyan-100/80">v3</span>
         </span>
       </a>
 
@@ -98,11 +99,14 @@
       <a
         href="/"
         onclick={(e) => { e.preventDefault(); navigate('auto-apply') }}
-        class="flex items-center gap-2"
+        class="flex items-center gap-2.5"
         aria-label="Carver home"
       >
         <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300"></span>
-        <span class="font-display text-[14px] tracking-[0.38em] text-ivory">CARVER</span>
+        <span class="flex items-baseline gap-1.5">
+          <span class="wordmark text-[13px] text-ivory">CARVER</span>
+          <span class="font-display text-[11px] italic text-cyan-200/60">v3</span>
+        </span>
       </a>
 
       {#if onLogout}

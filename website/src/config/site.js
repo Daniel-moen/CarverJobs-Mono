@@ -4,6 +4,36 @@ export const supportEmail =
     ? String(import.meta.env.VITE_SUPPORT_EMAIL)
     : 'support@example.com'
 
+/**
+ * WhatsApp control channel. Crew can run every Carver function over text:
+ * `match`, `apply <n>`, `jobs <role>`, `status`, `cv`, `pause`, etc.
+ *
+ * Override VITE_WHATSAPP_NUMBER in production with the live business number
+ * in E.164 format **without** the leading `+` (e.g. 447000000000).
+ * The placeholder below renders the UI but `wa.me/` links won't open until
+ * you swap it for the real number — keep it short to make it obvious.
+ */
+const _waRaw = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WHATSAPP_NUMBER)
+  ? String(import.meta.env.VITE_WHATSAPP_NUMBER).replace(/[^0-9]/g, '')
+  : '447000000000'
+
+export const whatsapp = {
+  /** E.164 digits, no plus. Used to build wa.me/ links. */
+  number: _waRaw,
+  /** Pretty display (e.g. "+44 7000 000000"). */
+  display: _waRaw
+    ? '+' + _waRaw.replace(/^(\d{1,3})(\d{3,4})(\d+)$/, '$1 $2 $3')
+    : '',
+  /** Build a wa.me link with an optional pre-filled message. */
+  link(message = '') {
+    const base = `https://wa.me/${_waRaw}`
+    if (!message) return base
+    return `${base}?text=${encodeURIComponent(message)}`
+  },
+  /** True only when a real number is configured (not the obvious placeholder). */
+  configured: _waRaw !== '447000000000' && _waRaw.length >= 8,
+}
+
 export const site = {
   name: 'CARVER v3',
   tagline: 'Automated superyacht job applications.',
