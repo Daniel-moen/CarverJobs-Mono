@@ -288,6 +288,13 @@ def get_session(session: dict | None = Depends(optional_session), db: Session = 
     .filter(models.User.email == user_key)
     .scalar()
   ) if user_key else False
+  agency_name = None
+  if session.get("role") == "agency" and user_key:
+    agency_name = (
+      db.query(models.User.agency_name)
+      .filter(models.User.email == user_key)
+      .scalar()
+    )
   return {
     "ok": True,
     "authenticated": True,
@@ -296,5 +303,6 @@ def get_session(session: dict | None = Depends(optional_session), db: Session = 
       "is_subscribed": is_subscribed,
       "early_bird": early_bird,
       "credits_balance": credits_balance,
+      "agency_name": agency_name,
     },
   }

@@ -10,13 +10,11 @@ export const site = {
   description:
     'CARVER helps crew discover, match, and auto-apply to superyacht opportunities with a streamlined workflow.',
   nav: [
-    { key: 'auto-apply', label: 'Auto Apply', hideForAgency: true },
+    { key: 'auto-apply', label: 'Auto Apply' },
     { key: 'job-board', label: 'Job Board' },
-    { key: 'profile', label: 'Profile', hideForAgency: true },
-    { key: 'status', label: 'Status', hideForAgency: true },
-    { key: 'subscription', label: 'Buy Tokens', hideForAgency: true },
-    { key: 'agency-dashboard', label: 'My Jobs', agencyOnly: true },
-    { key: 'agency-submit', label: 'Post a Job', agencyOnly: true },
+    { key: 'profile', label: 'Profile' },
+    { key: 'status', label: 'Status' },
+    { key: 'subscription', label: 'Buy Tokens' },
     { key: 'dashboard', label: 'Dashboard', adminOnly: true },
     { key: 'admin-job-ingest', label: 'Job Ingest', adminOnly: true },
   ],

@@ -17,8 +17,7 @@
   import LaunchSignupPage from './components/pages/LaunchSignupPage.svelte'
   import SignUpPage from './components/pages/SignUpPage.svelte'
   import AdminJobIngestPage from './components/pages/AdminJobIngestPage.svelte'
-  import AgencySubmitJobPage from './components/pages/AgencySubmitJobPage.svelte'
-  import AgencyDashboardPage from './components/pages/AgencyDashboardPage.svelte'
+  import AgencyShell from './components/layout/AgencyShell.svelte'
   import PrivacyPolicyPage from './components/pages/PrivacyPolicyPage.svelte'
   import TermsOfServicePage from './components/pages/TermsOfServicePage.svelte'
   import DataDeletionPage from './components/pages/DataDeletionPage.svelte'
@@ -38,8 +37,6 @@
     '/status':       'status',
     '/dashboard':    'dashboard',
     '/dashboard/job-ingest': 'admin-job-ingest',
-    '/agency':        'agency-dashboard',
-    '/agency/submit': 'agency-submit',
     '/subscription': 'subscription',
     '/privacy':      'privacy',
     '/terms':        'terms',
@@ -94,22 +91,9 @@
     if (currentPage === 'admin-job-ingest' && userRole !== 'admin') {
       currentPage = 'auto-apply'
       history.replaceState({ page: 'auto-apply' }, '', '/')
-      return
     }
-    const agencyOnly = currentPage === 'agency-dashboard' || currentPage === 'agency-submit'
-    if (agencyOnly && userRole !== 'agency' && userRole !== 'admin') {
-      currentPage = 'auto-apply'
-      history.replaceState({ page: 'auto-apply' }, '', '/')
-      return
-    }
-    // Agencies don't use crew-facing pages — bounce them to their dashboard.
-    if (userRole === 'agency') {
-      const crewOnly = ['auto-apply', 'profile', 'subscription', 'status', 'match-session']
-      if (crewOnly.includes(currentPage)) {
-        currentPage = 'agency-dashboard'
-        history.replaceState({ page: 'agency-dashboard' }, '', '/agency')
-      }
-    }
+    // Agency role is handled by AgencyShell — App.svelte never renders
+    // crew pages for agencies, so no extra bouncing is needed here.
   }
 
   const SITE_LAUNCHED = String(import.meta.env.VITE_SITE_LAUNCHED ?? 'true').toLowerCase() === 'true'
@@ -122,6 +106,7 @@
   let isAuthenticated = false
   let hasActiveSession = false
   let userRole = ''
+  let agencyName = ''
   let isSubscribed = false
   let creditsBalance = 0
   let showOnboarding = false
@@ -151,6 +136,7 @@
     isAuthenticated = false
     hasActiveSession = false
     userRole = ''
+    agencyName = ''
     isSubscribed = false
     creditsBalance = 0
     showOnboarding = false
@@ -210,8 +196,6 @@
     status: StatusPage,
     dashboard: DashboardPage,
     'admin-job-ingest': AdminJobIngestPage,
-    'agency-dashboard': AgencyDashboardPage,
-    'agency-submit': AgencySubmitJobPage,
     subscription: SubscriptionPage,
   }
 
@@ -247,28 +231,32 @@
       if (isAuthenticated) {
         hasActiveSession = true
         userRole = data?.session?.role ?? ''
+        agencyName = String(data?.session?.agency_name ?? '')
         isSubscribed = Boolean(data?.session?.is_subscribed)
         creditsBalance = Number(data?.session?.credits_balance ?? 0)
-        // Keep the page that matches the current URL; don't override with a default.
-        currentPage = pageFromPath(window.location.pathname)
-        enforceRoleAccess()
         if (userRole === 'agency') {
-          // Agencies skip crew onboarding/docs reminders entirely.
+          // Agency users get a fully separate shell — no crew page resolution,
+          // no onboarding, no docs reminders.
           showOnboarding = false
           showDocsReminder = false
           return
         }
+        // Keep the page that matches the current URL; don't override with a default.
+        currentPage = pageFromPath(window.location.pathname)
+        enforceRoleAccess()
         showOnboarding = checkOnboardingNeeded()
         if (!showOnboarding) showDocsReminder = checkDocsReminder()
       } else {
         hasActiveSession = false
         userRole = ''
+        agencyName = ''
         isSubscribed = false
         creditsBalance = 0
       }
     } catch (error) {
       isAuthenticated = false
       userRole = ''
+      agencyName = ''
       isSubscribed = false
       creditsBalance = 0
     } finally {
@@ -318,6 +306,11 @@
       loginPassword = ''
       await checkSession()
       trackFunnel('login_success', { label: 'password' })
+      if (userRole === 'agency') {
+        showLogin = false
+        history.replaceState({}, '', '/agency')
+        return
+      }
       showOnboarding = checkOnboardingNeeded()
       if (!showOnboarding) showDocsReminder = checkDocsReminder()
     } catch {
@@ -344,6 +337,11 @@
       }
       await checkSession()
       trackFunnel('login_success', { label: 'google' })
+      if (userRole === 'agency') {
+        showLogin = false
+        history.replaceState({}, '', '/agency')
+        return
+      }
       showOnboarding = checkOnboardingNeeded()
       if (!showOnboarding) showDocsReminder = checkDocsReminder()
     } catch {
@@ -414,6 +412,7 @@
     isAuthenticated = false
     hasActiveSession = false
     userRole = ''
+    agencyName = ''
     isSubscribed = false
     creditsBalance = 0
     authError = ''
@@ -453,6 +452,8 @@
         trackPageView('launch-signup')
         return
       }
+      // Agency users own their own routing inside AgencyShell.
+      if (isAuthenticated && userRole === 'agency') return
       publicSlug = extractCrewSlug(window.location.pathname)
       waToken = extractWaToken(window.location.pathname)
       matchSessionId = extractMatchSessionId(window.location.pathname)
@@ -542,8 +543,7 @@
         if (result?.intent === 'agency') {
           showOnboarding = false
           showDocsReminder = false
-          currentPage = 'agency-dashboard'
-          history.replaceState({ page: 'agency-dashboard' }, '', '/agency')
+          history.replaceState({}, '', '/agency')
           return
         }
         try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
@@ -649,6 +649,8 @@
     </main>
   {:else if showOnboarding}
     <OnboardingFlow onComplete={handleOnboardingComplete} />
+  {:else if isAuthenticated && userRole === 'agency'}
+    <AgencyShell agencyName={agencyName} onLogout={logout} />
   {:else}
     <!-- Global animated app background -->
     <div class="app-bg" aria-hidden="true">
