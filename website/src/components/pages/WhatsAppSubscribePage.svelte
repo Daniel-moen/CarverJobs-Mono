@@ -75,45 +75,67 @@
   }
 </script>
 
-<section class="mx-auto w-full max-w-lg">
+<section class="ws-root" class:visible={mounted}>
   {#if returnStatus === 'success'}
-    <div class="wa-sub-card rounded-2xl border border-emerald-400/22 bg-gradient-to-br from-emerald-950/40 to-zinc-950 p-8 text-center" class:visible={mounted}>
-      <div class="mb-4 text-5xl">🎉</div>
-      <h1 class="text-2xl font-black text-white">Tokens Added!</h1>
-      <p class="mt-3 text-sm text-slate-400">Your payment is being confirmed. Your tokens will appear in your balance shortly.</p>
+    <div class="ws-card ws-card-success">
+      <div class="ws-state-icon ws-state-icon-success" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M8 12.5l3 3 5-6"/>
+        </svg>
+      </div>
+      <p class="ws-eyebrow ws-eyebrow-radium">
+        <span class="ws-pip ws-pip-radium" aria-hidden="true"></span>
+        Payment received
+      </p>
+      <h1 class="ws-title">Tokens added to your account</h1>
+      <p class="ws-body">Your payment is being confirmed. Tokens will appear in your balance within a minute.</p>
       <button
         type="button"
         onclick={() => onNavigate('profile')}
-        class="mt-6 w-full rounded-xl border border-emerald-300/30 bg-emerald-300/10 py-3 text-sm font-bold text-emerald-200 transition hover:bg-emerald-300/20 hover:text-white active:scale-95"
+        class="ws-cta-primary"
       >
-        Go to Profile →
+        Go to profile
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg>
       </button>
-      <p class="mt-3 text-xs text-slate-600">Send any message on WhatsApp to continue.</p>
+      <p class="ws-foot">Send any message on WhatsApp to continue.</p>
     </div>
 
   {:else if returnStatus === 'cancelled'}
-    <div class="wa-sub-card rounded-2xl border border-white/8 bg-zinc-950 p-8 text-center" class:visible={mounted}>
-      <div class="mb-4 text-4xl">↩️</div>
-      <h1 class="text-xl font-bold text-white">Checkout cancelled</h1>
-      <p class="mt-2 text-sm text-slate-400">No charge was made. You can try again whenever you're ready.</p>
+    <div class="ws-card">
+      <div class="ws-state-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 14l-4-4 4-4"/>
+          <path d="M5 10h9a6 6 0 0 1 0 12"/>
+        </svg>
+      </div>
+      <p class="ws-eyebrow">Checkout cancelled</p>
+      <h1 class="ws-title">No charge was made.</h1>
+      <p class="ws-body">You can try again whenever you're ready.</p>
       <button
         type="button"
         onclick={() => (returnStatus = '')}
-        class="mt-6 w-full rounded-xl border border-cyan-300/30 bg-cyan-300/10 py-3 text-sm font-bold text-cyan-100 transition hover:bg-cyan-300/20 hover:text-white active:scale-95"
+        class="ws-cta-primary"
       >
         Try again
       </button>
     </div>
 
   {:else if returnStatus === 'failed'}
-    <div class="wa-sub-card rounded-2xl border border-rose-400/20 bg-rose-950/25 p-8 text-center" class:visible={mounted}>
-      <div class="mb-4 text-4xl">⚠️</div>
-      <h1 class="text-xl font-bold text-white">Payment failed</h1>
-      <p class="mt-2 text-sm text-rose-200">You were not charged. Please try again or use a different payment method.</p>
+    <div class="ws-card ws-card-failed">
+      <div class="ws-state-icon ws-state-icon-garnet" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3L2 21h20L12 3z"/>
+          <path d="M12 10v4M12 17.5v.01"/>
+        </svg>
+      </div>
+      <p class="ws-eyebrow ws-eyebrow-garnet">Payment failed</p>
+      <h1 class="ws-title">You were not charged.</h1>
+      <p class="ws-body">Please try again or use a different payment method.</p>
       <button
         type="button"
         onclick={() => (returnStatus = '')}
-        class="mt-6 w-full rounded-xl border border-cyan-300/30 bg-cyan-300/10 py-3 text-sm font-bold text-cyan-100 transition hover:bg-cyan-300/20 hover:text-white active:scale-95"
+        class="ws-cta-primary"
       >
         Try again
       </button>
@@ -121,89 +143,430 @@
 
   {:else}
     <!-- Main buy-tokens card -->
-    <div
-      class="wa-sub-card relative overflow-hidden rounded-2xl border border-cyan-400/22 bg-gradient-to-br from-sky-950/60 via-indigo-950/50 to-fuchsia-950/40 p-8"
-      class:visible={mounted}
-    >
-      <div class="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-cyan-400/12 blur-3xl" style="animation: waPulse 4s ease-in-out infinite;"></div>
-      <div class="pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full bg-fuchsia-400/10 blur-3xl" style="animation: waPulse 4s ease-in-out infinite; animation-delay:-2s;"></div>
+    <div class="ws-card ws-card-main">
+      <div class="ws-glow" aria-hidden="true"></div>
 
-      <div class="relative z-10">
-        <div class="text-center">
-          <span class="inline-block rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-200">
-            CARVER Tokens
-          </span>
-          <h1 class="mt-4 text-3xl font-black tracking-tight text-white">
-            Buy Tokens
-          </h1>
-          <p class="mt-2 text-sm text-slate-400">
-            {formatPrice(tokenPrice)} per token · Buy tokens anytime
-          </p>
-
-          <!-- Balance -->
-          <div class="mx-auto mt-4 inline-flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-4 py-2">
-            <span class="text-xs text-slate-500">Balance:</span>
-            <span class="text-lg font-black text-white">{balance}</span>
-            <span class="text-xs text-slate-500">{balance === 1 ? 'token' : 'tokens'}</span>
-          </div>
-        </div>
-
-        {#if checkoutError}
-          <div class="mt-5 rounded-xl border border-rose-400/20 bg-rose-950/30 px-4 py-3 text-sm text-rose-300">
-            {checkoutError}
-          </div>
-        {/if}
-
-        <div class="mt-6 space-y-3">
-          {#each packages as pkg, i}
-            {@const isPopular = i === 1}
-            <button
-              type="button"
-              onclick={() => startCheckout(pkg.tokens)}
-              disabled={isLoading !== null}
-              class="w-full rounded-xl border py-4 text-left transition-all active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60 {isPopular
-                ? 'border-cyan-300/30 bg-cyan-300/12 hover:border-cyan-300/50 hover:bg-cyan-300/20'
-                : 'border-white/10 bg-white/[0.04] hover:border-white/20 hover:bg-white/[0.08]'}"
-            >
-              <div class="flex items-center justify-between px-5">
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-base font-bold text-white">{pkg.tokens} Tokens</span>
-                    {#if isPopular}
-                      <span class="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-cyan-200">Best Value</span>
-                    {/if}
-                  </div>
-                  <p class="mt-0.5 text-xs text-slate-500">{pkg.tokens} matching runs</p>
-                </div>
-                <span class="text-xl font-black {isPopular ? 'text-cyan-100' : 'text-white'}">
-                  {isLoading === pkg.tokens ? '...' : formatPrice(pkg.price)}
-                </span>
-              </div>
-            </button>
-          {/each}
-        </div>
-
-        <p class="mt-4 text-center text-[10px] text-slate-600">
-          Secure payment via Yoco · No recurring charges
+      <header class="ws-head">
+        <p class="ws-eyebrow">
+          <span class="ws-pip" aria-hidden="true"></span>
+          Carver tokens
         </p>
+        <h1 class="ws-title ws-title-lg">Buy tokens</h1>
+        <p class="ws-price-line">
+          <span class="ws-price-amount">{formatPrice(tokenPrice)}</span>
+          <span class="ws-price-unit">per token</span>
+          <span class="ws-price-dot" aria-hidden="true">·</span>
+          <span class="ws-price-unit">no recurring charges</span>
+        </p>
+
+        <div class="ws-balance">
+          <span class="ws-balance-label">Balance</span>
+          <span class="ws-balance-num">{balance}</span>
+          <span class="ws-balance-unit">{balance === 1 ? 'token' : 'tokens'}</span>
+        </div>
+      </header>
+
+      {#if checkoutError}
+        <p class="ws-error">{checkoutError}</p>
+      {/if}
+
+      <div class="ws-packages">
+        {#each packages as pkg, i}
+          {@const isPopular = i === 1}
+          <button
+            type="button"
+            onclick={() => startCheckout(pkg.tokens)}
+            disabled={isLoading !== null}
+            class="ws-pkg"
+            class:is-popular={isPopular}
+          >
+            {#if isPopular}
+              <span class="ws-pkg-flag">Best value</span>
+            {/if}
+            <div class="ws-pkg-row">
+              <div class="ws-pkg-lead">
+                <span class="ws-pkg-tokens">{pkg.tokens}</span>
+                <span class="ws-pkg-tokens-label">tokens</span>
+              </div>
+              <div class="ws-pkg-meta">
+                <span class="ws-pkg-runs">{pkg.tokens} matching runs</span>
+              </div>
+              <div class="ws-pkg-price">
+                {#if isLoading === pkg.tokens}
+                  <span class="ws-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                {:else}
+                  <span class="ws-pkg-price-amount">{formatPrice(pkg.price)}</span>
+                {/if}
+              </div>
+            </div>
+          </button>
+        {/each}
       </div>
+
+      <p class="ws-foot ws-foot-seal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Secure payment via Yoco · no recurring charges
+      </p>
     </div>
   {/if}
 </section>
 
 <style>
-  .wa-sub-card {
+  .ws-root {
+    max-width: 32rem;
+    margin: 0 auto;
     opacity: 0;
     transform: translateY(14px);
-    transition: opacity 0.45s ease, transform 0.45s ease;
+    transition:
+      opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .wa-sub-card.visible {
-    opacity: 1;
-    transform: translateY(0);
+  .ws-root.visible { opacity: 1; transform: translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ws-root { opacity: 1 !important; transform: none !important; transition: none !important; }
   }
 
-  @keyframes waPulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.6; transform: scale(1.12); }
+  /* ── Card shell ────────────────────────────────────────────────── */
+  .ws-card {
+    position: relative;
+    overflow: hidden;
+    padding: 2rem 1.5rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(201, 169, 110, 0.22);
+    background:
+      radial-gradient(80% 60% at 50% 0%, rgba(201, 169, 110, 0.05), transparent 70%),
+      linear-gradient(180deg, #0a1015 0%, #050a0e 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(201, 169, 110, 0.08),
+      0 30px 80px -40px rgba(0, 0, 0, 0.7);
+    text-align: center;
+  }
+  @media (min-width: 520px) { .ws-card { padding: 2.5rem 2rem; } }
+
+  .ws-card-success { border-color: rgba(141, 240, 196, 0.35); }
+  .ws-card-failed { border-color: rgba(190, 120, 100, 0.4); }
+
+  .ws-glow {
+    position: absolute;
+    top: -100px;
+    right: -80px;
+    width: 280px;
+    height: 280px;
+    border-radius: 9999px;
+    background: radial-gradient(closest-side, rgba(201, 169, 110, 0.12), transparent 70%);
+    filter: blur(50px);
+    pointer-events: none;
+  }
+
+  /* ── Shared typographic elements ──────────────────────────────── */
+  .ws-eyebrow {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+  .ws-eyebrow-radium { color: var(--radium); }
+  .ws-eyebrow-garnet { color: #e09286; }
+
+  .ws-pip {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--brass-bright);
+    box-shadow: 0 0 0 3px rgba(201, 169, 110, 0.18);
+  }
+  .ws-pip-radium {
+    background: var(--radium);
+    box-shadow: 0 0 0 3px rgba(141, 240, 196, 0.2);
+  }
+
+  .ws-title {
+    margin: 0.75rem 0 0;
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 100, "opsz" 144;
+    font-weight: 300;
+    font-size: 1.65rem;
+    line-height: 1.2;
+    letter-spacing: -0.022em;
+    color: var(--ivory);
+  }
+  .ws-title-lg {
+    font-size: clamp(2.1rem, 6vw, 2.75rem);
+    line-height: 1.05;
+  }
+
+  .ws-body {
+    margin: 0.7rem 0 0;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+  }
+
+  .ws-foot {
+    margin: 1.25rem 0 0;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .ws-foot-seal {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--brass);
+    opacity: 0.8;
+  }
+  .ws-foot-seal svg { width: 12px; height: 12px; }
+
+  /* ── State icons (cancelled/failed/success) ───────────────────── */
+  .ws-state-icon {
+    width: 44px;
+    height: 44px;
+    margin: 0 auto 1rem;
+    color: var(--brass);
+    opacity: 0.85;
+  }
+  .ws-state-icon-success { color: var(--radium); }
+  .ws-state-icon-garnet { color: #e09286; }
+
+  /* ── Main card head ───────────────────────────────────────────── */
+  .ws-head {
+    position: relative;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px dashed rgba(201, 169, 110, 0.22);
+  }
+
+  .ws-price-line {
+    margin: 0.9rem 0 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+  }
+  .ws-price-amount {
+    color: var(--ivory);
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 14px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .ws-price-unit { color: var(--text-muted); }
+  .ws-price-dot { margin: 0 0.35rem; opacity: 0.5; }
+
+  .ws-balance {
+    margin-top: 1rem;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: 9999px;
+    background: rgba(243, 234, 216, 0.04);
+    border: 1px solid rgba(201, 169, 110, 0.2);
+  }
+  .ws-balance-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--brass);
+    opacity: 0.8;
+  }
+  .ws-balance-num {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-size: 1.5rem;
+    color: var(--ivory);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .ws-balance-unit {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  /* ── Error banner ─────────────────────────────────────────────── */
+  .ws-error {
+    margin: 1.25rem 0 0;
+    padding: 0.7rem 0.9rem;
+    border-radius: 0.55rem;
+    font-size: 13px;
+    text-align: left;
+    color: #ecb4a7;
+    background: rgba(190, 90, 70, 0.08);
+    border: 1px solid rgba(190, 90, 70, 0.3);
+  }
+
+  /* ── Package tiles ────────────────────────────────────────────── */
+  .ws-packages {
+    margin-top: 1.5rem;
+    display: grid;
+    gap: 0.7rem;
+    text-align: left;
+  }
+
+  .ws-pkg {
+    position: relative;
+    width: 100%;
+    padding: 1.1rem 1.1rem;
+    border-radius: 0.75rem;
+    border: 1px solid rgba(201, 169, 110, 0.2);
+    background:
+      radial-gradient(120% 80% at 100% 0%, rgba(201, 169, 110, 0.03), transparent 60%),
+      rgba(243, 234, 216, 0.02);
+    cursor: pointer;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.2s ease;
+    text-align: left;
+    min-height: 68px;
+  }
+  .ws-pkg:hover:not(:disabled) {
+    border-color: rgba(201, 169, 110, 0.4);
+    background: rgba(201, 169, 110, 0.05);
+    transform: translateY(-1px);
+  }
+  .ws-pkg:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .ws-pkg.is-popular {
+    border-color: rgba(216, 198, 154, 0.45);
+    background:
+      radial-gradient(120% 80% at 100% 0%, rgba(216, 198, 154, 0.08), transparent 60%),
+      rgba(216, 198, 154, 0.04);
+  }
+  .ws-pkg.is-popular:hover:not(:disabled) {
+    border-color: rgba(216, 198, 154, 0.65);
+  }
+
+  .ws-pkg-flag {
+    position: absolute;
+    top: -9px;
+    left: 1rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: #06090d;
+    background: linear-gradient(180deg, #fbf3df 0%, #ead7a7 100%);
+    border: 1px solid rgba(216, 198, 154, 0.55);
+    box-shadow: 0 6px 18px -8px rgba(216, 198, 154, 0.45);
+  }
+
+  .ws-pkg-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .ws-pkg-lead {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 60px;
+  }
+  .ws-pkg-tokens {
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+    font-variation-settings: "SOFT" 100, "opsz" 144;
+    font-weight: 300;
+    font-size: 2rem;
+    line-height: 1;
+    color: var(--ivory);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .ws-pkg.is-popular .ws-pkg-tokens {
+    color: var(--brass-bright);
+    text-shadow: 0 0 22px rgba(201, 169, 110, 0.25);
+  }
+  .ws-pkg-tokens-label {
+    margin-top: 0.15rem;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--brass);
+    opacity: 0.75;
+  }
+
+  .ws-pkg-meta { min-width: 0; }
+  .ws-pkg-runs {
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+
+  .ws-pkg-price {
+    display: inline-flex;
+    align-items: baseline;
+  }
+  .ws-pkg-price-amount {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-size: 1.35rem;
+    color: var(--ivory);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .ws-pkg.is-popular .ws-pkg-price-amount { color: var(--brass-bright); }
+
+  /* CTA (success/cancelled/failed states) */
+  .ws-cta-primary {
+    margin-top: 1.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.85rem 1.4rem;
+    border-radius: 9999px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #06090d;
+    background: linear-gradient(180deg, #fbf3df 0%, #ead7a7 100%);
+    border: 1px solid rgba(216, 198, 154, 0.55);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.55) inset,
+      0 16px 40px -18px rgba(216, 198, 154, 0.45);
+    cursor: pointer;
+    transition: transform 0.2s ease, filter 0.2s ease;
+    min-height: 44px;
+  }
+  .ws-cta-primary:hover { filter: brightness(1.04); transform: translateY(-1px); }
+  .ws-cta-primary svg { width: 13px; height: 13px; }
+
+  /* Loading dots for in-progress checkout */
+  .ws-dots {
+    display: inline-flex;
+    gap: 0.25rem;
+  }
+  .ws-dots i {
+    width: 5px;
+    height: 5px;
+    border-radius: 9999px;
+    background: var(--brass);
+    opacity: 0.5;
+    animation: wsDot 1.2s ease-in-out infinite;
+  }
+  .ws-dots i:nth-child(2) { animation-delay: 0.15s; }
+  .ws-dots i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes wsDot {
+    0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+    30%           { opacity: 1; transform: translateY(-2px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ws-dots i { animation: none; opacity: 0.7; }
   }
 </style>
