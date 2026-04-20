@@ -511,6 +511,25 @@ html {
   }
 }
 
+/* ── Light mode ────────────────────────────────────────────────────────
+   Pragmatic, low-risk light theme: invert the whole document, then
+   counter-invert media so photos/logos/videos keep their true colors.
+   Keeps the existing dark-tuned palette authoritative while giving
+   users a bright surface when they want it. */
+html.light {
+  color-scheme: light;
+  background: #f4f6f8;
+  filter: invert(1) hue-rotate(180deg);
+}
+html.light img,
+html.light video,
+html.light picture,
+html.light canvas,
+html.light iframe,
+html.light [data-no-invert] {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

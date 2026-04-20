@@ -1,6 +1,13 @@
 <script>
   import { site } from '../../config/site'
+  import { getTheme, toggleTheme } from '../../lib/theme'
   let { currentPage = 'auto-apply', userRole = '', isSubscribed = false, creditsBalance = 0, onNavigate = () => {}, onLogout = null } = $props()
+
+  let theme = $state(getTheme())
+
+  function handleToggleTheme() {
+    theme = toggleTheme()
+  }
 
   const visibleNav = $derived(
     site.nav.filter(item =>
@@ -58,6 +65,19 @@
       </a>
 
       <div class="flex items-center justify-end gap-2.5">
+        <button
+          type="button"
+          class="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] text-slate-300 transition hover:border-white/25 hover:bg-white/[0.05] hover:text-white"
+          onclick={handleToggleTheme}
+          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+        >
+          {#if theme === 'light'}
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          {:else}
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          {/if}
+        </button>
         {#if userRole === 'crew'}
           <div class="flex items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1 text-[11px] font-semibold text-cyan-100">
             <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 9.5h4a2 2 0 0 1 0 4H9.5a2 2 0 0 0 0 4H15"/></svg>
@@ -116,6 +136,18 @@
               {creditsBalance}
             </div>
           {/if}
+          <button
+            type="button"
+            class="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 text-slate-300 transition hover:border-white/30 hover:text-white"
+            onclick={handleToggleTheme}
+            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          >
+            {#if theme === 'light'}
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            {:else}
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            {/if}
+          </button>
           <button
             type="button"
             class="rounded-full border border-white/15 px-3 py-1.5 text-[11px] text-slate-300 transition hover:border-white/30 hover:text-white"
