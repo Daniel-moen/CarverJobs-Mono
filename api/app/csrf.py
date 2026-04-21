@@ -28,7 +28,7 @@ CSRF_HEADER_NAME = "X-CSRF-Token"
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _EXEMPT_PATHS = frozenset({"/health", "/admin/analytics", "/auth/login", "/auth/google", "/auth/waitlist"})
 # External callers (Meta, Yoco, Telnyx) never send a CSRF token — exempt by prefix.
-_EXEMPT_PREFIXES = ("/webhooks/", "/subscription/webhook", "/telnyx/webhook")
+_EXEMPT_PREFIXES = ("/webhooks/", "/subscription/webhook", "/telnyx/webhook", "/agent/")
 _TOKEN_MAX_AGE = settings.SESSION_TTL_SECONDS
 
 

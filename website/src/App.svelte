@@ -21,6 +21,7 @@
   import PrivacyPolicyPage from './components/pages/PrivacyPolicyPage.svelte'
   import TermsOfServicePage from './components/pages/TermsOfServicePage.svelte'
   import DataDeletionPage from './components/pages/DataDeletionPage.svelte'
+  import ArticlesPage from './components/pages/ArticlesPage.svelte'
   import { API_BASE_URL, apiFetch } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
 
@@ -41,6 +42,7 @@
     '/privacy':      'privacy',
     '/terms':        'terms',
     '/data-deletion': 'data-deletion',
+    '/articles':      'articles',
   }
   const PAGE_TO_PATH = Object.fromEntries(
     Object.entries(PATH_TO_PAGE).map(([p, k]) => [k, p])
@@ -61,14 +63,24 @@
     return match ? parseInt(match[1], 10) : 0
   }
 
+  function extractArticleSlug(pathname) {
+    const match = pathname.match(/^\/articles\/([a-zA-Z0-9_-]+)$/)
+    return match ? match[1] : ''
+  }
+
   function isLegalDocumentPage(key) {
     return key === 'privacy' || key === 'terms' || key === 'data-deletion'
+  }
+
+  function isPublicContentPage(key) {
+    return isLegalDocumentPage(key) || key === 'articles'
   }
 
   function pageFromPath(pathname) {
     if (pathname === '/privacy') return 'privacy'
     if (pathname === '/terms') return 'terms'
     if (pathname === '/data-deletion') return 'data-deletion'
+    if (pathname === '/articles' || pathname.startsWith('/articles/')) return 'articles'
     if (!SITE_LAUNCHED) return 'launch-signup'
     if (pathname.startsWith('/crew/')) return 'public-profile'
     if (pathname.startsWith('/wa/')) return 'whatsapp-auth'
@@ -78,7 +90,7 @@
   }
 
   function navigate(pageKey) {
-    if (!SITE_LAUNCHED && !isLegalDocumentPage(pageKey)) return
+    if (!SITE_LAUNCHED && !isPublicContentPage(pageKey)) return
     if (currentPage === pageKey) return
     currentPage = pageKey
     publicSlug = ''
@@ -101,6 +113,7 @@
   let publicSlug = SITE_LAUNCHED ? extractCrewSlug(window.location.pathname) : ''
   let waToken = SITE_LAUNCHED ? extractWaToken(window.location.pathname) : ''
   let matchSessionId = SITE_LAUNCHED ? extractMatchSessionId(window.location.pathname) : 0
+  let articleSlug = extractArticleSlug(window.location.pathname)
   let currentPage = pageFromPath(window.location.pathname)
   let isCheckingSession = true
   let isAuthenticated = false
@@ -420,8 +433,15 @@
 
   function enforceLaunchGate() {
     const path = window.location.pathname
-    if (path === '/privacy' || path === '/terms' || path === '/data-deletion') {
+    if (
+      path === '/privacy' ||
+      path === '/terms' ||
+      path === '/data-deletion' ||
+      path === '/articles' ||
+      path.startsWith('/articles/')
+    ) {
       currentPage = pageFromPath(path)
+      articleSlug = extractArticleSlug(path)
       return
     }
     currentPage = 'launch-signup'
@@ -443,8 +463,9 @@
     window.addEventListener('popstate', (e) => {
       if (!SITE_LAUNCHED) {
         const next = e.state?.page ?? pageFromPath(window.location.pathname)
-        if (isLegalDocumentPage(next)) {
+        if (isPublicContentPage(next)) {
           currentPage = next
+          articleSlug = extractArticleSlug(window.location.pathname)
           trackPageView(next)
           return
         }
@@ -457,6 +478,7 @@
       publicSlug = extractCrewSlug(window.location.pathname)
       waToken = extractWaToken(window.location.pathname)
       matchSessionId = extractMatchSessionId(window.location.pathname)
+      articleSlug = extractArticleSlug(window.location.pathname)
       currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
       enforceRoleAccess()
       showSignup = currentPage === 'signup'
@@ -465,7 +487,7 @@
     })
 
     if (!SITE_LAUNCHED) {
-      if (isLegalDocumentPage(currentPage)) {
+      if (isPublicContentPage(currentPage)) {
         trackPageView(currentPage)
         return
       }
@@ -501,6 +523,16 @@
 <div class="min-h-screen bg-black text-slate-100 relative">
   {#if currentPage === 'launch-signup'}
     <LaunchSignupPage />
+  {:else if currentPage === 'articles'}
+    <ArticlesPage
+      slug={articleSlug}
+      onBack={() => {
+        articleSlug = ''
+        currentPage = SITE_LAUNCHED ? 'auto-apply' : 'launch-signup'
+        const path = SITE_LAUNCHED ? '/' : '/launch'
+        history.pushState({ page: currentPage }, '', path)
+      }}
+    />
   {:else if isLegalDocumentPage(currentPage)}
     {#if currentPage === 'privacy'}
       <PrivacyPolicyPage />

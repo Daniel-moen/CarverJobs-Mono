@@ -248,4 +248,27 @@ def run_migrations() -> None:
         "CREATE INDEX IF NOT EXISTS ix_job_drafts_job_id ON job_drafts (job_id)"
     )
 
+    # articles — SEO content pushed in by the authoring agent.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug VARCHAR(120) NOT NULL UNIQUE,
+            title VARCHAR(200) NOT NULL,
+            description VARCHAR(400) NOT NULL,
+            date VARCHAR(20) NOT NULL,
+            read_minutes INTEGER NOT NULL DEFAULT 3,
+            keywords_json TEXT NOT NULL DEFAULT '[]',
+            body_json TEXT NOT NULL DEFAULT '[]',
+            published BOOLEAN NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+            updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_articles_slug ON articles (slug)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_articles_published ON articles (published)"
+    )
+
     conn.commit()

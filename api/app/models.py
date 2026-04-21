@@ -293,6 +293,35 @@ class MatchSessionResult(Base):
   factor_scores = Column(Text, nullable=True)
 
 
+class Article(Base):
+  """SEO article pushed in by the authoring agent.
+
+  `body_json` stores a JSON-encoded list of structured blocks — always rendered
+  as escaped text by the frontend, never as raw HTML. `keywords_json` is a
+  JSON-encoded list of strings used for the `keywords` meta tag.
+  """
+
+  __tablename__ = "articles"
+
+  id = Column(Integer, primary_key=True, index=True)
+  slug = Column(String(120), unique=True, nullable=False, index=True)
+  title = Column(String(200), nullable=False)
+  description = Column(String(400), nullable=False)
+  # ISO date (YYYY-MM-DD) — kept as string to match how the frontend renders it.
+  date = Column(String(20), nullable=False)
+  read_minutes = Column(Integer, nullable=False, default=3)
+  keywords_json = Column(Text, nullable=False, default="[]")
+  body_json = Column(Text, nullable=False, default="[]")
+  published = Column(Boolean, nullable=False, default=True, index=True)
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+  updated_at = Column(
+    DateTime(timezone=True),
+    server_default=func.now(),
+    onupdate=func.now(),
+    nullable=False,
+  )
+
+
 class JobDraftEvent(Base):
   """One row per (user, job) when a crew member drafts an application email.
 

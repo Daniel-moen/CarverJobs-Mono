@@ -104,16 +104,23 @@
       <span class="wordmark text-[12px] text-ivory">CARVER</span>
       <span class="font-display italic text-[12px] text-brass">v3</span>
     </a>
-    <a
-      href={whatsapp.link('help')}
-      target="_blank"
-      rel="noopener noreferrer"
-      onclick={() => trackEvent('mobile_nav_whatsapp')}
-      class="m-nav-wa"
-    >
-      <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
-      Open chat
-    </a>
+    <div class="m-nav-right">
+      <a
+        href="/articles"
+        onclick={() => trackEvent('mobile_nav_articles')}
+        class="m-nav-articles"
+      >Articles</a>
+      <a
+        href={whatsapp.link('help')}
+        target="_blank"
+        rel="noopener noreferrer"
+        onclick={() => trackEvent('mobile_nav_whatsapp')}
+        class="m-nav-wa"
+      >
+        <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
+        Open chat
+      </a>
+    </div>
   </nav>
 
   <!-- ── Hero ───────────────────────────────────────────────── -->
@@ -312,6 +319,21 @@
     text-decoration: none;
   }
   .m-nav-wa svg { width: 12px; height: 12px; }
+  .m-nav-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .m-nav-articles {
+    padding: 0.4rem 0.7rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(201, 169, 110, 0.28);
+    background: rgba(201, 169, 110, 0.06);
+    color: var(--ivory);
+    font-size: 11.5px;
+    font-weight: 500;
+    text-decoration: none;
+  }
 
   /* ── Hero ──────────────────────────────────────────────── */
   .m-hero {

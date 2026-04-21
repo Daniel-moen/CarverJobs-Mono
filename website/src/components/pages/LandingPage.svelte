@@ -128,6 +128,7 @@
       <div class="nav-links">
         <a href="#route" class="nav-link">How it works</a>
         <a href="#agencies" class="nav-link">For agencies</a>
+        <a href="/articles" class="nav-link" onclick={() => trackEvent('nav_articles')}>Articles</a>
         <a
           href={whatsapp.link('help')}
           target="_blank"
