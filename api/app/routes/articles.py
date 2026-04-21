@@ -14,14 +14,12 @@ The body is stored as a validated JSON list of structured blocks
 as raw HTML, so content pushed here cannot inject script into visitors.
 """
 
-from __future__ import annotations
-
 import hmac
 import json
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -258,8 +256,8 @@ def get_article(slug: str, request: Request, db: Session = Depends(get_db)):
 @agent_router.post("", dependencies=[Depends(_require_agent_token)])
 @_limiter.limit("30/minute")
 def upsert_article(
-    payload: ArticleIn,
     request: Request,
+    payload: ArticleIn = Body(...),
     db: Session = Depends(get_db),
 ):
     """Create or update an article, keyed by slug."""
