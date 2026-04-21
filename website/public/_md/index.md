@@ -37,5 +37,4 @@ Post a role and let Carver surface qualified crew. See the landing page for the 
 - Privacy policy: <https://jobcarver.co/privacy>
 - Terms of service: <https://jobcarver.co/terms>
 - Data deletion: <https://jobcarver.co/data-deletion>
-- API catalog: <https://jobcarver.co/.well-known/api-catalog>
 - Sitemap: <https://jobcarver.co/sitemap.xml>
