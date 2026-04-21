@@ -512,22 +512,283 @@ html {
 }
 
 /* ── Light mode ────────────────────────────────────────────────────────
-   Pragmatic, low-risk light theme: invert the whole document, then
-   counter-invert media so photos/logos/videos keep their true colors.
-   Keeps the existing dark-tuned palette authoritative while giving
-   users a bright surface when they want it. */
+   A proper parchment-ivory light theme. Rather than CSS-filter-inverting
+   the page (which muddied brass, broke shadows, and fought the palette),
+   we override the design tokens and the few hard-coded dark surfaces.
+   Goal: calm, editorial, trustworthy — warm paper with deep ink type,
+   antique brass accents, muted teal for interactive emphasis. */
 html.light {
   color-scheme: light;
-  background: #f4f6f8;
-  filter: invert(1) hue-rotate(180deg);
+
+  /* Warm paper surfaces, never pure white */
+  --bg-base: #f6f1e6;
+  --bg-surface: #fbf6ea;
+  --bg-elevated: #ffffff;
+  --bg-bridge: #efe7d4;
+  --border-soft: rgba(20, 24, 30, 0.08);
+  --border-strong: rgba(20, 24, 30, 0.16);
+
+  /* Brass reads warmer on light paper */
+  --brass: #9a7b3a;
+  --brass-bright: #b8923f;
+  --brass-deep: #6a5224;
+  --brass-glow: rgba(154, 123, 58, 0.18);
+
+  /* Deeper radium so it's legible on cream */
+  --radium: #1aa06c;
+  --radium-deep: #0f7a50;
+
+  /* Teal sharpened so it contrasts on paper (WCAG-safe on #fbf6ea) */
+  --accent: #0e7490;
+  --accent-strong: #0891b2;
+  --accent-deep: #075467;
+  --accent-glow: rgba(14, 116, 144, 0.16);
+
+  /* Ivory highlight retuned as deep parchment ink */
+  --ivory: #2a2418;
+  --ivory-soft: rgba(42, 36, 24, 0.72);
+
+  /* Deep ink type for long-form readability */
+  --text-primary: #141820;
+  --text-secondary: #4a5260;
+  --text-muted: #78818f;
 }
-html.light img,
-html.light video,
-html.light picture,
-html.light canvas,
-html.light iframe,
-html.light [data-no-invert] {
-  filter: invert(1) hue-rotate(180deg);
+
+html.light body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(201, 169, 110, 0.10), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(14, 116, 144, 0.06), transparent 60%),
+    var(--bg-base);
+  color: var(--text-primary);
+}
+
+/* Serif accent: deep brass gradient on paper */
+html.light .serif-accent {
+  background: linear-gradient(180deg, #6a5224 0%, #9a7b3a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+html.light .eyebrow {
+  color: var(--accent-deep);
+  opacity: 0.85;
+}
+
+/* Hairline rule on paper */
+html.light .hairline {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(20, 24, 30, 0.14) 40%,
+    rgba(20, 24, 30, 0.14) 60%,
+    transparent 100%
+  );
+}
+html.light .brass-rule {
+  background-image: linear-gradient(90deg,
+    transparent 0%,
+    rgba(154, 123, 58, 0.5) 18%,
+    rgba(154, 123, 58, 0.5) 82%,
+    transparent 100%);
+}
+
+/* Elevated panels — warm paper with a soft brass wash */
+html.light .panel-elevated {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(14, 116, 144, 0.05), transparent 55%),
+    radial-gradient(120% 80% at 100% 100%, rgba(201, 169, 110, 0.07), transparent 55%),
+    linear-gradient(180deg, #ffffff 0%, #fbf6ea 100%);
+  border: 1px solid rgba(20, 24, 30, 0.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 1px 2px rgba(20, 24, 30, 0.04),
+    0 30px 60px -40px rgba(20, 24, 30, 0.22);
+}
+
+/* Instrument frame — engraved brass on ivory plate */
+html.light .instrument {
+  background:
+    radial-gradient(80% 60% at 50% 0%, rgba(201, 169, 110, 0.10), transparent 70%),
+    linear-gradient(180deg, #fdf8ec 0%, #f4ecd8 100%);
+  border: 1px solid rgba(154, 123, 58, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 0 30px -10px rgba(154, 123, 58, 0.18),
+    0 20px 40px -28px rgba(20, 24, 30, 0.25);
+}
+html.light .instrument::before,
+html.light .instrument::after {
+  background: var(--brass-deep);
+  opacity: 0.8;
+}
+
+html.light .engraved {
+  color: var(--brass-deep);
+  opacity: 0.85;
+}
+
+html.light .readout {
+  color: var(--brass-deep);
+  text-shadow: none;
+}
+
+/* Trust seal — embossed on paper */
+html.light .trust-seal {
+  background: radial-gradient(circle at 30% 30%, rgba(154, 123, 58, 0.20), rgba(154, 123, 58, 0.05) 70%);
+  border: 1px solid rgba(154, 123, 58, 0.35);
+  color: var(--brass-deep);
+}
+
+/* CTAs: keep ivory/brass as the primary trust buttons, but re-seat their shadows on paper */
+html.light .cta-ivory {
+  color: #141820;
+  background: linear-gradient(180deg, #ffffff 0%, #f1e6c7 100%);
+  border: 1px solid rgba(154, 123, 58, 0.55);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 0 0 1px rgba(20, 24, 30, 0.03),
+    0 14px 30px -16px rgba(154, 123, 58, 0.45);
+}
+html.light .cta-brass {
+  color: #1a1206;
+  background: linear-gradient(180deg, #e8c27a 0%, #a2782f 100%);
+  border: 1px solid rgba(106, 82, 36, 0.7);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 14px 30px -16px rgba(106, 82, 36, 0.5);
+}
+
+/* WhatsApp chat surface — keep it recognizably "WhatsApp" even in light mode,
+   mirroring the official light theme rather than a washed-out paper look. */
+html.light .chat-surface {
+  background:
+    radial-gradient(60% 80% at 50% 0%, rgba(20, 24, 30, 0.03), transparent 60%),
+    linear-gradient(180deg, #efe7da 0%, #e4dccb 100%);
+  background-image: radial-gradient(rgba(20, 24, 30, 0.035) 1px, transparent 1px);
+  background-size: 12px 12px;
+}
+html.light .bubble-bot {
+  background: #ffffff;
+  color: #111b21;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+}
+html.light .bubble-bot strong {
+  color: #111b21;
+}
+html.light .bubble-me {
+  background: #d9fdd3;
+  color: #111b21;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+}
+html.light .bubble-tick {
+  color: #53bdeb;
+}
+html.light .typing-dots span {
+  background: rgba(17, 27, 33, 0.45);
+}
+html.light .caret-blink::after {
+  color: rgba(17, 27, 33, 0.55);
+}
+
+/* Focus ring stays brass but tuned for paper */
+html.light .focus-brass:focus-visible {
+  outline-color: var(--brass-deep);
+}
+
+/* ── Pragmatic overrides for hard-coded dark Tailwind utilities ──────────
+   Many pages still use bg-black / bg-[#04070b] / text-white / text-slate-*
+   directly. Rather than refactor every page, we remap the most common
+   dark utilities onto the light palette. Kept narrow on purpose. */
+
+html.light .bg-black,
+html.light .bg-\[\#04070b\] {
+  background-color: var(--bg-base);
+}
+html.light .bg-\[\#0a0e14\],
+html.light .bg-\[\#0a0e14\]\/95 {
+  background-color: var(--bg-surface);
+}
+html.light .bg-slate-950,
+html.light .bg-slate-900,
+html.light .bg-neutral-950,
+html.light .bg-neutral-900,
+html.light .bg-zinc-950,
+html.light .bg-zinc-900 {
+  background-color: var(--bg-surface);
+}
+html.light .bg-slate-800,
+html.light .bg-neutral-800,
+html.light .bg-zinc-800 {
+  background-color: var(--bg-elevated);
+}
+
+/* Type: dark-mode "white-ish" text should become deep ink on paper */
+html.light .text-white,
+html.light .text-slate-50,
+html.light .text-slate-100,
+html.light .text-neutral-50,
+html.light .text-neutral-100,
+html.light .text-zinc-50,
+html.light .text-zinc-100 {
+  color: var(--text-primary);
+}
+html.light .text-slate-200,
+html.light .text-slate-300,
+html.light .text-neutral-200,
+html.light .text-neutral-300,
+html.light .text-zinc-200,
+html.light .text-zinc-300 {
+  color: var(--text-secondary);
+}
+html.light .text-slate-400,
+html.light .text-slate-500,
+html.light .text-neutral-400,
+html.light .text-neutral-500,
+html.light .text-zinc-400,
+html.light .text-zinc-500 {
+  color: var(--text-muted);
+}
+
+/* Borders: translucent-white hairlines -> translucent-ink hairlines.
+   Tailwind emits these with escaped brackets; match the common opacities. */
+html.light .border-white\/5,
+html.light .border-white\/10,
+html.light .border-white\/\[0\.06\],
+html.light .border-white\/\[0\.08\],
+html.light .border-white\/\[0\.1\],
+html.light .border-white\/\[0\.12\] {
+  border-color: rgba(20, 24, 30, 0.10);
+}
+html.light .border-white\/15,
+html.light .border-white\/20,
+html.light .border-white\/\[0\.14\],
+html.light .border-white\/\[0\.18\] {
+  border-color: rgba(20, 24, 30, 0.16);
+}
+
+/* Translucent-white fills -> translucent-ink fills */
+html.light .bg-white\/5,
+html.light .bg-white\/\[0\.04\],
+html.light .bg-white\/\[0\.06\],
+html.light .bg-white\/\[0\.08\] {
+  background-color: rgba(20, 24, 30, 0.04);
+}
+html.light .bg-white\/10,
+html.light .bg-white\/\[0\.1\],
+html.light .bg-white\/\[0\.12\] {
+  background-color: rgba(20, 24, 30, 0.06);
+}
+
+/* Ensure accents relying on cyan read well on paper */
+html.light .text-cyan-300,
+html.light .text-cyan-400 {
+  color: var(--accent-deep);
+}
+html.light .text-cyan-50,
+html.light .text-cyan-100,
+html.light .text-cyan-200 {
+  color: var(--accent-deep);
 }
 
 @media (prefers-reduced-motion: reduce) {
