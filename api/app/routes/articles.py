@@ -54,6 +54,8 @@ _MAX_LIST_ITEMS = 20
 _MAX_BLOCKS = 200
 _MAX_KEYWORDS = 20
 _MAX_KEYWORD_LEN = 80
+# Aligned: JSON list and HTML index must return the same published-article set.
+_MAX_PUBLIC_LIST = 500
 
 
 class Block(BaseModel):
@@ -197,6 +199,42 @@ def _require_agent_token(request: Request) -> None:
         )
 
 
+def _normalise_article_slug(slug: str) -> str | None:
+    s = slug.strip().lower()
+    return s if _SLUG_PATTERN.match(s) else None
+
+
+def _published_article_query(db: Session):
+    """Published rows, newest first (shared ordering for list, SSR, sitemap)."""
+    return (
+        db.query(Article)
+        .filter(Article.published.is_(True))
+        .order_by(Article.date.desc(), Article.id.desc())
+    )
+
+
+def _get_published_article_or_none(db: Session, slug: str) -> Article | None:
+    norm = _normalise_article_slug(slug)
+    if norm is None:
+        return None
+    return (
+        db.query(Article)
+        .filter(Article.slug == norm, Article.published.is_(True))
+        .first()
+    )
+
+
+def _article_keyword_set(row: Article) -> set[str]:
+    try:
+        return {
+            k.lower()
+            for k in json.loads(row.keywords_json or "[]")
+            if isinstance(k, str)
+        }
+    except (ValueError, TypeError):
+        return set()
+
+
 # ── Serialisation ───────────────────────────────────────────────────────────
 
 def _serialise(row: Article) -> dict:
@@ -220,6 +258,14 @@ def _serialise(row: Article) -> dict:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+
+
+def _json_ld_date_modified(article: dict) -> str:
+    """Last-modified calendar date for JSON-LD and meta; prefers DB `updated_at` over editorial `date`."""
+    updated = article.get("updated_at")
+    if updated and isinstance(updated, str) and len(updated) >= 10 and updated[4] == "-" and updated[7] == "-":
+        return updated[:10]
+    return article.get("date") or ""
 
 
 # ── SSR helpers ─────────────────────────────────────────────────────────────
@@ -250,27 +296,13 @@ def _pick_related(current: Article, candidates: list[Article], k: int = 4) -> li
     every detail page has at least a couple of internal links, which is
     important for crawl depth and SEO.
     """
-    try:
-        current_kw = {
-            k.lower()
-            for k in json.loads(current.keywords_json or "[]")
-            if isinstance(k, str)
-        }
-    except (ValueError, TypeError):
-        current_kw = set()
+    current_kw = _article_keyword_set(current)
 
     scored: list[tuple[int, str, int, Article]] = []
     for row in candidates:
         if row.slug == current.slug:
             continue
-        try:
-            kw = {
-                k.lower()
-                for k in json.loads(row.keywords_json or "[]")
-                if isinstance(k, str)
-            }
-        except (ValueError, TypeError):
-            kw = set()
+        kw = _article_keyword_set(row)
         score = len(current_kw & kw)
         scored.append((score, row.date or "", row.id or 0, row))
 
@@ -313,6 +345,8 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
     description_html = _esc(article["description"])
     headline_html = _esc(article["title"])
     date_html = _esc(article["date"])
+    date_modified_plain = _json_ld_date_modified(article)
+    date_modified_html = _esc(date_modified_plain) if date_modified_plain else date_html
     try:
         read_minutes = int(article.get("read_minutes") or 3)
     except (TypeError, ValueError):
@@ -344,7 +378,7 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
         "headline": article["title"],
         "description": article["description"],
         "datePublished": article["date"],
-        "dateModified": article["date"],
+        "dateModified": date_modified_plain or article["date"],
         "author": {"@type": "Organization", "name": "Carver"},
         "publisher": {"@type": "Organization", "name": "Carver"},
         "mainEntityOfPage": canonical,
@@ -375,6 +409,7 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
     <meta property="og:image" content="{_esc(origin)}/og-image.svg" />
     <meta property="og:locale" content="en_GB" />
     <meta property="article:published_time" content="{date_html}" />
+    <meta property="article:modified_time" content="{date_modified_html}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{title_html}" />
     <meta name="twitter:description" content="{description_html}" />
@@ -613,7 +648,7 @@ def list_articles(request: Request, db: Session = Depends(get_db)):
         db.query(Article)
         .filter(Article.published.is_(True))
         .order_by(Article.date.desc(), Article.id.desc())
-        .limit(200)
+        .limit(_MAX_PUBLIC_LIST)
         .all()
     )
     return {"ok": True, "articles": [_serialise(r) for r in rows]}
@@ -627,7 +662,7 @@ def articles_list_page(request: Request, db: Session = Depends(get_db)):
         db.query(Article)
         .filter(Article.published.is_(True))
         .order_by(Article.date.desc(), Article.id.desc())
-        .limit(500)
+        .limit(_MAX_PUBLIC_LIST)
         .all()
     )
     body = _render_articles_list_html(rows)
@@ -637,13 +672,7 @@ def articles_list_page(request: Request, db: Session = Depends(get_db)):
 @public_router.get("/sitemap.xml", include_in_schema=False)
 @_limiter.limit("60/minute")
 def articles_sitemap(request: Request, db: Session = Depends(get_db)):
-    rows = (
-        db.query(Article)
-        .filter(Article.published.is_(True))
-        .order_by(Article.date.desc(), Article.id.desc())
-        .limit(2000)
-        .all()
-    )
+    rows = _published_article_query(db).limit(2000).all()
     xml = _render_articles_sitemap(rows)
     return Response(content=xml, media_type="application/xml")
 
@@ -651,14 +680,7 @@ def articles_sitemap(request: Request, db: Session = Depends(get_db)):
 @public_router.get("/{slug}/page.html", include_in_schema=False)
 @_limiter.limit("60/minute")
 def article_page(slug: str, request: Request, db: Session = Depends(get_db)):
-    slug = slug.strip().lower()
-    if not _SLUG_PATTERN.match(slug):
-        raise HTTPException(status_code=404, detail="Article not found.")
-    row = (
-        db.query(Article)
-        .filter(Article.slug == slug, Article.published.is_(True))
-        .first()
-    )
+    row = _get_published_article_or_none(db, slug)
     if not row:
         raise HTTPException(status_code=404, detail="Article not found.")
 
@@ -666,9 +688,8 @@ def article_page(slug: str, request: Request, db: Session = Depends(get_db)):
     # entries in Python — cheap at this volume and avoids coupling ranking
     # to the storage layer.
     pool = (
-        db.query(Article)
-        .filter(Article.published.is_(True), Article.slug != row.slug)
-        .order_by(Article.date.desc(), Article.id.desc())
+        _published_article_query(db)
+        .filter(Article.slug != row.slug)
         .limit(100)
         .all()
     )

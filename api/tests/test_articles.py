@@ -35,12 +35,12 @@ def _auth():
     return {"Authorization": f"Bearer {_TOKEN}"}
 
 
-def _payload(slug, *, title=None, keywords=None, body=None, description=None):
+def _payload(slug, *, title=None, keywords=None, body=None, description=None, date="2026-01-15"):
     return {
         "slug": slug,
         "title": title or f"Guide {slug}",
         "description": description or f"A short guide about {slug}.",
-        "date": "2026-01-15",
+        "date": date,
         "read_minutes": 4,
         "keywords": keywords if keywords is not None else ["yacht", "crew"],
         "body": body
@@ -152,6 +152,27 @@ def test_list_html_escapes_author_content(client):
 
 
 # ── SSR: single article page (/articles/{slug}/page.html) ───────────────────
+
+def test_article_page_json_ld_uses_date_modified_for_edits(client):
+    """`dateModified` and article:modified_time should reflect the DB, not re-use editorial `date` only."""
+    client.post(
+        "/agent/articles",
+        json=_payload("edited-slug", date="2020-01-01"),
+        headers=_auth(),
+    )
+    client.post(
+        "/agent/articles",
+        json=_payload("edited-slug", date="2020-01-01", title="New title for SEO"),
+        headers=_auth(),
+    )
+    resp = client.get("/articles/edited-slug/page.html")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "New title for SEO" in html
+    # Must not hard-code dateModified to editorial date only when content was updated.
+    assert '"dateModified": "2020-01-01"' not in html
+    assert "article:modified_time" in html
+
 
 def test_article_page_content_present_without_js(client):
     client.post(
