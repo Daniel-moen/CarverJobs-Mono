@@ -7,6 +7,8 @@ Two clients are provided:
   - `auth_client` — raw (no overrides); use for tests that exercise the actual
                     login / logout / session endpoints.
 """
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -56,6 +58,15 @@ def _reset_db():
     Base.metadata.drop_all(bind=_engine)
 
 
+def _wait_db_ready(client: TestClient, *, timeout_s: float = 30.0) -> None:
+    """Lifespan runs DB init in a background task; non-exempt routes 503 until ready."""
+    deadline = time.monotonic() + timeout_s
+    while not getattr(client.app.state, "db_ready", False):
+        if time.monotonic() > deadline:
+            raise RuntimeError("Timed out waiting for app.state.db_ready")
+        time.sleep(0.02)
+
+
 def _seed_csrf(client):
     """
     Make a GET request to obtain a signed CSRF token from the response
@@ -75,6 +86,7 @@ def client():
     app.dependency_overrides[require_admin_session] = _override_require_session
     app.state.limiter.enabled = False
     with TestClient(app, raise_server_exceptions=True) as c:
+        _wait_db_ready(c)
         _seed_csrf(c)
         yield c
     app.dependency_overrides.clear()
@@ -87,6 +99,7 @@ def auth_client():
     app.dependency_overrides[get_db] = _override_get_db
     app.state.limiter.enabled = False
     with TestClient(app, raise_server_exceptions=True) as c:
+        _wait_db_ready(c)
         _seed_csrf(c)
         yield c
     app.dependency_overrides.clear()
