@@ -702,14 +702,7 @@ def article_page(slug: str, request: Request, db: Session = Depends(get_db)):
 @public_router.get("/{slug}")
 @_limiter.limit("60/minute")
 def get_article(slug: str, request: Request, db: Session = Depends(get_db)):
-    slug = slug.strip().lower()
-    if not _SLUG_PATTERN.match(slug):
-        raise HTTPException(status_code=404, detail="Article not found.")
-    row = (
-        db.query(Article)
-        .filter(Article.slug == slug, Article.published.is_(True))
-        .first()
-    )
+    row = _get_published_article_or_none(db, slug)
     if not row:
         raise HTTPException(status_code=404, detail="Article not found.")
     return {"ok": True, "article": _serialise(row)}
