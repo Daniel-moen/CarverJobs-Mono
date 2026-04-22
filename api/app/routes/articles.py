@@ -644,13 +644,7 @@ def _render_articles_sitemap(rows: list[Article]) -> str:
 @public_router.get("")
 @_limiter.limit("60/minute")
 def list_articles(request: Request, db: Session = Depends(get_db)):
-    rows = (
-        db.query(Article)
-        .filter(Article.published.is_(True))
-        .order_by(Article.date.desc(), Article.id.desc())
-        .limit(_MAX_PUBLIC_LIST)
-        .all()
-    )
+    rows = _published_article_query(db).limit(_MAX_PUBLIC_LIST).all()
     return {"ok": True, "articles": [_serialise(r) for r in rows]}
 
 
@@ -658,13 +652,7 @@ def list_articles(request: Request, db: Session = Depends(get_db)):
 @_limiter.limit("60/minute")
 def articles_list_page(request: Request, db: Session = Depends(get_db)):
     """SSR HTML index of published articles. Proxied from `/articles` by nginx."""
-    rows = (
-        db.query(Article)
-        .filter(Article.published.is_(True))
-        .order_by(Article.date.desc(), Article.id.desc())
-        .limit(_MAX_PUBLIC_LIST)
-        .all()
-    )
+    rows = _published_article_query(db).limit(_MAX_PUBLIC_LIST).all()
     body = _render_articles_list_html(rows)
     return HTMLResponse(content=body)
 
