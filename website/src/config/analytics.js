@@ -1,4 +1,5 @@
 import { API_BASE_URL, apiFetch } from './api'
+import { capture as phCapture, capturePageView as phCapturePageView } from './posthog'
 
 const FLUSH_INTERVAL_MS = 15_000
 const MAX_BATCH = 50
@@ -28,10 +29,13 @@ const _sessionId = _getSessionId()
 export function trackEvent(type, data = {}) {
   _queue.push({ type, session_id: _sessionId, ...data, ts: _now() })
   if (_queue.length >= MAX_BATCH) flush()
+  phCapture(type, data)
 }
 
 export function trackPageView(page) {
-  trackEvent('page_view', { page })
+  _queue.push({ type: 'page_view', session_id: _sessionId, page, ts: _now() })
+  if (_queue.length >= MAX_BATCH) flush()
+  phCapturePageView(page)
 }
 
 export function trackClick(label) {

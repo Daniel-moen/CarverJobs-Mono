@@ -24,6 +24,7 @@
   import ArticlesPage from './components/pages/ArticlesPage.svelte'
   import { API_BASE_URL, apiFetch } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
+  import { identifyUser, resetUser } from './config/posthog'
 
   // ── URL routing ──────────────────────────────────────────────────────────────
   // Map URL pathnames → page keys and back.  No router library needed —
@@ -247,6 +248,7 @@
         agencyName = String(data?.session?.agency_name ?? '')
         isSubscribed = Boolean(data?.session?.is_subscribed)
         creditsBalance = Number(data?.session?.credits_balance ?? 0)
+        identifyUser({ id: data?.session?.sub, role: userRole, isSubscribed })
         if (userRole === 'agency') {
           // Agency users get a fully separate shell — no crew page resolution,
           // no onboarding, no docs reminders.
@@ -429,6 +431,7 @@
     isSubscribed = false
     creditsBalance = 0
     authError = ''
+    resetUser()
   }
 
   function enforceLaunchGate() {
