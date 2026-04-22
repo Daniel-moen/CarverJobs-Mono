@@ -240,7 +240,65 @@ def _esc(value: str | None) -> str:
     return html.escape(value or "", quote=True)
 
 
-def _render_article_html(article: dict) -> str:
+def _pick_related(current: Article, candidates: list[Article], k: int = 4) -> list[Article]:
+    """Pick up to `k` related articles for internal linking.
+
+    Scoring:
+      1. Higher keyword overlap (Jaccard-style: shared keyword count).
+      2. Tie-break on newer `date`, then newer `id`.
+    Articles with zero overlap still appear (padded from most-recent) so
+    every detail page has at least a couple of internal links, which is
+    important for crawl depth and SEO.
+    """
+    try:
+        current_kw = {
+            k.lower()
+            for k in json.loads(current.keywords_json or "[]")
+            if isinstance(k, str)
+        }
+    except (ValueError, TypeError):
+        current_kw = set()
+
+    scored: list[tuple[int, str, int, Article]] = []
+    for row in candidates:
+        if row.slug == current.slug:
+            continue
+        try:
+            kw = {
+                k.lower()
+                for k in json.loads(row.keywords_json or "[]")
+                if isinstance(k, str)
+            }
+        except (ValueError, TypeError):
+            kw = set()
+        score = len(current_kw & kw)
+        scored.append((score, row.date or "", row.id or 0, row))
+
+    scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [row for _, _, _, row in scored[:k]]
+
+
+def _render_related_section(related: list[Article]) -> str:
+    if not related:
+        return ""
+    items: list[str] = []
+    for row in related:
+        href = f"/articles/{row.slug}"
+        items.append(
+            f'<li><a href="{_esc(href)}">{_esc(row.title)}</a>'
+            f'<span class="related-desc">{_esc(row.description)}</span></li>'
+        )
+    inner = "\n            ".join(items)
+    return f"""
+        <aside class="related" aria-label="Related articles">
+          <h2>More reading</h2>
+          <ul>
+            {inner}
+          </ul>
+        </aside>"""
+
+
+def _render_article_html(article: dict, related: list[Article] | None = None) -> str:
     """Return a fully server-rendered HTML page for a single article.
 
     The page is self-contained (no third-party scripts, no SPA hydration)
@@ -278,6 +336,7 @@ def _render_article_html(article: dict) -> str:
             if items:
                 body_parts.append(f"<ul>{items}</ul>")
     body_html = "\n          ".join(body_parts)
+    related_html = _render_related_section(related or [])
 
     json_ld = {
         "@context": "https://schema.org",
@@ -340,7 +399,14 @@ def _render_article_html(article: dict) -> str:
       .body p {{ margin:0 0 1.1rem; color:var(--muted); }}
       .body ul {{ padding-left:1.2rem; color:var(--muted); margin:0 0 1.25rem; }}
       .body li {{ margin: 0.35rem 0; }}
-      .foot {{ margin-top:3rem; padding-top:1.5rem; border-top:1px solid var(--border); }}
+      .related {{ margin-top:3rem; padding-top:1.5rem; border-top:1px solid var(--border); }}
+      .related h2 {{ font-family: Georgia, "Times New Roman", serif; font-weight:400; font-size:1.15rem; margin:0 0 1rem; color:var(--text); letter-spacing:0.01em; }}
+      .related ul {{ list-style:none; padding:0; margin:0; display:grid; gap:0.75rem; }}
+      .related li {{ border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem; }}
+      .related a {{ display:block; color:var(--text); text-decoration:none; font-weight:500; font-size:0.98rem; }}
+      .related a:hover {{ color: var(--brass); }}
+      .related-desc {{ display:block; margin-top:0.3rem; color:var(--muted); font-size:0.85rem; line-height:1.5; font-weight:normal; }}
+      .foot {{ margin-top:2rem; padding-top:1.5rem; border-top:1px solid var(--border); }}
       .back {{ color:var(--muted); font-size:0.85rem; text-decoration:none; border-bottom:1px dashed rgba(255,255,255,0.18); }}
       .back:hover {{ color: var(--text); }}
     </style>
@@ -364,11 +430,144 @@ def _render_article_html(article: dict) -> str:
         <p class="lede" itemprop="description">{description_html}</p>
         <div class="body" itemprop="articleBody">
           {body_html}
-        </div>
+        </div>{related_html}
         <footer class="foot">
           <a class="back" href="/articles">&larr; All articles</a>
         </footer>
       </article>
+    </main>
+  </body>
+</html>
+"""
+
+
+def _render_articles_list_html(rows: list[Article]) -> str:
+    """Return a fully server-rendered HTML index of published articles.
+
+    Every link appears in the initial HTML (no JS required), so crawlers
+    and "View Page Source" both see the full article list and can reach
+    each detail page at minimum crawl depth.
+    """
+    origin = _site_origin()
+    canonical = f"{origin}/articles"
+    title_html = _esc("Articles — Carver")
+    description_html = _esc(
+        "Guides and stories for superyacht crew — CV tips, season timelines, "
+        "and how Carver matches you to live roles over WhatsApp."
+    )
+
+    if rows:
+        cards: list[str] = []
+        for row in rows:
+            href = _esc(f"/articles/{row.slug}")
+            title = _esc(row.title)
+            desc = _esc(row.description)
+            date = _esc(row.date or "")
+            try:
+                read_minutes = int(row.read_minutes or 3)
+            except (TypeError, ValueError):
+                read_minutes = 3
+            cards.append(
+                f'<li class="card">'
+                f'<a href="{href}">'
+                f'<p class="meta"><time datetime="{date}">{date}</time>'
+                f' &middot; <span>{read_minutes} min read</span></p>'
+                f'<h2>{title}</h2>'
+                f'<p class="desc">{desc}</p>'
+                f'<span class="cta">Read article &rarr;</span>'
+                f'</a></li>'
+            )
+        list_html = "\n        ".join(cards)
+        body_block = f'<ul class="list" aria-label="Articles">\n        {list_html}\n      </ul>'
+    else:
+        body_block = (
+            '<p class="empty">No articles have been published yet. '
+            'Please check back soon.</p>'
+        )
+
+    json_ld = {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        "name": "Carver journal",
+        "description": "Articles for superyacht crew.",
+        "url": canonical,
+        "mainEntity": {
+            "@type": "ItemList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": i + 1,
+                    "url": f"{origin}/articles/{row.slug}",
+                    "name": row.title,
+                }
+                for i, row in enumerate(rows)
+            ],
+        },
+    }
+    json_ld_safe = json.dumps(json_ld, ensure_ascii=True).replace("</", "<\\/")
+
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>{title_html}</title>
+    <meta name="description" content="{description_html}" />
+    <meta name="author" content="Carver" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="theme-color" content="#05080c" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="canonical" href="{_esc(canonical)}" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Carver" />
+    <meta property="og:title" content="{title_html}" />
+    <meta property="og:description" content="{description_html}" />
+    <meta property="og:url" content="{_esc(canonical)}" />
+    <meta property="og:image" content="{_esc(origin)}/og-image.svg" />
+    <meta property="og:locale" content="en_GB" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{title_html}" />
+    <meta name="twitter:description" content="{description_html}" />
+    <meta name="twitter:image" content="{_esc(origin)}/og-image.svg" />
+    <script type="application/ld+json">{json_ld_safe}</script>
+    <style>
+      :root {{ --bg:#05080c; --text:#e8e6e1; --muted:#8a8378; --brass:#d4b97a; --border:rgba(255,255,255,0.06); }}
+      *,*::before,*::after {{ box-sizing: border-box; }}
+      html,body {{ margin:0; padding:0; background:var(--bg); color:var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }}
+      a {{ color: var(--brass); }}
+      .nav {{ max-width:1280px; margin:0 auto; padding:1rem 1.5rem; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); }}
+      .brand {{ text-decoration:none; color:var(--text); font-weight:600; letter-spacing:0.04em; font-size: 0.9rem; }}
+      .nav-links a {{ margin-left:1rem; color:var(--muted); text-decoration:none; font-size:0.85rem; }}
+      .nav-links a:hover {{ color: var(--text); }}
+      main {{ max-width:760px; margin:0 auto; padding:3rem 1.5rem 5rem; }}
+      .eyebrow {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.72rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--brass); margin:0; }}
+      h1 {{ margin:0.75rem 0 0; font-family: Georgia, "Times New Roman", serif; font-weight:300; font-size:clamp(2rem, 4vw, 2.75rem); line-height:1.05; letter-spacing:-0.025em; color:var(--text); }}
+      .lede {{ margin:1.25rem 0 0; color:var(--muted); font-size:1rem; line-height:1.6; max-width:36rem; }}
+      .list {{ list-style:none; margin:2.5rem 0 0; padding:0; display:grid; gap:1rem; }}
+      .card {{ border:1px solid var(--border); border-radius:14px; transition: border-color 0.2s ease, background 0.2s ease; }}
+      .card:hover {{ border-color: rgba(212,185,122,0.35); background: rgba(212,185,122,0.04); }}
+      .card a {{ display:block; padding:1.25rem 1.4rem 1.4rem; text-decoration:none; color:inherit; }}
+      .meta {{ margin:0 0 0.4rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); }}
+      .card h2 {{ margin:0; font-family: Georgia, "Times New Roman", serif; font-weight:400; font-size:1.35rem; line-height:1.25; letter-spacing:-0.015em; color:var(--text); }}
+      .card .desc {{ margin:0.6rem 0 0.9rem; color:var(--muted); font-size:0.95rem; line-height:1.55; }}
+      .cta {{ font-size:12.5px; color: var(--brass); letter-spacing:0.02em; }}
+      .empty {{ color: var(--muted); font-size:1rem; }}
+    </style>
+  </head>
+  <body>
+    <nav class="nav" aria-label="Primary">
+      <a class="brand" href="/">CARVER</a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/articles">Articles</a>
+      </div>
+    </nav>
+    <main>
+      <p class="eyebrow">Carver journal</p>
+      <h1>Articles for superyacht crew</h1>
+      <p class="lede">Short guides on landing berths, staying match-ready between seasons, and how Carver's WhatsApp bot actually works.</p>
+      {body_block}
     </main>
   </body>
 </html>
@@ -420,6 +619,21 @@ def list_articles(request: Request, db: Session = Depends(get_db)):
     return {"ok": True, "articles": [_serialise(r) for r in rows]}
 
 
+@public_router.get("/list.html", include_in_schema=False)
+@_limiter.limit("60/minute")
+def articles_list_page(request: Request, db: Session = Depends(get_db)):
+    """SSR HTML index of published articles. Proxied from `/articles` by nginx."""
+    rows = (
+        db.query(Article)
+        .filter(Article.published.is_(True))
+        .order_by(Article.date.desc(), Article.id.desc())
+        .limit(500)
+        .all()
+    )
+    body = _render_articles_list_html(rows)
+    return HTMLResponse(content=body)
+
+
 @public_router.get("/sitemap.xml", include_in_schema=False)
 @_limiter.limit("60/minute")
 def articles_sitemap(request: Request, db: Session = Depends(get_db)):
@@ -447,7 +661,20 @@ def article_page(slug: str, request: Request, db: Session = Depends(get_db)):
     )
     if not row:
         raise HTTPException(status_code=404, detail="Article not found.")
-    body = _render_article_html(_serialise(row))
+
+    # Fetch a recent pool (excluding the current article) and pick related
+    # entries in Python — cheap at this volume and avoids coupling ranking
+    # to the storage layer.
+    pool = (
+        db.query(Article)
+        .filter(Article.published.is_(True), Article.slug != row.slug)
+        .order_by(Article.date.desc(), Article.id.desc())
+        .limit(100)
+        .all()
+    )
+    related = _pick_related(row, pool, k=4)
+
+    body = _render_article_html(_serialise(row), related=related)
     return HTMLResponse(content=body)
 
 
