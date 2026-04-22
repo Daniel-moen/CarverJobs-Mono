@@ -88,7 +88,7 @@
     draftError = ''
     copiedEmail = false
     document.body.style.overflow = 'hidden'
-    window.scrollTo({ top: 0, behavior: 'instant' })
+    window.scrollTo({ top: 0, behavior: 'auto' })
     trackClick('match_session_draft_email')
     await callDraftApi(job.id)
   }

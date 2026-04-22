@@ -72,7 +72,7 @@
     draftError = ''
     emailCopied = false
     document.body.style.overflow = 'hidden'
-    window.scrollTo({ top: 0, behavior: 'instant' })
+    window.scrollTo({ top: 0, behavior: 'auto' })
     await callDraftApi(job.id)
   }
 

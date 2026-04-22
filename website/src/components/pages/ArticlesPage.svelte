@@ -82,7 +82,7 @@
         author: { '@type': 'Organization', name: 'Carver' },
         publisher: { '@type': 'Organization', name: 'Carver' },
         mainEntityOfPage: url,
-        keywords: current.keywords.join(', '),
+        keywords: (Array.isArray(current.keywords) ? current.keywords : []).join(', '),
       }
     } else if (notFound) {
       title = 'Article not found — Carver'
@@ -162,7 +162,7 @@
 
   onMount(() => {
     trackPageView(isDetail ? `article:${slug}` : 'articles')
-    window.scrollTo({ top: 0, behavior: 'instant' })
+    window.scrollTo({ top: 0, behavior: 'auto' })
     loadArticles()
   })
 
@@ -229,7 +229,7 @@
         <p class="a-article-lede" itemprop="description">{current.description}</p>
 
         <div class="a-article-body" itemprop="articleBody">
-          {#each current.body as block}
+          {#each current.body ?? [] as block}
             {#if block.type === 'h2'}
               <h2>{block.text}</h2>
             {:else if block.type === 'p'}
