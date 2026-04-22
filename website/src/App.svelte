@@ -2,26 +2,6 @@
   import { onMount, tick, onDestroy } from 'svelte'
   import SiteHeader from './components/layout/SiteHeader.svelte'
   import SiteFooter from './components/layout/SiteFooter.svelte'
-  import AutoApplyPage from './components/pages/AutoApplyPage.svelte'
-  import DashboardPage from './components/pages/DashboardPage.svelte'
-  import JobBoardPage from './components/pages/JobBoardPage.svelte'
-  import ProfilePage from './components/pages/ProfilePage.svelte'
-  import StatusPage from './components/pages/StatusPage.svelte'
-  import SubscriptionPage from './components/pages/SubscriptionPage.svelte'
-  import OnboardingFlow from './components/onboarding/OnboardingFlow.svelte'
-  import LandingPage from './components/pages/LandingPage.svelte'
-  import MobileMarketingPage from './components/pages/MobileMarketingPage.svelte'
-  import PublicProfilePage from './components/pages/PublicProfilePage.svelte'
-  import WhatsAppAuthPage from './components/pages/WhatsAppAuthPage.svelte'
-  import MatchSessionPage from './components/pages/MatchSessionPage.svelte'
-  import LaunchSignupPage from './components/pages/LaunchSignupPage.svelte'
-  import SignUpPage from './components/pages/SignUpPage.svelte'
-  import AdminJobIngestPage from './components/pages/AdminJobIngestPage.svelte'
-  import AgencyShell from './components/layout/AgencyShell.svelte'
-  import PrivacyPolicyPage from './components/pages/PrivacyPolicyPage.svelte'
-  import TermsOfServicePage from './components/pages/TermsOfServicePage.svelte'
-  import DataDeletionPage from './components/pages/DataDeletionPage.svelte'
-  import ArticlesPage from './components/pages/ArticlesPage.svelte'
   import { API_BASE_URL, apiFetch } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
   import { identifyUser, resetUser } from './config/posthog'
@@ -29,6 +9,37 @@
   // ── URL routing ──────────────────────────────────────────────────────────────
   // Map URL pathnames → page keys and back.  No router library needed —
   // nginx already falls back to index.html for every path.
+  /** Cached dynamic imports — one chunk per key, reused on navigation. */
+  const _pageChunkCache = new Map()
+  /**
+   * @param {string} key
+   * @param {() => Promise<{ default: import('svelte').Component }>} loader
+   */
+  function pageChunk(key, loader) {
+    let p = _pageChunkCache.get(key)
+    if (!p) {
+      p = loader()
+      _pageChunkCache.set(key, p)
+    }
+    return p
+  }
+
+  const crewPageImports = {
+    'auto-apply': () => import('./components/pages/AutoApplyPage.svelte'),
+    'job-board': () => import('./components/pages/JobBoardPage.svelte'),
+    'match-session': () => import('./components/pages/MatchSessionPage.svelte'),
+    profile: () => import('./components/pages/ProfilePage.svelte'),
+    status: () => import('./components/pages/StatusPage.svelte'),
+    dashboard: () => import('./components/pages/DashboardPage.svelte'),
+    'admin-job-ingest': () => import('./components/pages/AdminJobIngestPage.svelte'),
+    subscription: () => import('./components/pages/SubscriptionPage.svelte'),
+  }
+
+  /** @param {string} page */
+  function crewChunkKey(page) {
+    return page in crewPageImports ? page : 'auto-apply'
+  }
+
   const PATH_TO_PAGE = {
     '/launch':       'launch-signup',
     '/signup':       'signup',
@@ -201,19 +212,6 @@
     showOnboarding = false
     showDocsReminder = checkDocsReminder()
   }
-
-  const pageMap = {
-    'auto-apply': AutoApplyPage,
-    'job-board': JobBoardPage,
-    'match-session': MatchSessionPage,
-    profile: ProfilePage,
-    status: StatusPage,
-    dashboard: DashboardPage,
-    'admin-job-ingest': AdminJobIngestPage,
-    subscription: SubscriptionPage,
-  }
-
-  $: ActivePage = pageMap[currentPage] ?? AutoApplyPage
 
   // Retry a fetch on network failure (e.g. API still booting). Gives up after
   // maxAttempts, doubling the delay each time starting from initialDelayMs.
@@ -525,30 +523,70 @@
 
 <div class="min-h-screen bg-black text-slate-100 relative">
   {#if currentPage === 'launch-signup'}
-    <LaunchSignupPage />
+    {#await pageChunk('launch-signup', () => import('./components/pages/LaunchSignupPage.svelte'))}
+      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+      </main>
+    {:then { default: LaunchSignupPage }}
+      <LaunchSignupPage />
+    {/await}
   {:else if currentPage === 'articles'}
-    <ArticlesPage
-      slug={articleSlug}
-      onBack={() => {
-        articleSlug = ''
-        currentPage = SITE_LAUNCHED ? 'auto-apply' : 'launch-signup'
-        const path = SITE_LAUNCHED ? '/' : '/launch'
-        history.pushState({ page: currentPage }, '', path)
-      }}
-    />
+    {#await pageChunk('articles', () => import('./components/pages/ArticlesPage.svelte'))}
+      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+      </main>
+    {:then { default: ArticlesPage }}
+      <ArticlesPage
+        slug={articleSlug}
+        onBack={() => {
+          articleSlug = ''
+          currentPage = SITE_LAUNCHED ? 'auto-apply' : 'launch-signup'
+          const path = SITE_LAUNCHED ? '/' : '/launch'
+          history.pushState({ page: currentPage }, '', path)
+        }}
+      />
+    {/await}
   {:else if isLegalDocumentPage(currentPage)}
     {#if currentPage === 'privacy'}
-      <PrivacyPolicyPage />
+      {#await pageChunk('legal-privacy', () => import('./components/pages/PrivacyPolicyPage.svelte'))}
+        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+        </main>
+      {:then { default: PrivacyPolicyPage }}
+        <PrivacyPolicyPage />
+      {/await}
     {:else if currentPage === 'terms'}
-      <TermsOfServicePage />
+      {#await pageChunk('legal-terms', () => import('./components/pages/TermsOfServicePage.svelte'))}
+        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+        </main>
+      {:then { default: TermsOfServicePage }}
+        <TermsOfServicePage />
+      {/await}
     {:else}
-      <DataDeletionPage />
+      {#await pageChunk('legal-data-deletion', () => import('./components/pages/DataDeletionPage.svelte'))}
+        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+        </main>
+      {:then { default: DataDeletionPage }}
+        <DataDeletionPage />
+      {/await}
     {/if}
   {:else if waToken}
-    <WhatsAppAuthPage token={waToken} />
+    {#await pageChunk('whatsapp-auth', () => import('./components/pages/WhatsAppAuthPage.svelte'))}
+      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+      </main>
+    {:then { default: WhatsAppAuthPage }}
+      <WhatsAppAuthPage token={waToken} />
+    {/await}
   {:else if publicSlug}
     <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
-      <PublicProfilePage slug={publicSlug} />
+      {#await pageChunk('public-profile', () => import('./components/pages/PublicProfilePage.svelte'))}
+        <p class="py-16 text-center font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+      {:then { default: PublicProfilePage }}
+        <PublicProfilePage slug={publicSlug} />
+      {/await}
     </main>
   {:else if isCheckingSession}
     <main class="mx-auto flex min-h-[100dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
@@ -561,57 +599,75 @@
       </div>
     </main>
   {:else if !isAuthenticated && showSignup}
-    <SignUpPage
-      {googleEnabled}
-      {googleClientId}
-      initialIntent={window.location.pathname === '/signup/agency' ? 'agency' : 'crew'}
-      onGoogleSignIn={async (token) => {
-        await loginWithGoogleToken(token)
-        if (isAuthenticated) {
+    {#await pageChunk('signup', () => import('./components/pages/SignUpPage.svelte'))}
+      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+      </main>
+    {:then { default: SignUpPage }}
+      <SignUpPage
+        {googleEnabled}
+        {googleClientId}
+        initialIntent={window.location.pathname === '/signup/agency' ? 'agency' : 'crew'}
+        onGoogleSignIn={async (token) => {
+          await loginWithGoogleToken(token)
+          if (isAuthenticated) {
+            showSignup = false
+            trackFunnel('signup_complete', { label: 'google' })
+            try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
+            showOnboarding = checkOnboardingNeeded()
+            if (!showOnboarding) showDocsReminder = checkDocsReminder()
+            currentPage = 'auto-apply'
+            history.replaceState({ page: 'auto-apply' }, '', '/')
+          }
+        }}
+        onSignUpSuccess={async (result) => {
+          await checkSession()
           showSignup = false
-          trackFunnel('signup_complete', { label: 'google' })
+          trackFunnel('signup_complete', { label: result?.intent === 'agency' ? 'agency' : 'email' })
+          if (result?.intent === 'agency') {
+            showOnboarding = false
+            showDocsReminder = false
+            history.replaceState({}, '', '/agency')
+            return
+          }
           try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
           showOnboarding = checkOnboardingNeeded()
           if (!showOnboarding) showDocsReminder = checkDocsReminder()
           currentPage = 'auto-apply'
           history.replaceState({ page: 'auto-apply' }, '', '/')
-        }
-      }}
-      onSignUpSuccess={async (result) => {
-        await checkSession()
-        showSignup = false
-        trackFunnel('signup_complete', { label: result?.intent === 'agency' ? 'agency' : 'email' })
-        if (result?.intent === 'agency') {
-          showOnboarding = false
-          showDocsReminder = false
-          history.replaceState({}, '', '/agency')
-          return
-        }
-        try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
-        showOnboarding = checkOnboardingNeeded()
-        if (!showOnboarding) showDocsReminder = checkDocsReminder()
-        currentPage = 'auto-apply'
-        history.replaceState({ page: 'auto-apply' }, '', '/')
-      }}
-      onGoToLogin={() => {
-        showSignup = false
-        showLogin = true
-        history.pushState({ page: 'login' }, '', '/')
-      }}
-    />
+        }}
+        onGoToLogin={() => {
+          showSignup = false
+          showLogin = true
+          history.pushState({ page: 'login' }, '', '/')
+        }}
+      />
+    {/await}
   {:else if !isAuthenticated && !showLogin}
     {#if isMobileViewport}
-      <MobileMarketingPage
-        onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
-        onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
-        onAgencySignup={() => { authError = ''; showLogin = false; showSignup = true; history.pushState({ page: 'signup' }, '', '/signup/agency'); trackClick('agency_signup_cta') }}
-      />
+      {#await pageChunk('marketing-mobile', () => import('./components/pages/MobileMarketingPage.svelte'))}
+        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+        </main>
+      {:then { default: MobileMarketingPage }}
+        <MobileMarketingPage
+          onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
+          onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
+          onAgencySignup={() => { authError = ''; showLogin = false; showSignup = true; history.pushState({ page: 'signup' }, '', '/signup/agency'); trackClick('agency_signup_cta') }}
+        />
+      {/await}
     {:else}
-      <LandingPage
-        onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
-        onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
-        onAgencySignup={() => { authError = ''; showLogin = false; showSignup = true; history.pushState({ page: 'signup' }, '', '/signup/agency'); trackClick('agency_signup_cta') }}
-      />
+      {#await pageChunk('marketing-desktop', () => import('./components/pages/LandingPage.svelte'))}
+        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+        </main>
+      {:then { default: LandingPage }}
+        <LandingPage
+          onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
+          onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
+          onAgencySignup={() => { authError = ''; showLogin = false; showSignup = true; history.pushState({ page: 'signup' }, '', '/signup/agency'); trackClick('agency_signup_cta') }}
+        />
+      {/await}
     {/if}
   {:else if !isAuthenticated && showLogin}
     <main class="relative mx-auto flex min-h-[100dvh] w-full max-w-md items-center px-4 py-10 sm:px-6">
@@ -710,9 +766,21 @@
       </section>
     </main>
   {:else if showOnboarding}
-    <OnboardingFlow onComplete={handleOnboardingComplete} />
+    {#await pageChunk('onboarding', () => import('./components/onboarding/OnboardingFlow.svelte'))}
+      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+      </main>
+    {:then { default: OnboardingFlow }}
+      <OnboardingFlow onComplete={handleOnboardingComplete} />
+    {/await}
   {:else if isAuthenticated && userRole === 'agency'}
-    <AgencyShell agencyName={agencyName} onLogout={logout} />
+    {#await pageChunk('agency-shell', () => import('./components/layout/AgencyShell.svelte'))}
+      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
+        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+      </main>
+    {:then { default: AgencyShell }}
+      <AgencyShell agencyName={agencyName} onLogout={logout} />
+    {/await}
   {:else}
     <!-- Global animated app background -->
     <div class="app-bg" aria-hidden="true">
@@ -758,7 +826,11 @@
     {/if}
 
     <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
-      <svelte:component this={ActivePage} isSubscribed={isSubscribed} creditsBalance={creditsBalance} onCreditsChanged={(value) => (creditsBalance = Math.max(0, Number(value) || 0))} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} sessionId={matchSessionId} />
+      {#await pageChunk('crew-' + crewChunkKey(currentPage), () => crewPageImports[crewChunkKey(currentPage)]())}
+        <p class="py-16 text-center font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+      {:then { default: ActivePage }}
+        <svelte:component this={ActivePage} isSubscribed={isSubscribed} creditsBalance={creditsBalance} onCreditsChanged={(value) => (creditsBalance = Math.max(0, Number(value) || 0))} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} sessionId={matchSessionId} />
+      {/await}
     </main>
     <SiteFooter />
   {/if}
