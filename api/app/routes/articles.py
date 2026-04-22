@@ -15,11 +15,13 @@ as raw HTML, so content pushed here cannot inject script into visitors.
 """
 
 import hmac
+import html
 import json
 import re
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -220,7 +222,190 @@ def _serialise(row: Article) -> dict:
     }
 
 
+# ── SSR helpers ─────────────────────────────────────────────────────────────
+#
+# All author-controlled text is HTML-escaped before being inlined, and the
+# JSON-LD payload has every "</" sequence escaped so it cannot break out of
+# the <script> element. The SSR page loads no third-party JS and carries a
+# strict Content-Security-Policy via nginx.
+
+def _site_origin() -> str:
+    base = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
+    if not base or base.startswith("http://localhost"):
+        return "https://jobcarver.co"
+    return base
+
+
+def _esc(value: str | None) -> str:
+    return html.escape(value or "", quote=True)
+
+
+def _render_article_html(article: dict) -> str:
+    """Return a fully server-rendered HTML page for a single article.
+
+    The page is self-contained (no third-party scripts, no SPA hydration)
+    so crawlers and social previewers receive the article body and meta
+    tags in the initial response.
+    """
+    origin = _site_origin()
+    slug = article["slug"]
+    canonical = f"{origin}/articles/{slug}"
+    full_title_plain = f"{article['title']} — Carver"
+    title_html = _esc(full_title_plain)
+    description_html = _esc(article["description"])
+    headline_html = _esc(article["title"])
+    date_html = _esc(article["date"])
+    try:
+        read_minutes = int(article.get("read_minutes") or 3)
+    except (TypeError, ValueError):
+        read_minutes = 3
+    keywords_raw = [k for k in (article.get("keywords") or []) if isinstance(k, str)]
+    keywords_html = _esc(", ".join(keywords_raw))
+
+    body_parts: list[str] = []
+    for block in article.get("body") or []:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "h2" and block.get("text"):
+            body_parts.append(f"<h2>{_esc(block['text'])}</h2>")
+        elif btype == "p" and block.get("text"):
+            body_parts.append(f"<p>{_esc(block['text'])}</p>")
+        elif btype == "ul" and isinstance(block.get("items"), list):
+            items = "".join(
+                f"<li>{_esc(item)}</li>" for item in block["items"] if isinstance(item, str)
+            )
+            if items:
+                body_parts.append(f"<ul>{items}</ul>")
+    body_html = "\n          ".join(body_parts)
+
+    json_ld = {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": article["title"],
+        "description": article["description"],
+        "datePublished": article["date"],
+        "dateModified": article["date"],
+        "author": {"@type": "Organization", "name": "Carver"},
+        "publisher": {"@type": "Organization", "name": "Carver"},
+        "mainEntityOfPage": canonical,
+        "keywords": ", ".join(keywords_raw),
+    }
+    # Prevent </script> breakout inside the JSON-LD block.
+    json_ld_safe = json.dumps(json_ld, ensure_ascii=True).replace("</", "<\\/")
+
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>{title_html}</title>
+    <meta name="description" content="{description_html}" />
+    <meta name="keywords" content="{keywords_html}" />
+    <meta name="author" content="Carver" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="theme-color" content="#05080c" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="canonical" href="{_esc(canonical)}" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Carver" />
+    <meta property="og:title" content="{title_html}" />
+    <meta property="og:description" content="{description_html}" />
+    <meta property="og:url" content="{_esc(canonical)}" />
+    <meta property="og:image" content="{_esc(origin)}/og-image.svg" />
+    <meta property="og:locale" content="en_GB" />
+    <meta property="article:published_time" content="{date_html}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{title_html}" />
+    <meta name="twitter:description" content="{description_html}" />
+    <meta name="twitter:image" content="{_esc(origin)}/og-image.svg" />
+    <script type="application/ld+json">{json_ld_safe}</script>
+    <style>
+      :root {{ --bg:#05080c; --text:#e8e6e1; --muted:#8a8378; --brass:#d4b97a; --border:rgba(255,255,255,0.06); }}
+      *,*::before,*::after {{ box-sizing: border-box; }}
+      html,body {{ margin:0; padding:0; background:var(--bg); color:var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }}
+      a {{ color: var(--brass); }}
+      .nav {{ max-width:1280px; margin:0 auto; padding:1rem 1.5rem; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); }}
+      .brand {{ text-decoration:none; color:var(--text); font-weight:600; letter-spacing:0.04em; font-size: 0.9rem; }}
+      .nav-links a {{ margin-left:1rem; color:var(--muted); text-decoration:none; font-size:0.85rem; }}
+      .nav-links a:hover {{ color: var(--text); }}
+      main {{ max-width:720px; margin:0 auto; padding:3rem 1.5rem 5rem; }}
+      .crumbs {{ font-size:0.72rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin:0 0 1.5rem; }}
+      .crumbs a {{ color:inherit; text-decoration:none; border-bottom:1px dashed rgba(255,255,255,0.18); }}
+      h1 {{ font-family: Georgia, "Times New Roman", serif; font-weight:300; font-size:clamp(1.9rem, 4.5vw, 2.75rem); line-height:1.08; letter-spacing:-0.02em; margin:0; color:var(--text); }}
+      .lede {{ color:var(--muted); font-size:1.05rem; line-height:1.6; margin:1.25rem 0 0; }}
+      .body {{ margin-top:2.25rem; line-height:1.7; }}
+      .body h2 {{ font-family: Georgia, "Times New Roman", serif; font-weight:400; font-size:1.3rem; margin:2.25rem 0 0.75rem; color:var(--text); }}
+      .body p {{ margin:0 0 1.1rem; color:var(--muted); }}
+      .body ul {{ padding-left:1.2rem; color:var(--muted); margin:0 0 1.25rem; }}
+      .body li {{ margin: 0.35rem 0; }}
+      .foot {{ margin-top:3rem; padding-top:1.5rem; border-top:1px solid var(--border); }}
+      .back {{ color:var(--muted); font-size:0.85rem; text-decoration:none; border-bottom:1px dashed rgba(255,255,255,0.18); }}
+      .back:hover {{ color: var(--text); }}
+    </style>
+  </head>
+  <body>
+    <nav class="nav" aria-label="Primary">
+      <a class="brand" href="/">CARVER</a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/articles">Articles</a>
+      </div>
+    </nav>
+    <main>
+      <article itemscope itemtype="https://schema.org/Article">
+        <p class="crumbs">
+          <a href="/articles">Articles</a> &middot;
+          <time datetime="{date_html}" itemprop="datePublished">{date_html}</time> &middot;
+          <span>{read_minutes} min read</span>
+        </p>
+        <h1 itemprop="headline">{headline_html}</h1>
+        <p class="lede" itemprop="description">{description_html}</p>
+        <div class="body" itemprop="articleBody">
+          {body_html}
+        </div>
+        <footer class="foot">
+          <a class="back" href="/articles">&larr; All articles</a>
+        </footer>
+      </article>
+    </main>
+  </body>
+</html>
+"""
+
+
+def _render_articles_sitemap(rows: list[Article]) -> str:
+    origin = _site_origin()
+    parts: list[str] = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for row in rows:
+        loc = f"{origin}/articles/{row.slug}"
+        lastmod = row.date or ""
+        try:
+            if row.updated_at is not None:
+                lastmod = row.updated_at.date().isoformat()
+        except AttributeError:
+            pass
+        parts.append("  <url>")
+        parts.append(f"    <loc>{html.escape(loc)}</loc>")
+        if lastmod:
+            parts.append(f"    <lastmod>{html.escape(lastmod)}</lastmod>")
+        parts.append("    <changefreq>monthly</changefreq>")
+        parts.append("    <priority>0.7</priority>")
+        parts.append("  </url>")
+    parts.append("</urlset>")
+    parts.append("")
+    return "\n".join(parts)
+
+
 # ── Public endpoints ────────────────────────────────────────────────────────
+#
+# Route registration order matters: `/sitemap.xml` and `/{slug}/page.html`
+# must be registered before the generic `/{slug}` route so Starlette picks
+# the more specific match first.
 
 @public_router.get("")
 @_limiter.limit("60/minute")
@@ -233,6 +418,37 @@ def list_articles(request: Request, db: Session = Depends(get_db)):
         .all()
     )
     return {"ok": True, "articles": [_serialise(r) for r in rows]}
+
+
+@public_router.get("/sitemap.xml", include_in_schema=False)
+@_limiter.limit("60/minute")
+def articles_sitemap(request: Request, db: Session = Depends(get_db)):
+    rows = (
+        db.query(Article)
+        .filter(Article.published.is_(True))
+        .order_by(Article.date.desc(), Article.id.desc())
+        .limit(2000)
+        .all()
+    )
+    xml = _render_articles_sitemap(rows)
+    return Response(content=xml, media_type="application/xml")
+
+
+@public_router.get("/{slug}/page.html", include_in_schema=False)
+@_limiter.limit("60/minute")
+def article_page(slug: str, request: Request, db: Session = Depends(get_db)):
+    slug = slug.strip().lower()
+    if not _SLUG_PATTERN.match(slug):
+        raise HTTPException(status_code=404, detail="Article not found.")
+    row = (
+        db.query(Article)
+        .filter(Article.slug == slug, Article.published.is_(True))
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Article not found.")
+    body = _render_article_html(_serialise(row))
+    return HTMLResponse(content=body)
 
 
 @public_router.get("/{slug}")
