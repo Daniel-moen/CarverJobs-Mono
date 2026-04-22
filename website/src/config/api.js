@@ -5,29 +5,46 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 const CSRF_EXEMPT_PATHS = ['/auth/login', '/auth/google', '/auth/signup', '/auth/waitlist']
 
 let _csrfToken = ''
-let _seedingPromise = null
+/** In-flight or last single-flight GET /auth/providers (CSRF + Google config). */
+let _providersBootstrapPromise = null
 let _lastUnauthorizedEventMs = 0
 
 let _waSessionToken = ''
 export function setWaSessionToken(token) { _waSessionToken = token }
 export function getWaSessionToken() { return _waSessionToken }
 
-async function _seedCsrfToken() {
-  if (_csrfToken) return
-  if (_seedingPromise) return _seedingPromise
+/**
+ * One network GET /auth/providers at a time: sets CSRF from response headers
+ * and returns parsed JSON (or null). Used by App bootstrap and CSRF seeding
+ * so a racing POST does not duplicate the same request.
+ */
+export async function getAuthProviders() {
+  if (_providersBootstrapPromise) return _providersBootstrapPromise
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 4000)
-  _seedingPromise = fetch(`${API_BASE_URL}/auth/providers`, {
-    credentials: 'include',
-    signal: controller.signal,
-  })
-    .then((r) => {
+  _providersBootstrapPromise = (async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/auth/providers`, {
+        credentials: 'include',
+        signal: controller.signal,
+      })
       const t = r.headers.get(CSRF_HEADER)
       if (t) _csrfToken = t
-    })
-    .catch(() => {})
-    .finally(() => { clearTimeout(timer); _seedingPromise = null })
-  return _seedingPromise
+      const json = r.ok ? await r.json().catch(() => null) : null
+      return { ok: r.ok, json }
+    } catch {
+      return { ok: false, json: null }
+    } finally {
+      clearTimeout(timer)
+      _providersBootstrapPromise = null
+    }
+  })()
+  return _providersBootstrapPromise
+}
+
+async function _seedCsrfToken() {
+  if (_csrfToken) return
+  await getAuthProviders()
 }
 
 export async function apiFetch(url, options = {}) {

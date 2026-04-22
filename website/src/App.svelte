@@ -2,7 +2,7 @@
   import { onMount, tick, onDestroy } from 'svelte'
   import SiteHeader from './components/layout/SiteHeader.svelte'
   import SiteFooter from './components/layout/SiteFooter.svelte'
-  import { API_BASE_URL, apiFetch } from './config/api'
+  import { API_BASE_URL, apiFetch, getAuthProviders } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
   import { identifyUser, resetUser } from './config/posthog'
 
@@ -279,14 +279,16 @@
 
   async function loadAuthProviders() {
     try {
-      const response = await fetchWithRetry(`${API_BASE_URL}/auth/providers`, {
-        method: 'GET',
-        credentials: 'include',
-        skipAuthHandling: true,
-        timeoutMs: 4000,
-      }, { maxAttempts: 2, initialDelayMs: 1000 })
-      if (!response.ok) return
-      const payload = await response.json()
+      let payload = null
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const { ok, json } = await getAuthProviders()
+        if (ok && json) {
+          payload = json
+          break
+        }
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 1000))
+      }
+      if (!payload) return
       googleEnabled = Boolean(payload?.google?.enabled)
       googleClientId = typeof payload?.google?.client_id === 'string' ? payload.google.client_id : ''
     } catch {
@@ -513,7 +515,6 @@
 
     await Promise.all([checkSession(), loadAuthProviders()])
     if (currentPage === 'signup' && !isAuthenticated) showSignup = true
-    await initGoogleButton()
   })
 
   $: if (!isAuthenticated && showLogin && googleEnabled && googleClientId) {
@@ -808,7 +809,7 @@
           </div>
           <div class="flex items-center gap-3 self-end sm:flex-none sm:self-auto">
             <button
-              onclick={() => (currentPage = 'profile')}
+              onclick={() => navigate('profile')}
               class="rounded-lg border border-amber-300/40 bg-amber-300/15 px-3 py-1 text-xs font-medium text-amber-100 transition hover:bg-amber-300/25"
             >
               Go to Profile
