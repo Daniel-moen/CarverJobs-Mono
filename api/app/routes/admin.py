@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import Field, JsonValue
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -12,7 +12,7 @@ from app import analytics, flags, metrics, telnyx_inbound_buffer
 from app.database import get_db
 from app.error_codes import CRV_1005, CRV_5001, CRV_5002, CRV_5003, CRV_5004
 from app.logger import get_logger
-from app.models import ErrorLog, Job, User, WhatsAppMagicToken, WhatsAppSession
+from app.models import ErrorLog, Job, User, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
 from app.schemas import APIModel
 from app.security import require_admin_session
 from app.services.ai_client import AIClientError, call_openai
@@ -85,6 +85,35 @@ def get_stats(request: Request, db: Session = Depends(get_db)):
 def get_telnyx_inbound_recent():
     """Recent inbound SMS captured by POST /telnyx/webhook (for OTP / debugging)."""
     return {"ok": True, "messages": telnyx_inbound_buffer.recent()}
+
+
+@router.get("/whatsapp/messages")
+def list_whatsapp_messages(
+    limit: int = Query(default=50, ge=1, le=200),
+    phone_number: str | None = Query(default=None, max_length=30),
+    db: Session = Depends(get_db),
+):
+    query = db.query(WhatsAppMessage).order_by(WhatsAppMessage.id.desc())
+    if phone_number:
+        query = query.filter(WhatsAppMessage.phone_number == phone_number.strip())
+
+    rows = query.limit(limit).all()
+    return {
+        "ok": True,
+        "messages": [
+            {
+                "id": row.id,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "phone_number": row.phone_number,
+                "direction": row.direction,
+                "message_type": row.message_type,
+                "content": row.content,
+                "meta_message_id": row.meta_message_id,
+                "graph_phone_number_id": row.graph_phone_number_id,
+            }
+            for row in rows
+        ],
+    }
 
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
