@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 from app import flags, metrics
 from app.database import SessionLocal, get_db
 from app.logger import get_logger
-from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppSession
+from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
 from app.security import issue_session_token
 from app.settings import settings
 from app.services.ai_client import AIClientError
@@ -145,6 +145,46 @@ def _wa_configured() -> bool:
     return bool(settings.WHATSAPP_PHONE_NUMBER_ID and settings.WHATSAPP_ACCESS_TOKEN)
 
 
+def _record_whatsapp_message(
+    phone_number: str,
+    direction: str,
+    message_type: str,
+    content: str | None,
+    *,
+    meta_message_id: str | None = None,
+    graph_phone_number_id: str | None = None,
+    payload: dict | None = None,
+) -> None:
+    """Best-effort audit log for WhatsApp inbound messages and bot replies."""
+    db = SessionLocal()
+    try:
+        db.add(WhatsAppMessage(
+            phone_number=phone_number,
+            direction=direction,
+            message_type=message_type,
+            content=content,
+            meta_message_id=meta_message_id or None,
+            graph_phone_number_id=graph_phone_number_id or None,
+            payload_json=json.dumps(payload, ensure_ascii=True, default=str) if payload else None,
+        ))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        log.warning("WhatsApp message audit failed | phone=%s | %s", phone_number[:6] + "****", exc)
+    finally:
+        db.close()
+
+
+def _meta_response_message_id(resp: httpx.Response) -> str | None:
+    try:
+        messages = resp.json().get("messages") or []
+    except ValueError:
+        return None
+    if not messages:
+        return None
+    return str((messages[0] or {}).get("id") or "").strip() or None
+
+
 def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
     """Verify X-Hub-Signature-256 from Meta."""
     if not settings.META_APP_SECRET:
@@ -173,14 +213,29 @@ async def _send_whatsapp(to: str, text: str) -> None:
         "text": {"body": text},
     }
     headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+    audit_payload: dict = {"graph_phone_number_id": _active_wa_phone_number_id()}
+    meta_message_id = None
     try:
         resp = await _http.post(url, json=payload, headers=headers)
+        audit_payload["status_code"] = resp.status_code
+        meta_message_id = _meta_response_message_id(resp)
         if resp.status_code >= 400:
             log.error("Meta send failed | to=%s | status=%d | body=%s", to, resp.status_code, resp.text[:300])
         else:
             log.info("WhatsApp message sent | to=%s | chars=%d", to, len(text))
     except httpx.HTTPError as exc:
+        audit_payload["error"] = exc.__class__.__name__
         log.exception("WhatsApp send error | to=%s | %s", to, exc)
+    finally:
+        _record_whatsapp_message(
+            to,
+            "outbound",
+            "text",
+            text,
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=_active_wa_phone_number_id(),
+            payload=audit_payload,
+        )
 
 
 async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, str]]) -> None:
@@ -201,12 +256,30 @@ async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, st
         },
     }
     headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+    audit_payload: dict = {
+        "graph_phone_number_id": _active_wa_phone_number_id(),
+        "buttons": [{"id": bid, "title": title[:20]} for bid, title in buttons[:3]],
+    }
+    meta_message_id = None
     try:
         resp = await _http.post(url, json=payload, headers=headers)
+        audit_payload["status_code"] = resp.status_code
+        meta_message_id = _meta_response_message_id(resp)
         if resp.status_code >= 400:
             log.error("Meta buttons send failed | to=%s | status=%d | body=%s", to, resp.status_code, resp.text[:300])
     except httpx.HTTPError as exc:
+        audit_payload["error"] = exc.__class__.__name__
         log.exception("WhatsApp buttons send error | to=%s | %s", to, exc)
+    finally:
+        _record_whatsapp_message(
+            to,
+            "outbound",
+            "interactive_button",
+            body,
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=_active_wa_phone_number_id(),
+            payload=audit_payload,
+        )
 
 
 async def _send_job_review_wait(to: str) -> None:
@@ -298,12 +371,39 @@ async def _send_help_menu(to: str, db: Session) -> None:
         },
     }
     headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+    audit_payload: dict = {
+        "graph_phone_number_id": _active_wa_phone_number_id(),
+        "sections": [
+            {
+                "title": section.get("title"),
+                "rows": [
+                    {"id": row.get("id"), "title": row.get("title")}
+                    for row in section.get("rows", [])
+                ],
+            }
+            for section in payload["interactive"]["action"]["sections"]
+        ],
+    }
+    meta_message_id = None
     try:
         resp = await _http.post(url, json=payload, headers=headers)
+        audit_payload["status_code"] = resp.status_code
+        meta_message_id = _meta_response_message_id(resp)
         if resp.status_code >= 400:
             log.error("Meta list send failed | to=%s | status=%d | body=%s", to, resp.status_code, resp.text[:300])
     except httpx.HTTPError as exc:
+        audit_payload["error"] = exc.__class__.__name__
         log.exception("WhatsApp list send error | to=%s | %s", to, exc)
+    finally:
+        _record_whatsapp_message(
+            to,
+            "outbound",
+            "interactive_list",
+            body_text,
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=_active_wa_phone_number_id(),
+            payload=audit_payload,
+        )
 
 
 # ── WhatsApp media download ───────────────────────────────────────────────────
@@ -1409,11 +1509,25 @@ _GLOBAL_CMDS: frozenset[str] = frozenset({
 })
 
 
-async def _process_whatsapp_message(phone_number: str, user_text: str, graph_phone_number_id: str = "") -> None:
+async def _process_whatsapp_message(
+    phone_number: str,
+    user_text: str,
+    graph_phone_number_id: str = "",
+    meta_message_id: str = "",
+    inbound_message_type: str = "text",
+) -> None:
     """Handle a parsed WhatsApp message in the background (owns its own DB session)."""
     ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
     db = SessionLocal()
     try:
+        _record_whatsapp_message(
+            phone_number,
+            "inbound",
+            inbound_message_type,
+            user_text,
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=graph_phone_number_id,
+        )
         wa_session = _get_or_create_session(phone_number, db)
 
         # Global commands bypass onboarding / job-submit modes so the user
@@ -1461,11 +1575,26 @@ async def _process_whatsapp_message(phone_number: str, user_text: str, graph_pho
             _wa_graph_phone_id.reset(ctx_token)
 
 
-async def _process_media_message(phone_number: str, media_id: str, graph_phone_number_id: str = "") -> None:
+async def _process_media_message(
+    phone_number: str,
+    media_id: str,
+    graph_phone_number_id: str = "",
+    meta_message_id: str = "",
+    inbound_message_type: str = "image",
+) -> None:
     """Handle an incoming media file — either as a job submission or crew doc upload."""
     ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
     db = SessionLocal()
     try:
+        _record_whatsapp_message(
+            phone_number,
+            "inbound",
+            inbound_message_type,
+            f"[{inbound_message_type}] {media_id}".strip(),
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=graph_phone_number_id,
+            payload={"media_id": media_id} if media_id else None,
+        )
         wa_session = _get_or_create_session(phone_number, db)
 
         if wa_session.mode == "job_submit":
@@ -1560,44 +1689,44 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
         if not messages:
             return {"ok": True}
 
-        msg = messages[0]
-        msg_type = msg.get("type", "")
-        phone_number = msg.get("from", "")
-        msg_id = msg.get("id", "")
-        msg_timestamp = msg.get("timestamp")
+        for msg in messages:
+            msg_type = msg.get("type", "")
+            phone_number = msg.get("from", "")
+            msg_id = msg.get("id", "")
+            msg_timestamp = msg.get("timestamp")
 
-        if not phone_number:
-            return {"ok": True}
+            if not phone_number:
+                continue
 
-        if msg_id and _is_duplicate_or_stale(msg_id, msg_timestamp):
-            return {"ok": True}
+            if msg_id and _is_duplicate_or_stale(msg_id, msg_timestamp):
+                continue
 
-        if msg_type == "text":
-            user_text = (msg.get("text") or {}).get("body", "").strip()
-            if not user_text:
-                return {"ok": True}
-        elif msg_type == "interactive":
-            interactive = msg.get("interactive") or {}
-            itype = interactive.get("type", "")
-            if itype == "button_reply":
-                bid = (interactive.get("button_reply") or {}).get("id", "")
-            elif itype == "list_reply":
-                bid = (interactive.get("list_reply") or {}).get("id", "")
+            if msg_type == "text":
+                user_text = (msg.get("text") or {}).get("body", "").strip()
+                if not user_text:
+                    continue
+            elif msg_type == "interactive":
+                interactive = msg.get("interactive") or {}
+                itype = interactive.get("type", "")
+                if itype == "button_reply":
+                    bid = (interactive.get("button_reply") or {}).get("id", "")
+                elif itype == "list_reply":
+                    bid = (interactive.get("list_reply") or {}).get("id", "")
+                else:
+                    continue
+                user_text = _INTERACTIVE_CMD_MAP.get(bid, "help")
+            elif msg_type == "image":
+                media_id = (msg.get("image") or {}).get("id", "")
+                if media_id:
+                    background_tasks.add_task(_process_media_message, phone_number, media_id, graph_phone_number_id, msg_id, "image")
+                continue
+            elif msg_type in ("document", "audio", "video"):
+                background_tasks.add_task(_process_media_message, phone_number, "", graph_phone_number_id, msg_id, msg_type)
+                continue
             else:
-                return {"ok": True}
-            user_text = _INTERACTIVE_CMD_MAP.get(bid, "help")
-        elif msg_type == "image":
-            media_id = (msg.get("image") or {}).get("id", "")
-            if media_id:
-                background_tasks.add_task(_process_media_message, phone_number, media_id, graph_phone_number_id)
-            return {"ok": True}
-        elif msg_type in ("document", "audio", "video"):
-            background_tasks.add_task(_process_media_message, phone_number, "", graph_phone_number_id)
-            return {"ok": True}
-        else:
-            return {"ok": True}
+                continue
 
-        background_tasks.add_task(_process_whatsapp_message, phone_number, user_text, graph_phone_number_id)
+            background_tasks.add_task(_process_whatsapp_message, phone_number, user_text, graph_phone_number_id, msg_id, msg_type)
 
     except Exception as exc:
         log.exception("WhatsApp webhook parse error | %s", exc)

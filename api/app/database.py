@@ -113,6 +113,28 @@ def run_migrations() -> None:
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone_number VARCHAR(30) NOT NULL,
+            direction VARCHAR(10) NOT NULL,
+            message_type VARCHAR(30) NOT NULL DEFAULT 'text',
+            content TEXT,
+            meta_message_id VARCHAR(120) UNIQUE,
+            graph_phone_number_id VARCHAR(80),
+            payload_json TEXT,
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_whatsapp_messages_phone_number ON whatsapp_messages (phone_number)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_whatsapp_messages_created_at ON whatsapp_messages (created_at)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_whatsapp_messages_meta_message_id ON whatsapp_messages (meta_message_id)"
+    )
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS whatsapp_magic_tokens (
             token VARCHAR(32) PRIMARY KEY,
             phone_number VARCHAR(30) NOT NULL,

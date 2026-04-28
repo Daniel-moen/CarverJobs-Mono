@@ -177,6 +177,20 @@ class WhatsAppSession(Base):
   )
 
 
+class WhatsAppMessage(Base):
+  __tablename__ = "whatsapp_messages"
+
+  id = Column(Integer, primary_key=True, index=True)
+  phone_number = Column(String(30), nullable=False, index=True)
+  direction = Column(String(10), nullable=False, index=True)  # inbound | outbound
+  message_type = Column(String(30), nullable=False, default="text")
+  content = Column(Text, nullable=True)
+  meta_message_id = Column(String(120), unique=True, nullable=True, index=True)
+  graph_phone_number_id = Column(String(80), nullable=True)
+  payload_json = Column(Text, nullable=True)
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class WhatsAppMagicToken(Base):
   __tablename__ = "whatsapp_magic_tokens"
 
