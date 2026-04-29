@@ -129,7 +129,6 @@
   let articleSlug = extractArticleSlug(window.location.pathname)
   let currentPage = pageFromPath(window.location.pathname)
   let isCheckingSession = true
-  let sessionCheckError = ''
   let isAuthenticated = false
   let hasActiveSession = false
   let userRole = ''
@@ -232,7 +231,6 @@
 
   async function checkSession() {
     isCheckingSession = true
-    sessionCheckError = ''
     try {
       const response = await fetchWithRetry(`${API_BASE_URL}/auth/session`, {
         method: 'GET',
@@ -240,9 +238,6 @@
         skipAuthHandling: true,
         timeoutMs: 4000,
       }, { maxAttempts: 2, initialDelayMs: 1000 })
-      if (!response.ok && response.status >= 500) {
-        sessionCheckError = 'CARVER is having trouble connecting. Please retry in a moment.'
-      }
       let data = null
       try { data = response.ok ? await response.json() : null } catch { data = null }
       isAuthenticated = Boolean(data?.authenticated)
@@ -273,7 +268,6 @@
         creditsBalance = 0
       }
     } catch (error) {
-      sessionCheckError = 'CARVER is having trouble connecting. Please retry in a moment.'
       isAuthenticated = false
       userRole = ''
       agencyName = ''
@@ -593,21 +587,6 @@
         </span>
         <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Securing session</p>
       </div>
-    </main>
-  {:else if sessionCheckError}
-    <main class="mx-auto flex min-h-[100dvh] w-full max-w-md items-center justify-center px-4 text-center sm:px-6">
-      <section class="rounded-2xl border border-amber-300/20 bg-zinc-950/90 p-6 shadow-2xl shadow-black/40">
-        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-amber-300/80">Connection issue</p>
-        <h1 class="mt-3 text-2xl font-black tracking-tight text-white">We could not verify your session.</h1>
-        <p class="mt-2 text-sm leading-6 text-slate-400">{sessionCheckError}</p>
-        <button
-          type="button"
-          onclick={checkSession}
-          class="mt-5 inline-flex items-center justify-center rounded-lg border border-cyan-300/40 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/60 hover:bg-cyan-300/15"
-        >
-          Retry
-        </button>
-      </section>
     </main>
   {:else if !isAuthenticated && showSignup}
     {#await pageChunk('signup', () => import('./components/pages/SignUpPage.svelte'))}
