@@ -2,6 +2,7 @@
   import { onMount, tick, onDestroy } from 'svelte'
   import SiteHeader from './components/layout/SiteHeader.svelte'
   import SiteFooter from './components/layout/SiteFooter.svelte'
+  import RouteLoading from './components/layout/RouteLoading.svelte'
   import { API_BASE_URL, apiFetch, getAuthProviders } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
   import { identifyUser, resetUser } from './config/posthog'
@@ -128,6 +129,7 @@
   let articleSlug = extractArticleSlug(window.location.pathname)
   let currentPage = pageFromPath(window.location.pathname)
   let isCheckingSession = true
+  let sessionCheckError = ''
   let isAuthenticated = false
   let hasActiveSession = false
   let userRole = ''
@@ -230,6 +232,7 @@
 
   async function checkSession() {
     isCheckingSession = true
+    sessionCheckError = ''
     try {
       const response = await fetchWithRetry(`${API_BASE_URL}/auth/session`, {
         method: 'GET',
@@ -237,6 +240,9 @@
         skipAuthHandling: true,
         timeoutMs: 4000,
       }, { maxAttempts: 2, initialDelayMs: 1000 })
+      if (!response.ok && response.status >= 500) {
+        sessionCheckError = 'CARVER is having trouble connecting. Please retry in a moment.'
+      }
       let data = null
       try { data = response.ok ? await response.json() : null } catch { data = null }
       isAuthenticated = Boolean(data?.authenticated)
@@ -267,6 +273,7 @@
         creditsBalance = 0
       }
     } catch (error) {
+      sessionCheckError = 'CARVER is having trouble connecting. Please retry in a moment.'
       isAuthenticated = false
       userRole = ''
       agencyName = ''
@@ -525,17 +532,13 @@
 <div class="min-h-screen bg-black text-slate-100 relative">
   {#if currentPage === 'launch-signup'}
     {#await pageChunk('launch-signup', () => import('./components/pages/LaunchSignupPage.svelte'))}
-      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-      </main>
+      <RouteLoading />
     {:then { default: LaunchSignupPage }}
       <LaunchSignupPage />
     {/await}
   {:else if currentPage === 'articles'}
     {#await pageChunk('articles', () => import('./components/pages/ArticlesPage.svelte'))}
-      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-      </main>
+      <RouteLoading />
     {:then { default: ArticlesPage }}
       <ArticlesPage
         slug={articleSlug}
@@ -550,41 +553,33 @@
   {:else if isLegalDocumentPage(currentPage)}
     {#if currentPage === 'privacy'}
       {#await pageChunk('legal-privacy', () => import('./components/pages/PrivacyPolicyPage.svelte'))}
-        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-        </main>
+        <RouteLoading />
       {:then { default: PrivacyPolicyPage }}
         <PrivacyPolicyPage />
       {/await}
     {:else if currentPage === 'terms'}
       {#await pageChunk('legal-terms', () => import('./components/pages/TermsOfServicePage.svelte'))}
-        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-        </main>
+        <RouteLoading />
       {:then { default: TermsOfServicePage }}
         <TermsOfServicePage />
       {/await}
     {:else}
       {#await pageChunk('legal-data-deletion', () => import('./components/pages/DataDeletionPage.svelte'))}
-        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-        </main>
+        <RouteLoading />
       {:then { default: DataDeletionPage }}
         <DataDeletionPage />
       {/await}
     {/if}
   {:else if waToken}
     {#await pageChunk('whatsapp-auth', () => import('./components/pages/WhatsAppAuthPage.svelte'))}
-      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-      </main>
+      <RouteLoading />
     {:then { default: WhatsAppAuthPage }}
       <WhatsAppAuthPage token={waToken} />
     {/await}
   {:else if publicSlug}
     <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
       {#await pageChunk('public-profile', () => import('./components/pages/PublicProfilePage.svelte'))}
-        <p class="py-16 text-center font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+        <RouteLoading compact />
       {:then { default: PublicProfilePage }}
         <PublicProfilePage slug={publicSlug} />
       {/await}
@@ -599,11 +594,24 @@
         <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Securing session</p>
       </div>
     </main>
+  {:else if sessionCheckError}
+    <main class="mx-auto flex min-h-[100dvh] w-full max-w-md items-center justify-center px-4 text-center sm:px-6">
+      <section class="rounded-2xl border border-amber-300/20 bg-zinc-950/90 p-6 shadow-2xl shadow-black/40">
+        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-amber-300/80">Connection issue</p>
+        <h1 class="mt-3 text-2xl font-black tracking-tight text-white">We could not verify your session.</h1>
+        <p class="mt-2 text-sm leading-6 text-slate-400">{sessionCheckError}</p>
+        <button
+          type="button"
+          onclick={checkSession}
+          class="mt-5 inline-flex items-center justify-center rounded-lg border border-cyan-300/40 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/60 hover:bg-cyan-300/15"
+        >
+          Retry
+        </button>
+      </section>
+    </main>
   {:else if !isAuthenticated && showSignup}
     {#await pageChunk('signup', () => import('./components/pages/SignUpPage.svelte'))}
-      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-      </main>
+      <RouteLoading />
     {:then { default: SignUpPage }}
       <SignUpPage
         {googleEnabled}
@@ -647,9 +655,7 @@
   {:else if !isAuthenticated && !showLogin}
     {#if isMobileViewport}
       {#await pageChunk('marketing-mobile', () => import('./components/pages/MobileMarketingPage.svelte'))}
-        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-        </main>
+        <RouteLoading />
       {:then { default: MobileMarketingPage }}
         <MobileMarketingPage
           onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
@@ -659,9 +665,7 @@
       {/await}
     {:else}
       {#await pageChunk('marketing-desktop', () => import('./components/pages/LandingPage.svelte'))}
-        <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-          <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-        </main>
+        <RouteLoading />
       {:then { default: LandingPage }}
         <LandingPage
           onSignIn={(source) => { authError = ''; showLogin = true; trackClick(source === 'hero' ? 'hero_cta_click' : 'nav_sign_in') }}
@@ -768,17 +772,13 @@
     </main>
   {:else if showOnboarding}
     {#await pageChunk('onboarding', () => import('./components/onboarding/OnboardingFlow.svelte'))}
-      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-      </main>
+      <RouteLoading />
     {:then { default: OnboardingFlow }}
       <OnboardingFlow onComplete={handleOnboardingComplete} />
     {/await}
   {:else if isAuthenticated && userRole === 'agency'}
     {#await pageChunk('agency-shell', () => import('./components/layout/AgencyShell.svelte'))}
-      <main class="mx-auto flex min-h-[50dvh] w-full max-w-3xl items-center justify-center px-4 text-center sm:px-6">
-        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
-      </main>
+      <RouteLoading />
     {:then { default: AgencyShell }}
       <AgencyShell agencyName={agencyName} onLogout={logout} />
     {/await}
@@ -828,7 +828,7 @@
 
     <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
       {#await pageChunk('crew-' + crewChunkKey(currentPage), () => crewPageImports[crewChunkKey(currentPage)]())}
-        <p class="py-16 text-center font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Loading…</p>
+        <RouteLoading compact />
       {:then { default: ActivePage }}
         <svelte:component this={ActivePage} isSubscribed={isSubscribed} creditsBalance={creditsBalance} onCreditsChanged={(value) => (creditsBalance = Math.max(0, Number(value) || 0))} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} sessionId={matchSessionId} />
       {/await}
@@ -937,5 +937,23 @@
     4%   { opacity: 1; }
     96%  { opacity: 1; }
     100% { top: 100%;  opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-grid-bg,
+    .app-particle,
+    .app-orb,
+    .app-scan {
+      animation: none !important;
+    }
+
+    .app-particle,
+    .app-scan {
+      display: none;
+    }
+
+    .app-orb {
+      transform: none;
+    }
   }
 </style>

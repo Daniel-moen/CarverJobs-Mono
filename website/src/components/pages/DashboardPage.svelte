@@ -119,6 +119,7 @@
       loading = false
       requestAnimationFrame(() => (mounted = true))
     }
+    clearTimeout(pollTimeout)
     pollTimeout = setTimeout(loadStats, POLL_MS)
   }
 
@@ -289,6 +290,77 @@
   const apifyEnabled  = $derived(flagsData?.flags?.scraper     ?? true)
   const webEnabled    = $derived(flagsData?.flags?.scraper_web ?? true)
 
+  const liveErrorTotal = $derived((ev.errors_4xx ?? 0) + (ev.errors_5xx ?? 0))
+  const securitySignalTotal = $derived((ev.rate_limit_hits ?? 0) + (ev.csrf_rejections ?? 0))
+  const matchingBacklog = $derived(Math.max(0, (ev.matching_queued ?? 0) - (ev.matching_completed ?? 0)))
+  const enabledFeatureCount = $derived(Object.values(flagsData?.flags ?? {}).filter(Boolean).length)
+  const totalFeatureCount = $derived(Object.keys(flagsData?.flags ?? {}).length)
+  const apiHealthTone = $derived((ev.errors_5xx ?? 0) > 0 ? 'rose' : liveErrorTotal > 0 ? 'amber' : 'emerald')
+  const scraperHealthTone = $derived(scraperStatus?.last_status === 'error' ? 'rose' : scraperStatus?.running ? 'cyan' : 'emerald')
+  const commandStatus = $derived(
+    apiHealthTone === 'rose' || scraperHealthTone === 'rose'
+      ? { label: 'Needs attention', tone: 'rose', detail: 'Investigate failing requests or scraper errors before scaling traffic.' }
+      : securitySignalTotal > 0
+        ? { label: 'Watching', tone: 'amber', detail: 'Security counters have activity since the last restart.' }
+        : { label: 'Nominal', tone: 'emerald', detail: 'Core counters are quiet and admin actions are available.' }
+  )
+  const commandCards = $derived([
+    {
+      label: 'API Health',
+      value: apiHealthTone === 'emerald' ? 'Clean' : `${liveErrorTotal} errors`,
+      detail: `${ev.errors_5xx ?? 0} server · ${ev.errors_4xx ?? 0} client`,
+      tone: apiHealthTone,
+    },
+    {
+      label: 'Scrapers',
+      value: scraperStatus?.running ? 'Running' : scraperStatus?.last_status === 'error' ? 'Review' : 'Ready',
+      detail: scraperStatus?.last_run_at ? `Last run ${fmtRelTime(scraperStatus.last_run_at)}` : 'No run recorded',
+      tone: scraperHealthTone,
+    },
+    {
+      label: 'WhatsApp',
+      value: db.whatsapp_sessions_total ?? 0,
+      detail: `${db.whatsapp_sessions_by_mode?.chat ?? 0} onboarded · ${ev.whatsapp_messages ?? 0} messages`,
+      tone: 'emerald',
+    },
+    {
+      label: 'Matching',
+      value: matchingBacklog,
+      detail: `${ev.matching_completed ?? 0} completed · ${ev.matching_queued ?? 0} queued`,
+      tone: matchingBacklog > 0 ? 'amber' : 'cyan',
+    },
+  ])
+  const priorityItems = $derived([
+    {
+      label: 'Error response',
+      status: liveErrorTotal > 0 ? `${liveErrorTotal} to review` : 'Clear',
+      detail: liveErrorTotal > 0 ? 'Open the error log and resolve the newest failures first.' : 'No recorded HTTP errors since restart.',
+      tone: liveErrorTotal > 0 ? apiHealthTone : 'emerald',
+      target: 'errors-panel',
+    },
+    {
+      label: 'Security watch',
+      status: securitySignalTotal > 0 ? `${securitySignalTotal} signals` : 'Quiet',
+      detail: `${ev.rate_limit_hits ?? 0} rate limits · ${ev.csrf_rejections ?? 0} CSRF rejections`,
+      tone: securitySignalTotal > 0 ? 'amber' : 'emerald',
+      target: 'request-panel',
+    },
+    {
+      label: 'Data intake',
+      status: scraperStatus?.running ? 'Running now' : scraperStatus?.last_status === 'error' ? 'Needs review' : 'Ready',
+      detail: webEnabled || apifyEnabled ? 'At least one scraper path is enabled.' : 'Both scraper automation flags are paused.',
+      tone: scraperHealthTone,
+      target: 'scrapers-panel',
+    },
+    {
+      label: 'Feature gates',
+      status: totalFeatureCount ? `${enabledFeatureCount}/${totalFeatureCount} on` : 'No flags',
+      detail: 'Toggle carefully: changes apply immediately.',
+      tone: totalFeatureCount && enabledFeatureCount < totalFeatureCount ? 'amber' : 'cyan',
+      target: 'feature-flags-panel',
+    },
+  ])
+
   const webLastBySource = $derived(
     Object.fromEntries(
       ['dockwalk', 'workonayacht'].map(src => {
@@ -297,6 +369,29 @@
       })
     )
   )
+
+  function toneCardClass(tone) {
+    if (tone === 'rose') return 'border-rose-400/22 bg-rose-400/8 text-rose-200'
+    if (tone === 'amber') return 'border-amber-400/22 bg-amber-400/8 text-amber-200'
+    if (tone === 'cyan') return 'border-cyan-400/22 bg-cyan-400/8 text-cyan-200'
+    return 'border-emerald-400/22 bg-emerald-400/8 text-emerald-200'
+  }
+
+  function toneDotClass(tone) {
+    if (tone === 'rose') return 'bg-rose-400'
+    if (tone === 'amber') return 'bg-amber-400'
+    if (tone === 'cyan') return 'bg-cyan-400'
+    return 'bg-emerald-400'
+  }
+
+  function refreshCommandCenter() {
+    loadStats()
+    loadErrors()
+  }
+
+  function scrollToPanel(id) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   async function loadErrors() {
     loadingErrors = true
@@ -372,17 +467,17 @@
       <div>
         <div class="flex items-center gap-2">
           <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400"></span>
-          <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Admin</p>
+          <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Operations</p>
         </div>
-        <h1 class="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">Dashboard</h1>
-        <p class="mt-1.5 text-sm text-slate-500">Live metrics · auto-updates every 30s · toggles take effect immediately.</p>
+        <h1 class="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">Command Center</h1>
+        <p class="mt-1.5 max-w-2xl text-sm text-slate-500">Live system health, growth signals, admin actions, and fault response in one place.</p>
       </div>
       <button
         type="button"
-        onclick={loadStats}
+        onclick={refreshCommandCenter}
         class="rounded-xl border border-white/10 bg-white/4 px-3 py-1.5 text-xs font-semibold text-slate-400 transition hover:border-white/20 hover:text-white active:scale-95"
       >
-        Refresh
+        Refresh all
       </button>
     </div>
     {#if lastFetched || stats}
@@ -421,9 +516,136 @@
 
   {:else if stats}
 
+    <!-- ── Command Center ── -->
+    <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:40ms;">
+      <div class="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <div class="relative overflow-hidden rounded-2xl border border-white/8 bg-gradient-to-br from-slate-950 via-zinc-950 to-indigo-950/45 p-5">
+          <div class="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-cyan-400/10 blur-3xl"></div>
+          <div class="pointer-events-none absolute -bottom-16 -left-14 h-40 w-40 rounded-full bg-violet-400/10 blur-3xl"></div>
+          <div class="relative">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full {toneDotClass(commandStatus.tone)} {commandStatus.tone === 'rose' || commandStatus.tone === 'amber' ? 'animate-pulse' : ''}"></span>
+                  <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Live Status</p>
+                </div>
+                <h2 class="mt-2 text-xl font-black tracking-tight text-white">{commandStatus.label}</h2>
+                <p class="mt-1 max-w-xl text-xs leading-relaxed text-slate-500">{commandStatus.detail}</p>
+              </div>
+              <span class="rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-wider {toneCardClass(commandStatus.tone)}">
+                Auto-refresh {POLL_MS / 1000}s
+              </span>
+            </div>
+
+            <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {#each commandCards as card}
+                <button
+                  type="button"
+                  onclick={() => scrollToPanel(card.label === 'API Health' ? 'request-panel' : card.label === 'Scrapers' ? 'scrapers-panel' : card.label === 'WhatsApp' ? 'whatsapp-panel' : 'ai-matching-panel')}
+                  class="rounded-xl border p-4 text-left transition hover:-translate-y-0.5 hover:border-white/20 {toneCardClass(card.tone)}"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-[10px] font-bold uppercase tracking-[0.24em] opacity-70">{card.label}</p>
+                    <span class="h-1.5 w-1.5 rounded-full {toneDotClass(card.tone)}"></span>
+                  </div>
+                  <p class="mt-2 text-2xl font-black text-white">{card.value}</p>
+                  <p class="mt-1 text-[10px] leading-relaxed opacity-75">{card.detail}</p>
+                </button>
+              {/each}
+            </div>
+
+            <div class="mt-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onclick={refreshCommandCenter}
+                class="rounded-xl border border-white/12 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 transition hover:border-white/25 hover:bg-white/8 active:scale-95"
+              >
+                Refresh overview
+              </button>
+              <button
+                type="button"
+                onclick={triggerWebScrape}
+                disabled={triggeringWeb || scraperStatus?.running}
+                class="rounded-xl border border-emerald-400/25 bg-emerald-400/8 px-3 py-2 text-xs font-bold text-emerald-200 transition hover:border-emerald-400/45 hover:bg-emerald-400/15 disabled:cursor-not-allowed disabled:opacity-35 active:scale-95"
+              >
+                {triggeringWeb ? 'Starting web…' : scraperStatus?.running ? 'Scraper running…' : 'Run web scrape'}
+              </button>
+              <button
+                type="button"
+                onclick={triggerScrape}
+                disabled={triggering || scraperStatus?.running}
+                class="rounded-xl border border-violet-400/25 bg-violet-400/8 px-3 py-2 text-xs font-bold text-violet-200 transition hover:border-violet-400/45 hover:bg-violet-400/15 disabled:cursor-not-allowed disabled:opacity-35 active:scale-95"
+              >
+                {triggering ? 'Starting Apify…' : scraperStatus?.running ? 'Scraper running…' : 'Run Apify'}
+              </button>
+              <button
+                type="button"
+                onclick={reviewJobs}
+                disabled={reviewingJobs}
+                class="rounded-xl border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-xs font-bold text-amber-200 transition hover:border-amber-400/45 hover:bg-amber-400/15 disabled:cursor-not-allowed disabled:opacity-35 active:scale-95"
+              >
+                {reviewingJobs ? 'Reviewing jobs…' : 'Review jobs'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid gap-3">
+          <div class="rounded-2xl border border-white/8 bg-zinc-900/45 p-4">
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Priority Queue</p>
+              <span class="text-[10px] text-slate-700">Since restart</span>
+            </div>
+            <div class="space-y-2">
+              {#each priorityItems as item}
+                <button
+                  type="button"
+                  onclick={() => scrollToPanel(item.target)}
+                  class="w-full rounded-xl border border-white/8 bg-black/20 px-3 py-2.5 text-left transition hover:border-white/16 hover:bg-white/[0.03]"
+                >
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="flex min-w-0 items-center gap-2">
+                      <span class="h-1.5 w-1.5 flex-none rounded-full {toneDotClass(item.tone)}"></span>
+                      <span class="truncate text-xs font-semibold text-slate-200">{item.label}</span>
+                    </span>
+                    <span class="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold {toneCardClass(item.tone)}">{item.status}</span>
+                  </div>
+                  <p class="mt-1 text-[10px] leading-relaxed text-slate-600">{item.detail}</p>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-white/8 bg-zinc-900/45 p-4">
+            <p class="mb-3 text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Jump To</p>
+            <div class="grid grid-cols-2 gap-2">
+              {#each [
+                ['feature-flags-panel', 'Flags'],
+                ['scrapers-panel', 'Scrapers'],
+                ['database-panel', 'Database'],
+                ['request-panel', 'Requests'],
+                ['analytics-panel', 'Analytics'],
+                ['whatsapp-panel', 'WhatsApp'],
+                ['ai-matching-panel', 'AI'],
+                ['errors-panel', 'Errors'],
+              ] as [target, label]}
+                <button
+                  type="button"
+                  onclick={() => scrollToPanel(target)}
+                  class="rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-slate-400 transition hover:border-cyan-400/25 hover:bg-cyan-400/8 hover:text-cyan-200"
+                >
+                  {label}
+                </button>
+              {/each}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Feature Toggles ── -->
     {#if flagsData}
-      <div class="dash-card" class:visible={mounted} style="--delay:60ms;">
+      <div id="feature-flags-panel" class="dash-card scroll-mt-4" class:visible={mounted} style="--delay:80ms;">
         <div class="mb-3 flex items-center justify-between gap-2">
           <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Feature Toggles</p>
           <p class="text-[10px] text-slate-700">Resets on restart</p>
@@ -459,7 +681,7 @@
     {/if}
 
     <!-- ── Scrapers ── -->
-    <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:100ms;">
+    <div id="scrapers-panel" class="dash-card scroll-mt-4 rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:100ms;">
       <div class="mb-4 flex items-center gap-2">
         <span class="h-1.5 w-1.5 rounded-full {scraperStatus?.running ? 'animate-pulse bg-cyan-400' : scraperStatus?.last_status === 'ok' ? 'bg-emerald-400' : 'bg-zinc-600'}"></span>
         <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Scrapers</p>
@@ -660,7 +882,7 @@
     </div>
 
     <!-- ── Database ── -->
-    <div class="dash-card" class:visible={mounted} style="--delay:140ms;">
+    <div id="database-panel" class="dash-card scroll-mt-4" class:visible={mounted} style="--delay:140ms;">
       <p class="mb-3 text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Database</p>
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {#each [
@@ -711,7 +933,7 @@
     </div>
 
     <!-- ── AI Job Review ── -->
-    <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:160ms;">
+    <div id="ai-review-panel" class="dash-card scroll-mt-4 rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:160ms;">
       <div class="mb-4 flex items-center gap-2">
         <span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
         <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">AI Job Review</p>
@@ -787,7 +1009,7 @@
     </div>
 
     <!-- ── Request Activity ── -->
-    <div class="dash-card" class:visible={mounted} style="--delay:180ms;">
+    <div id="request-panel" class="dash-card scroll-mt-4" class:visible={mounted} style="--delay:180ms;">
       <p class="mb-3 text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Request Activity</p>
       <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {#each [
@@ -867,7 +1089,7 @@
 
     <!-- ── Analytics ── -->
     {#if analyticsData}
-      <div class="dash-card" class:visible={mounted} style="--delay:260ms;">
+      <div id="analytics-panel" class="dash-card scroll-mt-4" class:visible={mounted} style="--delay:260ms;">
         <p class="mb-3 text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">User Analytics</p>
         <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {#each [
@@ -1062,7 +1284,7 @@
     </div>
 
     <!-- ── AI & Matching ── -->
-    <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:380ms;">
+    <div id="ai-matching-panel" class="dash-card scroll-mt-4 rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:380ms;">
       <p class="mb-4 text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">AI & Matching</p>
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {#each [
@@ -1081,7 +1303,7 @@
     </div>
 
     <!-- ── WhatsApp ── -->
-    <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:420ms;">
+    <div id="whatsapp-panel" class="dash-card scroll-mt-4 rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:420ms;">
       <div class="mb-4 flex items-center gap-2">
         <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
         <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">WhatsApp</p>
@@ -1266,7 +1488,7 @@
     </div>
 
     <!-- ── Error Log ── -->
-    <div class="dash-card rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:460ms;">
+    <div id="errors-panel" class="dash-card scroll-mt-4 rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:460ms;">
       <div class="mb-4 flex items-center justify-between gap-2">
         <div class="flex items-center gap-2">
           <span class="h-1.5 w-1.5 rounded-full bg-rose-400"></span>

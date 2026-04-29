@@ -58,6 +58,9 @@ def _verify_telnyx_ed25519(body: bytes, signature_b64: str, timestamp: str) -> b
     Signed payload: {timestamp}|{raw_json_body}
     """
     if not settings.TELNYX_PUBLIC_KEY:
+        if settings.APP_ENV == "production":
+            log.error("Telnyx webhook rejected: TELNYX_PUBLIC_KEY is not configured")
+            return False
         return True
 
     if not signature_b64 or not timestamp:
@@ -124,7 +127,7 @@ async def telnyx_webhook(request: Request):
     sig = request.headers.get("telnyx-signature-ed25519", "")
     ts = request.headers.get("telnyx-timestamp", "")
 
-    if settings.TELNYX_PUBLIC_KEY and not _verify_telnyx_ed25519(body, sig, ts):
+    if not _verify_telnyx_ed25519(body, sig, ts):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
 
     try:

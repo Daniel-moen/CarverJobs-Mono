@@ -11,8 +11,9 @@ Project workspace with multiple components.
 3. Start dev server: `npm run dev`
 ### API only
 1. Open `api/`
-2. Install dependencies: `npm install`
-3. Start server: `npm start`
+2. Create and activate a virtual environment: `python -m venv .venv && source .venv/bin/activate`
+3. Install dependencies: `pip install -r requirements.txt`
+4. Start server: `uvicorn app.main:app --reload --port 3000`
 ### Docker (both services)
 1. From project root, run: `docker compose up --build`
 2. Website: `http://localhost:8080`

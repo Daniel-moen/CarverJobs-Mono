@@ -1,6 +1,13 @@
 <script>
   import { onMount } from 'svelte'
-  import { API_BASE_URL, apiFetch } from '../../config/api'
+  import {
+    DEFAULT_TOKEN_PRICE,
+    defaultTokenPackages,
+    formatTokenPrice,
+    loadSubscriptionStatus,
+    readCheckoutReturnStatus,
+    startSubscriptionCheckout,
+  } from '../../config/subscriptionCheckout'
 
   export let onNavigate = () => {}
 
@@ -9,33 +16,19 @@
   let checkoutError = ''
   let returnStatus = ''
   let balance = 0
-  let tokenPrice = '10.00'
-  let packages = [
-    { tokens: 10, price: '100.00' },
-    { tokens: 20, price: '200.00' },
-  ]
+  let tokenPrice = DEFAULT_TOKEN_PRICE
+  let packages = defaultTokenPackages()
 
   function formatPrice(amountStr) {
-    const n = parseFloat(amountStr)
-    if (isNaN(n)) return `R${amountStr}`
-    return `R${Number.isInteger(n) ? n : n.toFixed(2)}`
+    return formatTokenPrice(amountStr)
   }
 
   onMount(async () => {
     requestAnimationFrame(() => (mounted = true))
-    const params = new URLSearchParams(window.location.search)
-    const status = params.get('status')
-    if (status === 'success' || status === 'cancelled' || status === 'failed') {
-      returnStatus = status
-      window.history.replaceState({}, '', window.location.pathname)
-    }
+    returnStatus = readCheckoutReturnStatus()
     try {
-      const res = await apiFetch(`${API_BASE_URL}/subscription/status`, {
-        method: 'GET',
-        credentials: 'include',
-      })
-      if (res.ok) {
-        const data = await res.json()
+      const data = await loadSubscriptionStatus()
+      if (data) {
         if (data.balance != null) balance = data.balance
         if (data.token_price) tokenPrice = data.token_price
         if (data.packages) packages = data.packages
@@ -43,32 +36,18 @@
     } catch { /* fallback to defaults */ }
   })
 
-  async function startCheckout(tokens, retried = false) {
+  async function startCheckout(tokens) {
     isLoading = tokens
     checkoutError = ''
     try {
-      const response = await apiFetch(`${API_BASE_URL}/subscription/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ tokens }),
-      })
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}))
-        if (!retried && response.status === 403 && err.code === 'CRV-2006') {
-          return startCheckout(tokens, true)
-        }
-        checkoutError = err.detail || 'Could not start checkout. Please try again.'
-        return
-      }
-      const data = await response.json()
+      const data = await startSubscriptionCheckout(tokens)
       if (data.redirect_url) {
         window.location.href = data.redirect_url
         return
       }
       checkoutError = 'Could not start checkout. Please try again.'
-    } catch {
-      checkoutError = 'Could not reach the server. Please try again.'
+    } catch (error) {
+      checkoutError = error?.message || 'Could not reach the server. Please try again.'
     } finally {
       isLoading = null
     }

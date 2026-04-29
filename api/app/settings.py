@@ -169,6 +169,8 @@ def validate_production_settings() -> None:
         fatal.append("ADMIN_PASSWORD is still the default — set a strong password")
     if settings.AUTO_LOGIN_AS_ADMIN:
         fatal.append("AUTO_LOGIN_AS_ADMIN must be false in production")
+    if settings.META_VERIFY_TOKEN == "carver-whatsapp-verify":
+        fatal.append("META_VERIFY_TOKEN is still the default — set a unique webhook verify token")
     if fatal:
         raise RuntimeError(
             "FATAL: Insecure configuration detected in production:\n  - "

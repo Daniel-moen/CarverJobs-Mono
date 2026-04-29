@@ -13,6 +13,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.csrf import check_csrf, generate_csrf_token, CSRF_HEADER_NAME
 from app.database import Base, engine, run_migrations, SessionLocal
@@ -93,6 +94,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CARVER API", version="0.1.0", lifespan=lifespan)
 app.state.limiter = limiter
+
+if settings.ALLOWED_HOSTS != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
 
 
 # ── Error persistence ───────────────────────────────────────────────────────
