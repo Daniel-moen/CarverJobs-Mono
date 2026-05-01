@@ -221,20 +221,21 @@ _QUERY_TIMEOUT_SECONDS = 10
 
 _FORBIDDEN_PATTERN = re.compile(
     r"\b("
-    r"DROP|ALTER|CREATE|TRUNCATE"
+    r"INSERT|UPDATE|DELETE|REPLACE"
+    r"|DROP|ALTER|CREATE|TRUNCATE"
     r"|ATTACH|DETACH|LOAD_EXTENSION|REINDEX|VACUUM"
     r")\b",
     re.IGNORECASE,
 )
 
 _ALLOWED_LEADING = re.compile(
-    r"^\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|PRAGMA|EXPLAIN|WITH)\b",
+    r"^\s*(SELECT|EXPLAIN|WITH)\b",
     re.IGNORECASE,
 )
 
 
 def _validate_sql(query: str) -> None:
-    """Reject destructive schema operations. Allow reads and data modifications."""
+    """Allow read-only diagnostic SQL only."""
     if len(query) > _MAX_QUERY_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -253,14 +254,14 @@ def _validate_sql(query: str) -> None:
     if not _ALLOWED_LEADING.match(stripped):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only SELECT, INSERT, UPDATE, DELETE, REPLACE, PRAGMA, EXPLAIN, and WITH queries are allowed.",
+            detail="Only read-only SELECT, EXPLAIN, and WITH queries are allowed.",
             headers={"X-Error-Code": CRV_5007},
         )
 
     if _FORBIDDEN_PATTERN.search(stripped):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Query contains a forbidden keyword (DROP, ALTER, CREATE, TRUNCATE are not allowed).",
+            detail="Query contains a forbidden write or schema keyword.",
             headers={"X-Error-Code": CRV_5007},
         )
 
@@ -277,8 +278,11 @@ def run_agent_sql(
     effective_query = query.strip().rstrip(";")
 
     try:
-        conn = sqlite3.connect(str(DB_PATH), timeout=_QUERY_TIMEOUT_SECONDS)
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn = sqlite3.connect(
+            f"file:{DB_PATH}?mode=ro",
+            timeout=_QUERY_TIMEOUT_SECONDS,
+            uri=True,
+        )
         conn.execute("PRAGMA busy_timeout=5000")
     except Exception as exc:
         log.error("Agent SQL: could not open connection: %s", exc)
@@ -291,24 +295,18 @@ def run_agent_sql(
     try:
         cursor = conn.execute(effective_query)
 
-        if cursor.description:
-            columns = [desc[0] for desc in cursor.description]
-            rows = cursor.fetchmany(limit)
-            truncated = len(rows) == limit and cursor.fetchone() is not None
-            conn.commit()
-            return {
-                "ok": True,
-                "columns": columns,
-                "rows": [list(row) for row in rows],
-                "row_count": len(rows),
-                "truncated": truncated,
-            }
+        if not cursor.description:
+            raise sqlite3.OperationalError("query did not return rows")
 
-        affected = cursor.rowcount
-        conn.commit()
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchmany(limit)
+        truncated = len(rows) == limit and cursor.fetchone() is not None
         return {
             "ok": True,
-            "rows_affected": affected,
+            "columns": columns,
+            "rows": [list(row) for row in rows],
+            "row_count": len(rows),
+            "truncated": truncated,
         }
     except sqlite3.OperationalError as exc:
         conn.rollback()
