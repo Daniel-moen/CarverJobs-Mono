@@ -5,7 +5,7 @@
 
 <LegalDocPage title="Terms of Service">
   {#snippet children()}
-    <p class="text-xs text-slate-500">Last updated: April 8, 2026. Generic template — obtain legal advice for your jurisdiction and product.</p>
+    <p class="text-xs text-slate-500">Last updated: 3 May 2026. Questions: <a class="text-cyan-500/90 underline hover:text-cyan-400" href="mailto:{supportEmail}">{supportEmail}</a>.</p>
 
     <section class="space-y-3">
       <h2 class="text-base font-semibold text-white">1. Agreement</h2>

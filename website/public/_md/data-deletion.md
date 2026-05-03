@@ -1,6 +1,10 @@
 # Delete your data
 
-How to request removal of your personal data from CARVER.
+_How to request removal of your personal data from CARVER. Last updated: 3 May 2026._
+
+## Contact
+
+**support@jobcarver.co** — use this address for deletion and other privacy-related requests.
 
 ## 1. Your right to deletion
 

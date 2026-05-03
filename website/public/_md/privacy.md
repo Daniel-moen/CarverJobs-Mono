@@ -1,6 +1,6 @@
 # Privacy Policy
 
-_Last updated: April 8, 2026. This is a generic template — review with qualified counsel before relying on it._
+_Last updated: 3 May 2026. Privacy and data-rights requests: support@jobcarver.co_
 
 ## 1. Who we are
 

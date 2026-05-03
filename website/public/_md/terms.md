@@ -1,6 +1,6 @@
 # Terms of Service
 
-_Last updated: April 8, 2026. Generic template — obtain legal advice for your jurisdiction and product._
+_Last updated: 3 May 2026. Questions: support@jobcarver.co_
 
 ## 1. Agreement
 

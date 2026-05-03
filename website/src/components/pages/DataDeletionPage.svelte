@@ -5,7 +5,7 @@
 
 <LegalDocPage title="Delete your data">
   {#snippet children()}
-    <p class="text-xs text-slate-500">How to request removal of your personal data from CARVER.</p>
+    <p class="text-xs text-slate-500">How to request removal of your personal data from CARVER. Last updated: 3 May 2026.</p>
 
     <section class="space-y-3">
       <h2 class="text-base font-semibold text-white">1. Your right to deletion</h2>

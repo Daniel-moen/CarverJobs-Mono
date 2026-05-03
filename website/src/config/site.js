@@ -1,8 +1,8 @@
-/** Shown on legal pages; override with VITE_SUPPORT_EMAIL in production. */
+/** Shown on legal pages; override with VITE_SUPPORT_EMAIL when needed. */
 export const supportEmail =
   typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPPORT_EMAIL
     ? String(import.meta.env.VITE_SUPPORT_EMAIL)
-    : 'support@example.com'
+    : 'support@jobcarver.co'
 
 /**
  * WhatsApp control channel. Crew can run every Carver function over text:
