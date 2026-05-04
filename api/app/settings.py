@@ -103,6 +103,8 @@ class Settings:
   FRONTEND_BASE_URL: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").strip()
   # How long a magic login link is valid (seconds)
   WA_MAGIC_TOKEN_TTL_SECONDS: int = int(os.getenv("WA_MAGIC_TOKEN_TTL_SECONDS", "1800"))
+  # WhatsApp "Recent Posts" matching window, based on when jobs entered the database.
+  WA_MATCH_RECENT_DAYS: int = int(os.getenv("WA_MATCH_RECENT_DAYS", "7"))
 
   # Web job board scrapers
   DOCKWALK_ENABLED: bool = os.getenv("DOCKWALK_ENABLED", "true").lower() == "true"
