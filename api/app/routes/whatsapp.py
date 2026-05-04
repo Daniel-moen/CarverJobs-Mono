@@ -50,6 +50,8 @@ _SEEN_MSG_MAX = 500
 _STALE_MSG_SECONDS = 300  # ignore messages older than 5 minutes
 _ACTIVE_MATCH_RUNS: set[str] = set()
 _ACTIVE_MATCH_RUNS_LOCK = threading.Lock()
+_MATCH_SCOPE_ALL = "all"
+_MATCH_SCOPE_RECENT = "recent"
 
 
 def _parse_meta_timestamp(timestamp_str: str | None) -> int | None:
@@ -290,6 +292,18 @@ async def _send_job_review_wait(to: str) -> None:
     )
 
 
+async def _send_match_scope_menu(to: str) -> None:
+    """Ask the WhatsApp user which job set to use for matching."""
+    await _send_whatsapp_buttons(
+        to,
+        "🎯 *Find Matches* uses *1 token* per run.\n\nWhich jobs should I scan?",
+        [
+            ("btn_match_recent", "Recent Posts"),
+            ("btn_match_all", "All DB Jobs"),
+            ("btn_menu", "Menu"),
+        ],
+    )
+
 def _credits_summary_for_menu(balance: int, subscribed: bool = False) -> str:
     w = "token" if balance == 1 else "tokens"
     return (
@@ -341,7 +355,7 @@ async def _send_help_menu(to: str, db: Session) -> None:
                             {
                                 "id": "cmd_match",
                                 "title": "Find Matches",
-                                "description": "Uses 1 token per run · Match to superyacht roles",
+                                "description": "Choose recent posts or all database jobs",
                             },
                             {"id": "cmd_jobs", "title": "Browse Job Board", "description": "View open yacht positions"},
                             {
@@ -582,6 +596,8 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_upload": "upload",
     "cmd_edit": "edit",
     "cmd_match": "match",
+    "cmd_match_recent": "match recent",
+    "cmd_match_all": "match all",
     "cmd_jobs": "jobs",
     "cmd_submit_job": "submit job",
     "cmd_credits": "credits",
@@ -589,6 +605,8 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_cancel_sub": "cancel subscription",
     "cmd_help": "help",
     "btn_find_matches": "match",
+    "btn_match_recent": "match recent",
+    "btn_match_all": "match all",
     "btn_edit_profile": "edit",
     "btn_upload_docs": "upload",
     "btn_view_profile": "profile",
@@ -1039,7 +1057,11 @@ async def _handle_jobs_command(phone_number: str, db: Session) -> str:
     )
 
 
-async def _handle_match_command(phone_number: str, db: Session) -> None:
+def _normalise_match_scope(match_scope: str | None) -> str:
+    return _MATCH_SCOPE_RECENT if match_scope == _MATCH_SCOPE_RECENT else _MATCH_SCOPE_ALL
+
+
+async def _handle_match_command(phone_number: str, db: Session, match_scope: str = _MATCH_SCOPE_ALL) -> None:
     """Run the AI matching engine, save results, and send a website link.
 
     Results are persisted as a MatchSession so the user can view all matches
@@ -1070,14 +1092,28 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
         await _send_whatsapp(phone_number, "⚠️ Matching engine is temporarily unavailable. Try again soon.")
         return
 
-    all_jobs = (
+    match_scope = _normalise_match_scope(match_scope)
+    jobs_query = (
         db.query(Job)
         .filter(Job.status.in_(["open", "priority"]))
-        .order_by(Job.created_at.desc())
-        .all()
     )
+    scope_label = "all database jobs"
+    if match_scope == _MATCH_SCOPE_RECENT:
+        recent_days = max(1, settings.WA_MATCH_RECENT_DAYS)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=recent_days)
+        jobs_query = jobs_query.filter(Job.created_at >= cutoff)
+        scope_label = f"recent posts from the last {recent_days} day{'s' if recent_days != 1 else ''}"
+
+    all_jobs = jobs_query.order_by(Job.created_at.desc()).all()
     if not all_jobs:
-        await _send_whatsapp(phone_number, "No open yacht positions right now — check back soon!")
+        if match_scope == _MATCH_SCOPE_RECENT:
+            await _send_whatsapp(
+                phone_number,
+                "No recent open yacht positions are in the database yet — try *All DB Jobs* instead.",
+            )
+            await _send_match_scope_menu(phone_number)
+        else:
+            await _send_whatsapp(phone_number, "No open yacht positions are in the database right now — check back soon!")
         return
 
     credits_remaining = spend_credits(db, phone_number, amount=1)
@@ -1106,7 +1142,7 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
     await _send_whatsapp(
         phone_number,
         f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
-        f"⏳ Scanning *{len(all_jobs)} positions* ({est_str}) — hang tight!",
+        f"⏳ Scanning *{len(all_jobs)} positions* from *{scope_label}* ({est_str}) — hang tight!",
     )
 
     certs = [c.strip() for c in (profile.certifications or "").replace("\n", ",").split(",") if c.strip()]
@@ -1226,6 +1262,7 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
     # Build brief summary for WhatsApp (top 3)
     top = matched[:3]
     lines = [f"🎯 *Found {len(matched)} match{'es' if len(matched) != 1 else ''}!*\n"]
+    lines.append(f"_Scanned {scope_label}._\n")
     for i, m in enumerate(top, 1):
         job = jobs_by_id.get(m.job_id)
         if not job:
@@ -1243,12 +1280,16 @@ async def _handle_match_command(phone_number: str, db: Session) -> None:
 
     await _send_whatsapp(phone_number, "\n".join(lines))
 
-async def _run_match_command_background(phone_number: str, graph_phone_number_id: str = "") -> None:
+async def _run_match_command_background(
+    phone_number: str,
+    graph_phone_number_id: str = "",
+    match_scope: str = _MATCH_SCOPE_ALL,
+) -> None:
     """Run matching in a detached task with its own DB session/context."""
     ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
     db = SessionLocal()
     try:
-        await _handle_match_command(phone_number, db)
+        await _handle_match_command(phone_number, db, match_scope=match_scope)
     except Exception as exc:
         log.exception("WhatsApp background match error | phone=%s | %s", phone_number[:6] + "****", exc)
     finally:
@@ -1456,6 +1497,16 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         return await _handle_jobs_command(phone, db)
 
     if cmd in ("match", "find jobs", "find matches", "matching", "find me jobs", "job match"):
+        await _send_match_scope_menu(phone)
+        return None
+
+    match_scope: str | None = None
+    if cmd in ("match recent", "recent matches", "find recent", "find recent matches", "recent jobs", "recent posts"):
+        match_scope = _MATCH_SCOPE_RECENT
+    elif cmd in ("match all", "all matches", "find all", "all jobs", "all db jobs", "database jobs"):
+        match_scope = _MATCH_SCOPE_ALL
+
+    if match_scope:
         if not _try_start_match_run(phone):
             await _send_whatsapp(
                 phone,
@@ -1463,8 +1514,9 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
             )
             return None
         graph_phone_number_id = _wa_graph_phone_id.get() or ""
-        asyncio.create_task(_run_match_command_background(phone, graph_phone_number_id))
-        await _send_whatsapp(phone, "🚀 Starting your *Find Matches* run now — you'll get updates here shortly.")
+        asyncio.create_task(_run_match_command_background(phone, graph_phone_number_id, match_scope))
+        scope_text = "recent postings" if match_scope == _MATCH_SCOPE_RECENT else "all database jobs"
+        await _send_whatsapp(phone, f"🚀 Starting your *Find Matches* run against *{scope_text}* — you'll get updates here shortly.")
         return None
 
     if cmd in ("submit job", "post job", "add job", "submit a job", "post a job"):
