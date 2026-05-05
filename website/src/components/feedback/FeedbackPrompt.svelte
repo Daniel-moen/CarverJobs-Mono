@@ -10,6 +10,7 @@
   let checkedStatus = $state(false)
   let submitted = $state(false)
   let submitting = $state(false)
+  let showIntro = $state(false)
   let error = $state('')
   let rewardMessage = $state('')
   let rating = $state(5)
@@ -52,7 +53,10 @@
     checkedStatus = true
     if (statusData?.eligible) {
       window.setTimeout(() => {
-        if (!submitted) visible = true
+        if (!submitted) {
+          showIntro = source === 'website_popup'
+          visible = true
+        }
       }, 250)
     }
   }
@@ -115,6 +119,28 @@
             onclick={closePrompt}
           >
             Close
+          </button>
+        </div>
+      {:else if showIntro}
+        <div class="text-center">
+          <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-300/30 bg-cyan-300/10 text-cyan-100 shadow-[0_0_40px_-12px_rgba(34,211,238,0.7)]">
+            <span class="font-display text-2xl">+2</span>
+          </div>
+          <p class="mt-5 font-mono text-[10px] uppercase tracking-[0.28em] text-cyan-300/80">Free token reward</p>
+          <h2 id="feedback-title" class="mt-2 font-display text-3xl text-white">We want to give you 2 free tokens</h2>
+          <p class="mt-3 text-sm leading-relaxed text-slate-300">
+            Please share quick feedback about your CARVER experience. In return, we’ll add 2 free tokens to your account as soon as you submit.
+          </p>
+          <div class="mt-5 rounded-xl border border-cyan-300/15 bg-cyan-300/[0.06] px-4 py-3 text-left">
+            <p class="text-sm font-semibold text-cyan-100">This takes less than 2 minutes.</p>
+            <p class="mt-1 text-xs leading-relaxed text-slate-400">Answer a few questions, submit once, and the tokens are added automatically.</p>
+          </div>
+          <button
+            type="button"
+            class="mt-6 w-full rounded-lg border border-cyan-300/40 bg-gradient-to-b from-cyan-300/20 to-cyan-300/10 px-4 py-3 text-sm font-semibold text-cyan-50 transition hover:border-cyan-300/60 hover:from-cyan-300/30"
+            onclick={() => { showIntro = false }}
+          >
+            Continue to feedback
           </button>
         </div>
       {:else}
