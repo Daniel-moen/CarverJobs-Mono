@@ -7,11 +7,13 @@ timeout config, retry on 429, error logging, and CRV code mapping live in one pl
 Uses only stdlib (urllib, json) — no extra dependencies.
 """
 import json
+import os
 import time
 import urllib.error
 import urllib.request
 import base64
 from typing import Any
+from uuid import uuid4
 
 from app.logger import get_logger
 
@@ -21,6 +23,7 @@ _OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 _REQUEST_TIMEOUT = 45       # seconds per HTTP call
 _MAX_RETRIES = 2            # extra attempts on 429 rate-limit
 _RETRY_DELAY = 5.0          # seconds to wait before retry
+_POSTHOG_CAPTURE_TIMEOUT = 2
 
 
 # ── Typed exceptions ──────────────────────────────────────────────────────────
@@ -54,6 +57,116 @@ class AINetworkError(AIClientError):
 
 class AIResponseError(AIClientError):
     """OpenAI returned an empty or unparseable response."""
+
+
+# ── PostHog LLM usage capture ─────────────────────────────────────────────────
+
+def _posthog_config() -> tuple[str, str, bool]:
+    api_key = (
+        os.getenv("POSTHOG_API_KEY")
+        or os.getenv("POSTHOG_PROJECT_API_KEY")
+        or os.getenv("VITE_POSTHOG_KEY")
+        or ""
+    ).strip()
+    host = (
+        os.getenv("POSTHOG_HOST")
+        or os.getenv("VITE_POSTHOG_HOST")
+        or "https://us.i.posthog.com"
+    ).strip().rstrip("/")
+    capture_content = os.getenv("POSTHOG_LLM_CAPTURE_CONTENT", "false").lower() == "true"
+    return api_key, host, capture_content
+
+
+def _safe_messages_for_posthog(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return messages without large binary/image payloads for optional content capture."""
+    safe: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content")
+        if isinstance(content, list):
+            safe_content: list[dict[str, Any]] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    safe_content.append({"type": "unknown"})
+                    continue
+                if item.get("type") == "image_url":
+                    safe_content.append({"type": "image_url", "image_url": {"url": "[redacted]"}})
+                else:
+                    safe_content.append(item)
+            safe.append({"role": role, "content": safe_content})
+        else:
+            safe.append({"role": role, "content": content})
+    return safe
+
+
+def _capture_llm_generation(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    max_tokens: int,
+    temperature: float,
+    response_format: dict[str, Any] | None,
+    latency_seconds: float,
+    attempt: int,
+    body: dict[str, Any] | None = None,
+    content: str | None = None,
+    http_status: int | None = None,
+    error: str | None = None,
+) -> None:
+    api_key, host, capture_content = _posthog_config()
+    if not api_key:
+        return
+
+    usage = body.get("usage", {}) if body else {}
+    choices = body.get("choices", []) if body else []
+    first_choice = choices[0] if choices else {}
+    finish_reason = first_choice.get("finish_reason")
+
+    properties: dict[str, Any] = {
+        "distinct_id": os.getenv("POSTHOG_LLM_DISTINCT_ID", "carver-api"),
+        "$ai_trace_id": uuid4().hex,
+        "$ai_span_id": uuid4().hex,
+        "$ai_span_name": os.getenv("POSTHOG_LLM_SPAN_NAME", "openai_chat_completion"),
+        "$ai_model": model,
+        "$ai_provider": "openai",
+        "$ai_input_tokens": usage.get("prompt_tokens"),
+        "$ai_output_tokens": usage.get("completion_tokens"),
+        "$ai_total_tokens": usage.get("total_tokens"),
+        "$ai_latency": round(latency_seconds, 3),
+        "$ai_http_status": http_status,
+        "$ai_base_url": "https://api.openai.com/v1",
+        "$ai_request_url": _OPENAI_URL,
+        "$ai_is_error": bool(error),
+        "$ai_error": error,
+        "$ai_stop_reason": finish_reason,
+        "$ai_temperature": temperature,
+        "$ai_stream": False,
+        "$ai_max_tokens": max_tokens,
+        "$ai_tokens_source": "sdk",
+        "attempt": attempt,
+        "response_format": response_format.get("type") if response_format else None,
+    }
+    if capture_content:
+        properties["$ai_input"] = _safe_messages_for_posthog(messages)
+        if content is not None:
+            properties["$ai_output_choices"] = [{"role": "assistant", "content": content}]
+
+    payload = {
+        "api_key": api_key,
+        "event": "$ai_generation",
+        "properties": {key: value for key, value in properties.items() if value is not None},
+    }
+    req = urllib.request.Request(
+        f"{host}/i/v0/e/",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_POSTHOG_CAPTURE_TIMEOUT):
+            pass
+    except Exception as exc:
+        log.debug("PostHog LLM capture failed | error=%s", exc)
 
 
 # ── Core call ─────────────────────────────────────────────────────────────────
@@ -123,14 +236,28 @@ def call_openai(
     attempt = 0
     while True:
         attempt += 1
+        started = time.perf_counter()
         try:
             with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
+                http_status = getattr(resp, "status", 200)
                 body = json.loads(resp.read().decode())
 
             try:
                 content = body["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError) as exc:
                 log.error("OpenAI unexpected shape | body=%s", json.dumps(body)[:600])
+                _capture_llm_generation(
+                    model=model,
+                    messages=messages,
+                    max_tokens=effective_max,
+                    temperature=temperature,
+                    response_format=response_format,
+                    latency_seconds=time.perf_counter() - started,
+                    attempt=attempt,
+                    body=body,
+                    http_status=http_status,
+                    error=f"OpenAI returned an unexpected response shape: {exc}",
+                )
                 raise AIResponseError(
                     f"OpenAI returned an unexpected response shape: {exc}",
                     crv_code="CRV-3006",
@@ -143,10 +270,34 @@ def call_openai(
                     "OpenAI empty content | finish_reason=%s | usage=%s | model=%s",
                     finish, json.dumps(usage), model,
                 )
+                _capture_llm_generation(
+                    model=model,
+                    messages=messages,
+                    max_tokens=effective_max,
+                    temperature=temperature,
+                    response_format=response_format,
+                    latency_seconds=time.perf_counter() - started,
+                    attempt=attempt,
+                    body=body,
+                    http_status=http_status,
+                    error="OpenAI returned an empty content string.",
+                )
                 raise AIResponseError(
                     "OpenAI returned an empty content string.",
                     crv_code="CRV-3006",
                 )
+            _capture_llm_generation(
+                model=model,
+                messages=messages,
+                max_tokens=effective_max,
+                temperature=temperature,
+                response_format=response_format,
+                latency_seconds=time.perf_counter() - started,
+                attempt=attempt,
+                body=body,
+                content=content,
+                http_status=http_status,
+            )
 
             return content
 
@@ -161,6 +312,17 @@ def call_openai(
                     )
                     time.sleep(_RETRY_DELAY)
                     continue
+                _capture_llm_generation(
+                    model=model,
+                    messages=messages,
+                    max_tokens=effective_max,
+                    temperature=temperature,
+                    response_format=response_format,
+                    latency_seconds=time.perf_counter() - started,
+                    attempt=attempt,
+                    http_status=exc.code,
+                    error=f"OpenAI quota/rate limit exceeded after {attempt} attempts. Response: {snippet}",
+                )
                 raise AIRateLimitError(
                     f"OpenAI quota/rate limit exceeded after {attempt} attempts. "
                     f"Response: {snippet}",
@@ -171,6 +333,17 @@ def call_openai(
                 "OpenAI HTTP error | status=%d | body=%s | attempt=%d",
                 exc.code, snippet, attempt,
             )
+            _capture_llm_generation(
+                model=model,
+                messages=messages,
+                max_tokens=effective_max,
+                temperature=temperature,
+                response_format=response_format,
+                latency_seconds=time.perf_counter() - started,
+                attempt=attempt,
+                http_status=exc.code,
+                error=f"OpenAI returned HTTP {exc.code}: {snippet}",
+            )
             raise AIHTTPError(
                 f"OpenAI returned HTTP {exc.code}: {snippet}",
                 crv_code="CRV-3003",
@@ -179,17 +352,48 @@ def call_openai(
         except urllib.error.URLError as exc:
             if "timed out" in str(exc.reason).lower():
                 log.error("OpenAI request timed out | attempt=%d", attempt)
+                _capture_llm_generation(
+                    model=model,
+                    messages=messages,
+                    max_tokens=effective_max,
+                    temperature=temperature,
+                    response_format=response_format,
+                    latency_seconds=time.perf_counter() - started,
+                    attempt=attempt,
+                    error=f"OpenAI request timed out after {_REQUEST_TIMEOUT}s.",
+                )
                 raise AITimeoutError(
                     f"OpenAI request timed out after {_REQUEST_TIMEOUT}s.",
                     crv_code="CRV-3002",
                 ) from exc
             log.error("OpenAI network error | reason=%s | attempt=%d", exc.reason, attempt)
+            _capture_llm_generation(
+                model=model,
+                messages=messages,
+                max_tokens=effective_max,
+                temperature=temperature,
+                response_format=response_format,
+                latency_seconds=time.perf_counter() - started,
+                attempt=attempt,
+                error=f"Could not reach OpenAI: {exc.reason}",
+            )
             raise AINetworkError(
                 f"Could not reach OpenAI: {exc.reason}",
                 crv_code="CRV-3005",
             ) from exc
 
         except json.JSONDecodeError as exc:
+            _capture_llm_generation(
+                model=model,
+                messages=messages,
+                max_tokens=effective_max,
+                temperature=temperature,
+                response_format=response_format,
+                latency_seconds=time.perf_counter() - started,
+                attempt=attempt,
+                http_status=200,
+                error=f"OpenAI returned non-JSON response: {exc}",
+            )
             raise AIResponseError(
                 f"OpenAI returned non-JSON response: {exc}",
                 crv_code="CRV-3006",

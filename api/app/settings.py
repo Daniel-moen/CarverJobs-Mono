@@ -63,6 +63,9 @@ class Settings:
   OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
   EMAIL_AI_MODEL = os.getenv("EMAIL_AI_MODEL", "gpt-4o").strip()
   WHATSAPP_AI_MODEL = os.getenv("WHATSAPP_AI_MODEL", "gpt-5-mini").strip()
+  POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY", os.getenv("POSTHOG_PROJECT_API_KEY", os.getenv("VITE_POSTHOG_KEY", ""))).strip()
+  POSTHOG_HOST = os.getenv("POSTHOG_HOST", os.getenv("VITE_POSTHOG_HOST", "https://us.i.posthog.com")).strip().rstrip("/")
+  POSTHOG_LLM_CAPTURE_CONTENT = os.getenv("POSTHOG_LLM_CAPTURE_CONTENT", "false").lower() == "true"
 
   CORS_ORIGINS = _csv_env(
     "CORS_ORIGINS",
