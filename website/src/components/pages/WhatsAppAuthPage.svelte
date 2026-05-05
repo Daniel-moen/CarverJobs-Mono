@@ -7,6 +7,7 @@
   import JobBoardPage from './JobBoardPage.svelte'
   import StatusPage from './StatusPage.svelte'
   import WhatsAppSubscribePage from './WhatsAppSubscribePage.svelte'
+  import FeedbackPrompt from '../feedback/FeedbackPrompt.svelte'
 
   export let token = ''
 
@@ -17,6 +18,8 @@
   let targetPage = ''
   let matchSessionId = 0
   let isSubscribed = false
+  let showFeedbackPrompt = false
+  let creditsBalance = 0
 
   const PAGE_PATH = {
     'profile': '/profile',
@@ -54,7 +57,7 @@
       const data = await response.json().catch(() => ({}))
       // Fallback: use ?r= query param if the API didn't return a redirect
       const urlR = new URLSearchParams(window.location.search).get('r') || ''
-      const SAFE = new Set(['/profile', '/jobs', '/status', '/', '/subscription'])
+      const SAFE = new Set(['/profile', '/jobs', '/status', '/', '/subscription', '/?feedback=1'])
       const redirect = data.redirect || (SAFE.has(urlR) ? urlR : '') || '/profile'
 
       if (data.session_token) {
@@ -70,6 +73,7 @@
         if (subRes.ok) {
           const subData = await subRes.json()
           isSubscribed = Boolean(subData.subscribed)
+          creditsBalance = Number(subData.balance ?? 0)
         }
       } catch { /* non-critical */ }
 
@@ -85,6 +89,9 @@
         targetPage = 'status'
       } else if (redirect === '/subscription') {
         targetPage = 'subscription'
+      } else if (redirect === '/?feedback=1') {
+        targetPage = 'profile'
+        showFeedbackPrompt = true
       } else {
         targetPage = 'profile'
       }
@@ -199,6 +206,17 @@
       <ProfilePage />
     {/if}
   </main>
+  {#if showFeedbackPrompt}
+    <FeedbackPrompt
+      forceOpen={true}
+      source="whatsapp_message"
+      onRewarded={(value) => (creditsBalance = Math.max(0, Number(value) || 0))}
+      onClose={() => {
+        showFeedbackPrompt = false
+        history.replaceState({}, '', '/profile')
+      }}
+    />
+  {/if}
 {/if}
 
 <style>

@@ -3,6 +3,7 @@
   import SiteHeader from './components/layout/SiteHeader.svelte'
   import SiteFooter from './components/layout/SiteFooter.svelte'
   import RouteLoading from './components/layout/RouteLoading.svelte'
+  import FeedbackPrompt from './components/feedback/FeedbackPrompt.svelte'
   import { API_BASE_URL, apiFetch, getAuthProviders } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
   import { identifyUser, resetUser } from './config/posthog'
@@ -140,6 +141,7 @@
   let showLogin = false
   let showSignup = false
   let autoStartMatch = false
+  let forceFeedbackPrompt = false
   let authError = ''
   let loginUsername = ''
   let loginPassword = ''
@@ -485,6 +487,7 @@
       articleSlug = extractArticleSlug(window.location.pathname)
       currentPage = e.state?.page ?? pageFromPath(window.location.pathname)
       enforceRoleAccess()
+      forceFeedbackPrompt = new URLSearchParams(window.location.search).get('feedback') === '1'
       showSignup = currentPage === 'signup'
       showLogin = false
       trackPageView(currentPage)
@@ -501,6 +504,7 @@
     }
 
     history.replaceState({ page: currentPage }, '', window.location.pathname)
+    forceFeedbackPrompt = new URLSearchParams(window.location.search).get('feedback') === '1'
     startAutoFlush()
     trackSessionStart()
     trackPageView(currentPage)
@@ -812,6 +816,19 @@
         <svelte:component this={ActivePage} isSubscribed={isSubscribed} creditsBalance={creditsBalance} onCreditsChanged={(value) => (creditsBalance = Math.max(0, Number(value) || 0))} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} sessionId={matchSessionId} />
       {/await}
     </main>
+    {#if isAuthenticated && userRole === 'crew' && !showOnboarding}
+      <FeedbackPrompt
+        forceOpen={forceFeedbackPrompt}
+        source={forceFeedbackPrompt ? 'whatsapp_message' : 'website_popup'}
+        onRewarded={(value) => (creditsBalance = Math.max(0, Number(value) || 0))}
+        onClose={() => {
+          forceFeedbackPrompt = false
+          if (new URLSearchParams(window.location.search).get('feedback') === '1') {
+            history.replaceState({ page: currentPage }, '', window.location.pathname)
+          }
+        }}
+      />
+    {/if}
     <SiteFooter />
   {/if}
 </div>

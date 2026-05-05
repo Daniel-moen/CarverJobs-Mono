@@ -281,6 +281,43 @@ class CreditAccount(Base):
   )
 
 
+class FeedbackSubmission(Base):
+  __tablename__ = "feedback_submissions"
+
+  id = Column(Integer, primary_key=True, index=True)
+  user_key = Column(String(160), nullable=False, index=True)
+  campaign = Column(String(80), nullable=False, default="feedback_5_tokens", index=True)
+  source = Column(String(40), nullable=False, default="website_popup", index=True)
+  rating = Column(Integer, nullable=False)
+  liked = Column(Text, nullable=True)
+  improved = Column(Text, nullable=True)
+  confusing = Column(Text, nullable=True)
+  recommend = Column(String(20), nullable=True)
+  anything_else = Column(Text, nullable=True)
+  reward_amount = Column(Integer, nullable=False, default=5)
+  rewarded = Column(Boolean, nullable=False, default=True)
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+  __table_args__ = (
+    UniqueConstraint("user_key", "campaign", name="uq_feedback_user_campaign"),
+  )
+
+class FeedbackCampaignSetting(Base):
+  __tablename__ = "feedback_campaign_settings"
+
+  campaign = Column(String(80), primary_key=True)
+  enabled = Column(Boolean, nullable=False, default=True)
+  # all | website | whatsapp | specific | off
+  target_mode = Column(String(20), nullable=False, default="all")
+  # JSON array of user keys (email addresses for website users, phone numbers for WhatsApp users).
+  target_user_keys_json = Column(Text, nullable=False, default="[]")
+  updated_at = Column(
+    DateTime(timezone=True),
+    server_default=func.now(),
+    onupdate=func.now(),
+    nullable=False,
+  )
+
 class MatchSession(Base):
   __tablename__ = "match_sessions"
 

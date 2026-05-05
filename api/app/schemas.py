@@ -471,6 +471,72 @@ class MatchingRunResponse(APIModel):
     credits_remaining: int = 0
     matches:    list[MatchResultItem]
 
+# ── Feedback schemas ──────────────────────────────────────────────────────────
+
+class FeedbackSubmitRequest(APIModel):
+    source: Literal["website_popup", "whatsapp_message"] = "website_popup"
+    rating: Annotated[int, Field(ge=1, le=5)]
+    liked: Annotated[Optional[str], Field(default=None, max_length=1500)] = None
+    improved: Annotated[Optional[str], Field(default=None, max_length=1500)] = None
+    confusing: Annotated[Optional[str], Field(default=None, max_length=1500)] = None
+    recommend: Literal["yes", "no", "maybe"] | None = None
+    anything_else: Annotated[Optional[str], Field(default=None, max_length=1500)] = None
+
+    @field_validator("liked", "improved", "confusing", "anything_else")
+    @classmethod
+    def _strip_optional_text(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
+
+
+class FeedbackStatusResponse(APIModel):
+    ok: bool
+    submitted: bool
+    eligible: bool = True
+    force_prompt: bool = False
+    target_mode: str = "all"
+    reward_amount: int = 5
+
+
+class FeedbackSubmitResponse(APIModel):
+    ok: bool
+    submitted: bool
+    reward_granted: bool
+    reward_amount: int = 5
+    credits_balance: int
+
+
+class FeedbackSettingsResponse(APIModel):
+    ok: bool
+    campaign: str
+    enabled: bool
+    target_mode: Literal["all", "website", "whatsapp", "specific", "off"]
+    target_user_keys: Annotated[list[str], Field(default_factory=list, max_length=500)]
+    reward_amount: int = 5
+
+
+class FeedbackSettingsUpdate(APIModel):
+    enabled: bool
+    target_mode: Literal["all", "website", "whatsapp", "specific", "off"]
+    target_user_keys: Annotated[list[str], Field(default_factory=list, max_length=500)] = []
+
+    @field_validator("target_user_keys")
+    @classmethod
+    def _normalise_target_user_keys(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        normalised: list[str] = []
+        for raw in v:
+            key = str(raw).strip().lower()
+            if not key or key in seen:
+                continue
+            if len(key) > 160:
+                raise ValueError("Target user keys must be 160 characters or fewer")
+            seen.add(key)
+            normalised.append(key)
+        return normalised
+
 
 # ── Crew matching schemas ────────────────────────────────────────────────────
 

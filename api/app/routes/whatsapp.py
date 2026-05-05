@@ -35,6 +35,7 @@ from app.security import issue_session_token
 from app.settings import settings
 from app.services.ai_client import AIClientError
 from app.services.credits import add_credits, get_credit_balance, is_subscribed, spend_credits
+from app.services.feedback_settings import feedback_is_eligible
 
 log = get_logger("carver.whatsapp")
 
@@ -378,6 +379,11 @@ async def _send_help_menu(to: str, db: Session) -> None:
                                 "title": "Buy Tokens",
                                 "description": "Top up your token balance",
                             },
+                            {
+                                "id": "cmd_feedback",
+                                "title": "Give Feedback",
+                                "description": "Earn 5 tokens for quick feedback",
+                            },
                         ],
                     },
                 ],
@@ -602,6 +608,7 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_submit_job": "submit job",
     "cmd_credits": "credits",
     "cmd_subscribe": "subscribe",
+    "cmd_feedback": "feedback",
     "cmd_cancel_sub": "cancel subscription",
     "cmd_help": "help",
     "btn_find_matches": "match",
@@ -617,7 +624,7 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
 
 
 _ALLOWED_REDIRECTS = frozenset({
-    "/profile", "/jobs", "/status", "/", "/subscription",
+    "/profile", "/jobs", "/status", "/", "/subscription", "/?feedback=1",
 })
 _ALLOWED_REDIRECT_PREFIXES = ("/matches/",)
 
@@ -1403,6 +1410,23 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         bal = get_credit_balance(db, phone)
         await _send_whatsapp(phone, _credits_standalone_message(bal))
         return None
+    if cmd in ("feedback", "give feedback", "review", "survey"):
+        eligible, _setting = feedback_is_eligible(db, user_key=phone, source="whatsapp_message")
+        if not eligible:
+            await _send_whatsapp(
+                phone,
+                "💬 Feedback rewards are not open for your account right now. Type *help* to see what else you can do.",
+            )
+            return None
+        link = _make_magic_link(phone, db, redirect_to="/?feedback=1")
+        await _send_whatsapp(
+            phone,
+            "💬 *Help us improve CARVER*\n\n"
+            "Share quick feedback about your experience and we'll reward you with *5 tokens*.\n\n"
+            f"Give feedback here: {link}\n\n"
+            "_Takes less than 2 minutes. Reward available once per user._",
+        )
+        return None
 
     if cmd in ("subscribe", "pro", "upgrade", "paid", "subscription", "buy tokens", "buy", "top up", "topup"):
         link = _make_magic_link(phone, db, redirect_to="/subscription")
@@ -1558,6 +1582,7 @@ _GLOBAL_CMDS: frozenset[str] = frozenset({
     "cancel subscription", "cancel pro", "cancel", "unsubscribe",
     "help", "commands", "menu",
     "credits", "balance", "my credits", "tokens", "my tokens",
+    "feedback", "give feedback", "review", "survey",
 })
 
 

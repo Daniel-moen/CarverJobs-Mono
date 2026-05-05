@@ -40,6 +40,10 @@
   let pfError          = $state('')
   let pfSubStatus      = $state(null)
   let pfCancelling     = $state(false)
+  let feedbackSettings = $state(null)
+  let feedbackSaving   = $state(false)
+  let feedbackMessage  = $state('')
+  let feedbackIsError  = $state(false)
 
   async function subscriptionCheckout(redirect) {
     subCheckoutLoading = true
@@ -60,6 +64,47 @@
       }
     } catch { pfError = 'Could not reach server.' }
     finally { subCheckoutLoading = false }
+  }
+
+  function parseFeedbackTargets(text) {
+    return String(text || '')
+      .split(/[,\n]/)
+      .map(v => v.trim().toLowerCase())
+      .filter(Boolean)
+  }
+
+  async function saveFeedbackSettings(next = {}) {
+    if (!feedbackSettings) return
+    feedbackSaving = true
+    feedbackMessage = ''
+    feedbackIsError = false
+    const payload = {
+      enabled: Boolean(next.enabled ?? feedbackSettings.enabled),
+      target_mode: next.target_mode ?? feedbackSettings.target_mode,
+      target_user_keys: next.target_user_keys ?? feedbackSettings.target_user_keys ?? [],
+    }
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/admin/feedback/settings`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        feedbackIsError = true
+        feedbackMessage = data.detail || `Could not save feedback settings. (${res.status})`
+        return
+      }
+      feedbackSettings = data
+      feedbackMessage = 'Feedback targeting saved.'
+      setTimeout(() => { feedbackMessage = '' }, 4000)
+    } catch {
+      feedbackIsError = true
+      feedbackMessage = 'Could not reach the server.'
+    } finally {
+      feedbackSaving = false
+    }
   }
 
   async function pfStatus() {
@@ -89,12 +134,13 @@
     error = ''
     errorCode = ''
     try {
-      const [statsRes, flagsRes, scraperRes, analyticsRes, flowsRes] = await Promise.all([
+      const [statsRes, flagsRes, scraperRes, analyticsRes, flowsRes, feedbackRes] = await Promise.all([
         apiFetch(`${API_BASE_URL}/admin/stats`,           { method: 'GET', credentials: 'include' }),
         apiFetch(`${API_BASE_URL}/admin/flags`,           { method: 'GET', credentials: 'include' }),
         apiFetch(`${API_BASE_URL}/scraper/status`,        { method: 'GET', credentials: 'include' }),
         apiFetch(`${API_BASE_URL}/admin/analytics`,       { method: 'GET', credentials: 'include' }),
         apiFetch(`${API_BASE_URL}/admin/analytics/flows`, { method: 'GET', credentials: 'include' }),
+        apiFetch(`${API_BASE_URL}/admin/feedback/settings`, { method: 'GET', credentials: 'include' }),
       ])
       if (!statsRes.ok) {
         if (statsRes.status === 401 || statsRes.status === 403) {
@@ -111,6 +157,7 @@
       scraperStatus = scraperRes.ok   ? await scraperRes.json()   : null
       analyticsData = analyticsRes.ok ? await analyticsRes.json() : null
       flowsData     = flowsRes.ok     ? await flowsRes.json()     : null
+      feedbackSettings = feedbackRes.ok ? await feedbackRes.json() : null
       lastFetched   = new Date()
     } catch {
       error = 'Could not reach the server.'
@@ -625,6 +672,7 @@
                 ['database-panel', 'Database'],
                 ['request-panel', 'Requests'],
                 ['analytics-panel', 'Analytics'],
+                ['feedback-panel', 'Feedback'],
                 ['whatsapp-panel', 'WhatsApp'],
                 ['ai-matching-panel', 'AI'],
                 ['errors-panel', 'Errors'],
@@ -676,6 +724,106 @@
               </div>
             </button>
           {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- ── Feedback Campaign ── -->
+    {#if feedbackSettings}
+      <div id="feedback-panel" class="dash-card scroll-mt-4 rounded-2xl border border-white/8 bg-zinc-950 p-5" class:visible={mounted} style="--delay:90ms;">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <span class="h-1.5 w-1.5 rounded-full {feedbackSettings.enabled && feedbackSettings.target_mode !== 'off' ? 'bg-emerald-400' : 'bg-zinc-600'}"></span>
+            <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Feedback Campaign</p>
+          </div>
+          <span class="rounded-full border border-cyan-400/20 bg-cyan-400/8 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
+            {feedbackSettings.reward_amount ?? 5} token reward
+          </span>
+        </div>
+
+        <div class="grid gap-4 lg:grid-cols-2">
+          <div class="rounded-xl border border-white/8 bg-zinc-900/50 p-4">
+            <p class="mb-3 text-xs font-bold text-slate-200">Who should see the feedback prompt?</p>
+            <div class="grid gap-2 sm:grid-cols-2">
+              {#each [
+                ['all', 'Everyone', 'Website popup + WhatsApp feedback links'],
+                ['website', 'Website users', 'Only logged-in website crew users'],
+                ['whatsapp', 'WhatsApp users', 'Only WhatsApp users who request feedback'],
+                ['specific', 'Specific users', 'Only listed emails or phone numbers'],
+                ['off', 'Off', 'Disable the campaign'],
+              ] as [mode, label, detail]}
+                <button
+                  type="button"
+                  onclick={() => saveFeedbackSettings({ enabled: mode !== 'off', target_mode: mode })}
+                  disabled={feedbackSaving}
+                  class="rounded-xl border px-3 py-2.5 text-left transition disabled:cursor-wait disabled:opacity-50 {feedbackSettings.target_mode === mode ? 'border-cyan-400/35 bg-cyan-400/10' : 'border-white/8 bg-black/20 hover:border-white/16 hover:bg-white/[0.03]'}"
+                >
+                  <p class="text-xs font-semibold {feedbackSettings.target_mode === mode ? 'text-cyan-100' : 'text-slate-200'}">{label}</p>
+                  <p class="mt-1 text-[10px] leading-relaxed text-slate-600">{detail}</p>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-white/8 bg-zinc-900/50 p-4">
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <p class="text-xs font-bold text-slate-200">Specific user list</p>
+                <p class="mt-1 text-[10px] text-slate-600">Use emails for website users and phone numbers for WhatsApp users. Separate with commas or new lines.</p>
+              </div>
+              <button
+                type="button"
+                onclick={() => saveFeedbackSettings({ enabled: !feedbackSettings.enabled })}
+                disabled={feedbackSaving}
+                class="rounded-lg border px-2.5 py-1 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 {feedbackSettings.enabled ? 'border-emerald-400/20 bg-emerald-400/8 text-emerald-300' : 'border-zinc-700 bg-zinc-800 text-slate-500'}"
+              >
+                {feedbackSettings.enabled ? 'Enabled' : 'Disabled'}
+              </button>
+            </div>
+            <textarea
+              rows="5"
+              value={(feedbackSettings.target_user_keys ?? []).join('\n')}
+              oninput={(event) => {
+                feedbackSettings = {
+                  ...feedbackSettings,
+                  target_user_keys: parseFeedbackTargets(event.currentTarget.value),
+                }
+              }}
+              class="w-full rounded-lg border border-white/[0.1] bg-[#04070b] px-3.5 py-2.5 font-mono text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/20"
+              placeholder="crew@example.com&#10;27821234567"
+            ></textarea>
+            <div class="mt-3 flex items-center justify-between gap-3">
+              <p class="text-[10px] text-slate-600">
+                {feedbackSettings.target_user_keys?.length ?? 0} targeted user{(feedbackSettings.target_user_keys?.length ?? 0) === 1 ? '' : 's'}
+              </p>
+              <button
+                type="button"
+                onclick={() => saveFeedbackSettings()}
+                disabled={feedbackSaving}
+                class="rounded-lg border border-cyan-300/35 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold text-cyan-100 transition hover:border-cyan-300/55 hover:bg-cyan-300/15 disabled:cursor-wait disabled:opacity-50"
+              >
+                {feedbackSaving ? 'Saving…' : 'Save targeting'}
+              </button>
+            </div>
+            {#if feedbackMessage}
+              <p class="mt-3 rounded-lg border px-3 py-2 text-xs {feedbackIsError ? 'border-rose-400/20 bg-rose-400/8 text-rose-300' : 'border-emerald-400/20 bg-emerald-400/8 text-emerald-300'}">{feedbackMessage}</p>
+            {/if}
+          </div>
+        </div>
+
+        <div class="mt-4 grid gap-3 sm:grid-cols-3">
+          <div class="rounded-xl border border-white/8 bg-black/20 p-3">
+            <p class="text-[10px] text-slate-600">Submissions</p>
+            <p class="mt-1 text-2xl font-black text-white">{db.feedback_submissions_total ?? 0}</p>
+          </div>
+          <div class="rounded-xl border border-white/8 bg-black/20 p-3">
+            <p class="text-[10px] text-slate-600">Website</p>
+            <p class="mt-1 text-2xl font-black text-cyan-300">{db.feedback_submissions_by_source?.website_popup ?? 0}</p>
+          </div>
+          <div class="rounded-xl border border-white/8 bg-black/20 p-3">
+            <p class="text-[10px] text-slate-600">WhatsApp</p>
+            <p class="mt-1 text-2xl font-black text-emerald-300">{db.feedback_submissions_by_source?.whatsapp_message ?? 0}</p>
+          </div>
         </div>
       </div>
     {/if}

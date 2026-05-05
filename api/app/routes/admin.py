@@ -12,10 +12,15 @@ from app import analytics, flags, metrics, telnyx_inbound_buffer
 from app.database import get_db
 from app.error_codes import CRV_1005, CRV_5001, CRV_5002, CRV_5003, CRV_5004
 from app.logger import get_logger
-from app.models import ErrorLog, Job, User, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
-from app.schemas import APIModel
+from app.models import ErrorLog, FeedbackSubmission, Job, User, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
+from app.schemas import APIModel, FeedbackSettingsResponse, FeedbackSettingsUpdate
 from app.security import require_admin_session
 from app.services.ai_client import AIClientError, call_openai
+from app.services.feedback_settings import (
+    get_feedback_setting,
+    serialise_feedback_setting,
+    update_feedback_setting,
+)
 from app.settings import settings
 
 log = get_logger("carver.admin")
@@ -50,6 +55,9 @@ def get_stats(request: Request, db: Session = Depends(get_db)):
         wa_sessions_by_mode = {row[0]: row[1] for row in wa_mode_rows}
         wa_tokens_total   = db.query(func.count(WhatsAppMagicToken.token)).scalar() or 0
         wa_tokens_used    = db.query(func.count(WhatsAppMagicToken.token)).filter(WhatsAppMagicToken.used.is_(True)).scalar() or 0
+        feedback_total    = db.query(func.count(FeedbackSubmission.id)).scalar() or 0
+        feedback_by_source_rows = db.query(FeedbackSubmission.source, func.count(FeedbackSubmission.id)).group_by(FeedbackSubmission.source).all()
+        feedback_by_source = {row[0]: row[1] for row in feedback_by_source_rows}
     except Exception as exc:
         log.error("Admin stats DB query failed: %s", exc)
         raise HTTPException(
@@ -74,6 +82,8 @@ def get_stats(request: Request, db: Session = Depends(get_db)):
             "whatsapp_sessions_by_mode": wa_sessions_by_mode,
             "whatsapp_magic_tokens_total": wa_tokens_total,
             "whatsapp_magic_tokens_used": wa_tokens_used,
+            "feedback_submissions_total": feedback_total,
+            "feedback_submissions_by_source": feedback_by_source,
         },
         "events": metrics.snapshot(),
         "errors_by_module": metrics.errors_by_module_snapshot(),
@@ -143,6 +153,36 @@ def update_flag(request: Request, payload: FlagUpdate):
             headers={"X-Error-Code": CRV_5002},
         )
     return {"ok": True, "flags": flags.get_all()}
+
+
+# ── Feedback campaign settings ────────────────────────────────────────────────
+
+@router.get("/feedback/settings", response_model=FeedbackSettingsResponse)
+def get_feedback_settings(db: Session = Depends(get_db)):
+    setting = get_feedback_setting(db)
+    return {"ok": True, **serialise_feedback_setting(setting)}
+
+
+@router.patch("/feedback/settings", response_model=FeedbackSettingsResponse)
+@_limiter.limit("20/minute")
+def update_feedback_settings(
+    request: Request,
+    payload: FeedbackSettingsUpdate,
+    db: Session = Depends(get_db),
+):
+    setting = update_feedback_setting(
+        db,
+        enabled=payload.enabled,
+        target_mode=payload.target_mode,
+        target_user_keys=payload.target_user_keys,
+    )
+    log.warning(
+        "Feedback settings changed | enabled=%s | target_mode=%s | targets=%d",
+        setting.enabled,
+        setting.target_mode,
+        len(payload.target_user_keys),
+    )
+    return {"ok": True, **serialise_feedback_setting(setting)}
 
 
 # ── Error log ─────────────────────────────────────────────────────────────────

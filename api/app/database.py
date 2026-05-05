@@ -251,6 +251,45 @@ def run_migrations() -> None:
 
     ca_cols = _existing("credit_accounts")
     _add("credit_accounts", "last_reset_at", "DATETIME", ca_cols)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedback_submissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_key VARCHAR(160) NOT NULL,
+            campaign VARCHAR(80) NOT NULL DEFAULT 'feedback_5_tokens',
+            source VARCHAR(40) NOT NULL DEFAULT 'website_popup',
+            rating INTEGER NOT NULL,
+            liked TEXT,
+            improved TEXT,
+            confusing TEXT,
+            recommend VARCHAR(20),
+            anything_else TEXT,
+            reward_amount INTEGER NOT NULL DEFAULT 5,
+            rewarded BOOLEAN NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_feedback_user_campaign ON feedback_submissions (user_key, campaign)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_feedback_submissions_source ON feedback_submissions (source)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_feedback_submissions_created_at ON feedback_submissions (created_at)"
+    )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedback_campaign_settings (
+            campaign VARCHAR(80) PRIMARY KEY,
+            enabled BOOLEAN NOT NULL DEFAULT 1,
+            target_mode VARCHAR(20) NOT NULL DEFAULT 'all',
+            target_user_keys_json TEXT NOT NULL DEFAULT '[]',
+            updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "INSERT OR IGNORE INTO feedback_campaign_settings (campaign, enabled, target_mode, target_user_keys_json) "
+        "VALUES ('feedback_5_tokens', 1, 'all', '[]')"
+    )
 
     # job_drafts — engagement signal for agency dashboards. One row per
     # (job_id, user_key); enforced unique so repeated drafts don't inflate.
