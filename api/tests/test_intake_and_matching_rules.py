@@ -4,6 +4,7 @@ from app.routes.scraper import _run_import_pipeline, _save_job_from_ai_fields
 from app.services.matching_engine import (
     CandidateProfile,
     JobSummary,
+    _call_openai,
     match_candidate_to_jobs,
 )
 from tests.conftest import _TestingSession
@@ -144,3 +145,19 @@ def test_matching_engine_allows_gender_match(monkeypatch):
     assert len(results) == 1
     assert results[0].matched is True
     assert results[0].compatibility == 88
+
+
+def test_matching_engine_openai_call_uses_shared_ai_client(monkeypatch):
+    captured = {}
+
+    def _fake_call_openai(**kwargs):
+        captured.update(kwargs)
+        return '{"matched_jobs": []}'
+
+    monkeypatch.setattr("app.services.matching_engine.call_openai", _fake_call_openai)
+
+    assert _call_openai("test-key", "test-model", "test prompt") == '{"matched_jobs": []}'
+    assert captured["api_key"] == "test-key"
+    assert captured["model"] == "test-model"
+    assert captured["messages"] == [{"role": "user", "content": "test prompt"}]
+    assert captured["response_format"] == {"type": "json_object"}

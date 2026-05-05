@@ -9,12 +9,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
-import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+from app.services.ai_client import AIClientError, call_openai
 
 log = logging.getLogger("carver.matching_engine")
 
@@ -22,9 +21,6 @@ BATCH_SIZE = 10
 MATCH_THRESHOLD = 30
 MAX_WORKERS = 4
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
-_RETRYABLE_CODES = {429, 500, 502, 503, 504}
-_MAX_RETRIES = 3
-_BASE_DELAY = 1.5
 _FEMALE_REQ_PATTERNS = (
     re.compile(r"\bfemale(?:\s+candidates?)?(?:\s+only)?\b"),
     re.compile(r"\bfemales?\s+only\b"),
@@ -136,56 +132,20 @@ def _job_gender_requirement(job: JobSummary) -> str | None:
     return None
 
 
-# ── OpenAI caller (stdlib only — no extra deps) ─────────────────────────────
+# ── OpenAI caller ────────────────────────────────────────────────────────────
 
 def _call_openai(api_key: str, model: str, prompt: str) -> str:
-    body = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-    }
-    data = json.dumps(body).encode("utf-8")
-    url = "https://api.openai.com/v1/chat/completions"
-
-    last_error: Exception | None = None
-    for attempt in range(_MAX_RETRIES):
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
+    try:
+        return call_openai(
+            api_key=api_key,
+            messages=[{"role": "user", "content": prompt}],
+            model=model,
+            max_tokens=2000,
+            temperature=0.3,
+            response_format={"type": "json_object"},
         )
-        try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                raw = resp.read().decode("utf-8")
-            parsed = json.loads(raw)
-            return parsed["choices"][0]["message"]["content"]
-        except urllib.error.HTTPError as exc:
-            last_error = exc
-            if exc.code in _RETRYABLE_CODES and attempt < _MAX_RETRIES - 1:
-                delay = _BASE_DELAY * (2 ** attempt)
-                log.warning("OpenAI %d (attempt %d/%d), retrying in %.1fs",
-                            exc.code, attempt + 1, _MAX_RETRIES, delay)
-                time.sleep(delay)
-                continue
-            detail = exc.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"OpenAI HTTP {exc.code}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            last_error = exc
-            if attempt < _MAX_RETRIES - 1:
-                delay = _BASE_DELAY * (2 ** attempt)
-                log.warning("OpenAI connection error (attempt %d/%d): %s",
-                            attempt + 1, _MAX_RETRIES, exc.reason)
-                time.sleep(delay)
-                continue
-            raise RuntimeError(f"OpenAI connection error: {exc.reason}") from exc
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("Unexpected OpenAI response structure") from exc
-
-    raise RuntimeError(f"OpenAI failed after {_MAX_RETRIES} attempts") from last_error
+    except AIClientError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 # ── Prompt builder ───────────────────────────────────────────────────────────
