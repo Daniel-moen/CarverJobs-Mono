@@ -6,7 +6,7 @@ def test_feedback_status_initially_not_submitted(client):
     assert body["ok"] is True
     assert body["submitted"] is False
     assert body["eligible"] is True
-    assert body["reward_amount"] == 5
+    assert body["reward_amount"] == 2
 
 
 def test_feedback_submit_rewards_tokens_once(client):
@@ -24,8 +24,8 @@ def test_feedback_submit_rewards_tokens_once(client):
     first_body = first.json()
     assert first_body["submitted"] is True
     assert first_body["reward_granted"] is True
-    assert first_body["reward_amount"] == 5
-    assert first_body["credits_balance"] == 7
+    assert first_body["reward_amount"] == 2
+    assert first_body["credits_balance"] == 4
 
     duplicate = client.post("/feedback/submit", json={
         "source": "whatsapp_message",
@@ -37,7 +37,7 @@ def test_feedback_submit_rewards_tokens_once(client):
     duplicate_body = duplicate.json()
     assert duplicate_body["submitted"] is True
     assert duplicate_body["reward_granted"] is False
-    assert duplicate_body["credits_balance"] == 7
+    assert duplicate_body["credits_balance"] == 4
 
     status = client.get("/feedback/status")
     assert status.status_code == 200

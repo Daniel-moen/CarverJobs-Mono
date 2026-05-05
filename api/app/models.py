@@ -286,7 +286,7 @@ class FeedbackSubmission(Base):
 
   id = Column(Integer, primary_key=True, index=True)
   user_key = Column(String(160), nullable=False, index=True)
-  campaign = Column(String(80), nullable=False, default="feedback_5_tokens", index=True)
+  campaign = Column(String(80), nullable=False, default="feedback_2_tokens", index=True)
   source = Column(String(40), nullable=False, default="website_popup", index=True)
   rating = Column(Integer, nullable=False)
   liked = Column(Text, nullable=True)
@@ -294,7 +294,7 @@ class FeedbackSubmission(Base):
   confusing = Column(Text, nullable=True)
   recommend = Column(String(20), nullable=True)
   anything_else = Column(Text, nullable=True)
-  reward_amount = Column(Integer, nullable=False, default=5)
+  reward_amount = Column(Integer, nullable=False, default=2)
   rewarded = Column(Boolean, nullable=False, default=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 

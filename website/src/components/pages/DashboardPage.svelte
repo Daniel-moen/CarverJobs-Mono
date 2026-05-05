@@ -737,19 +737,19 @@
             <p class="text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">Feedback Campaign</p>
           </div>
           <span class="rounded-full border border-cyan-400/20 bg-cyan-400/8 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
-            {feedbackSettings.reward_amount ?? 5} token reward
+            {feedbackSettings.reward_amount ?? 2} token reward
           </span>
         </div>
 
         <div class="grid gap-4 lg:grid-cols-2">
           <div class="rounded-xl border border-white/8 bg-zinc-900/50 p-4">
-            <p class="mb-3 text-xs font-bold text-slate-200">Who should see the feedback prompt?</p>
+            <p class="mb-3 text-xs font-bold text-slate-200">Who should receive the feedback request?</p>
             <div class="grid gap-2 sm:grid-cols-2">
               {#each [
-                ['all', 'Everyone', 'Website popup + WhatsApp feedback links'],
-                ['website', 'Website users', 'Only logged-in website crew users'],
-                ['whatsapp', 'WhatsApp users', 'Only WhatsApp users who request feedback'],
-                ['specific', 'Specific users', 'Only listed emails or phone numbers'],
+                ['all', 'Everyone', 'Website modal + direct WhatsApp request'],
+                ['website', 'Website users', 'Logged-in website crew users must answer'],
+                ['whatsapp', 'WhatsApp users', 'WhatsApp users are sent the feedback form directly'],
+                ['specific', 'Specific users', 'Only listed emails or phone numbers must answer'],
                 ['off', 'Off', 'Disable the campaign'],
               ] as [mode, label, detail]}
                 <button

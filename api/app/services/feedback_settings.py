@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 
 from app import models
 
-FEEDBACK_CAMPAIGN = "feedback_5_tokens"
-FEEDBACK_REWARD_TOKENS = 5
+FEEDBACK_CAMPAIGN = "feedback_2_tokens"
+FEEDBACK_REWARD_TOKENS = 2
 TARGET_MODES = {"all", "website", "whatsapp", "specific", "off"}
 
 

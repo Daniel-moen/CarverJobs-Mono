@@ -4,7 +4,6 @@
 
   let { forceOpen = false, source = 'website_popup', onRewarded = () => {}, onClose = () => {} } = $props()
 
-  const DISMISS_KEY = 'carver_feedback_prompt_dismissed'
   const SUBMITTED_KEY = 'carver_feedback_submitted'
 
   let visible = $state(false)
@@ -20,13 +19,6 @@
   let recommend = $state('maybe')
   let anythingElse = $state('')
 
-  function dismissedLocally() {
-    try { return localStorage.getItem(DISMISS_KEY) === 'true' } catch { return false }
-  }
-
-  function markDismissed() {
-    try { localStorage.setItem(DISMISS_KEY, 'true') } catch { /* ignore */ }
-  }
 
   function markSubmitted() {
     try { localStorage.setItem(SUBMITTED_KEY, 'true') } catch { /* ignore */ }
@@ -37,10 +29,6 @@
     onClose()
   }
 
-  function dismissPrompt() {
-    markDismissed()
-    closePrompt()
-  }
 
   async function loadStatus() {
     let statusData = null
@@ -62,10 +50,10 @@
       return
     }
     checkedStatus = true
-    if (forceOpen || statusData?.force_prompt || !dismissedLocally()) {
+    if (statusData?.eligible) {
       window.setTimeout(() => {
         if (!submitted) visible = true
-      }, forceOpen ? 250 : 45000)
+      }, 250)
     }
   }
 
@@ -96,7 +84,7 @@
       submitted = true
       markSubmitted()
       if (data.reward_granted) {
-        rewardMessage = `Thanks — ${data.reward_amount ?? 5} tokens have been added to your account.`
+        rewardMessage = `Thanks — ${data.reward_amount ?? 2} tokens have been added to your account.`
       } else {
         rewardMessage = 'Thanks — your feedback has already been recorded for this reward.'
       }
@@ -132,20 +120,12 @@
       {:else}
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-cyan-300/80">5 token reward</p>
-            <h2 id="feedback-title" class="mt-2 font-display text-2xl text-white">Help us improve CARVER</h2>
+            <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-cyan-300/80">2 token reward</p>
+            <h2 id="feedback-title" class="mt-2 font-display text-2xl text-white">Quick feedback required</h2>
             <p class="mt-2 text-sm leading-relaxed text-slate-400">
-              Share quick feedback about your experience and we’ll reward you with 5 tokens.
+              Please answer these quick questions about your experience. We’ll add 2 tokens to your account when you submit.
             </p>
           </div>
-          <button
-            type="button"
-            class="rounded-full border border-white/10 px-2 py-1 text-xs text-slate-400 transition hover:border-white/25 hover:text-white"
-            aria-label="Close feedback prompt"
-            onclick={dismissPrompt}
-          >
-            ✕
-          </button>
         </div>
 
         <form class="mt-5 grid gap-4" onsubmit={(event) => { event.preventDefault(); submitFeedback() }}>
@@ -200,13 +180,6 @@
           {/if}
 
           <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              class="rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-white/25 hover:text-white"
-              onclick={dismissPrompt}
-            >
-              Maybe later
-            </button>
             <button
               type="submit"
               disabled={submitting}

@@ -255,7 +255,7 @@ def run_migrations() -> None:
         CREATE TABLE IF NOT EXISTS feedback_submissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_key VARCHAR(160) NOT NULL,
-            campaign VARCHAR(80) NOT NULL DEFAULT 'feedback_5_tokens',
+            campaign VARCHAR(80) NOT NULL DEFAULT 'feedback_2_tokens',
             source VARCHAR(40) NOT NULL DEFAULT 'website_popup',
             rating INTEGER NOT NULL,
             liked TEXT,
@@ -263,7 +263,7 @@ def run_migrations() -> None:
             confusing TEXT,
             recommend VARCHAR(20),
             anything_else TEXT,
-            reward_amount INTEGER NOT NULL DEFAULT 5,
+            reward_amount INTEGER NOT NULL DEFAULT 2,
             rewarded BOOLEAN NOT NULL DEFAULT 1,
             created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
         )
@@ -288,7 +288,7 @@ def run_migrations() -> None:
     """)
     conn.execute(
         "INSERT OR IGNORE INTO feedback_campaign_settings (campaign, enabled, target_mode, target_user_keys_json) "
-        "VALUES ('feedback_5_tokens', 1, 'all', '[]')"
+        "VALUES ('feedback_2_tokens', 1, 'all', '[]')"
     )
 
     # job_drafts — engagement signal for agency dashboards. One row per

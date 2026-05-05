@@ -381,8 +381,8 @@ async def _send_help_menu(to: str, db: Session) -> None:
                             },
                             {
                                 "id": "cmd_feedback",
-                                "title": "Give Feedback",
-                                "description": "Earn 5 tokens for quick feedback",
+                                "title": "Feedback",
+                                "description": "Complete required feedback for 2 tokens",
                             },
                         ],
                     },
@@ -689,6 +689,31 @@ def _save_session(session: WhatsAppSession, db: Session, history: list, partial_
     if mode:
         session.mode = mode
     db.commit()
+
+
+def _feedback_already_submitted(db: Session, user_key: str) -> bool:
+    from app.models import FeedbackSubmission
+    from app.services.feedback_settings import FEEDBACK_CAMPAIGN
+    return (
+        db.query(FeedbackSubmission.id)
+        .filter(
+            FeedbackSubmission.user_key == user_key,
+            FeedbackSubmission.campaign == FEEDBACK_CAMPAIGN,
+        )
+        .first()
+    ) is not None
+
+
+async def _send_feedback_request(phone: str, db: Session) -> None:
+    link = _make_magic_link(phone, db, redirect_to="/?feedback=1")
+    await _send_whatsapp(
+        phone,
+        "💬 *Quick feedback required*\n\n"
+        "Please complete this short feedback form about your CARVER experience. "
+        "We'll add *2 tokens* to your account when you submit it.\n\n"
+        f"Feedback form: {link}\n\n"
+        "_Takes less than 2 minutes. Reward available once per user._",
+    )
 
 
 # ── AI helpers ────────────────────────────────────────────────────────────────
@@ -1418,14 +1443,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
                 "💬 Feedback rewards are not open for your account right now. Type *help* to see what else you can do.",
             )
             return None
-        link = _make_magic_link(phone, db, redirect_to="/?feedback=1")
-        await _send_whatsapp(
-            phone,
-            "💬 *Help us improve CARVER*\n\n"
-            "Share quick feedback about your experience and we'll reward you with *5 tokens*.\n\n"
-            f"Give feedback here: {link}\n\n"
-            "_Takes less than 2 minutes. Reward available once per user._",
-        )
+        await _send_feedback_request(phone, db)
         return None
 
     if cmd in ("subscribe", "pro", "upgrade", "paid", "subscription", "buy tokens", "buy", "top up", "topup"):
@@ -1606,10 +1624,20 @@ async def _process_whatsapp_message(
             graph_phone_number_id=graph_phone_number_id,
         )
         wa_session = _get_or_create_session(phone_number, db)
+        _cmd = user_text.strip().lower()
+
+        feedback_eligible, _feedback_setting = feedback_is_eligible(db, user_key=phone_number, source="whatsapp_message")
+        if (
+            feedback_eligible
+            and not _feedback_already_submitted(db, phone_number)
+            and _cmd not in ("feedback", "give feedback", "review", "survey")
+        ):
+            await _send_feedback_request(phone_number, db)
+            metrics.increment("whatsapp_messages")
+            return
 
         # Global commands bypass onboarding / job-submit modes so the user
         # can always buy tokens, check balance, or open the help menu.
-        _cmd = user_text.strip().lower()
         if wa_session.mode != "chat" and _cmd in _GLOBAL_CMDS:
             reply = await _run_chat(wa_session, user_text, db)
             if reply is not None:

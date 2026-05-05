@@ -497,14 +497,14 @@ class FeedbackStatusResponse(APIModel):
     eligible: bool = True
     force_prompt: bool = False
     target_mode: str = "all"
-    reward_amount: int = 5
+    reward_amount: int = 2
 
 
 class FeedbackSubmitResponse(APIModel):
     ok: bool
     submitted: bool
     reward_granted: bool
-    reward_amount: int = 5
+    reward_amount: int = 2
     credits_balance: int
 
 
@@ -514,7 +514,7 @@ class FeedbackSettingsResponse(APIModel):
     enabled: bool
     target_mode: Literal["all", "website", "whatsapp", "specific", "off"]
     target_user_keys: Annotated[list[str], Field(default_factory=list, max_length=500)]
-    reward_amount: int = 5
+    reward_amount: int = 2
 
 
 class FeedbackSettingsUpdate(APIModel):
