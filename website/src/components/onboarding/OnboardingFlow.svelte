@@ -17,6 +17,7 @@
   // AI chat state
   let messages = []
   let inputText = ''
+  let lastUserMessage = ''
   let isLoading = false
   let aiError = ''
   let isDone = false
@@ -52,7 +53,13 @@
   async function callOnboard(userMessage = '', history = null) {
     isLoading = true
     aiError = ''
-    const historyPayload = history ?? messages
+    const historyPayload = history ? [...history] : [...messages]
+    // Remove trailing user messages that never got an assistant reply.
+    // This prevents the model from seeing back-to-back user turns after
+    // a failed request.
+    while (historyPayload.length > 0 && historyPayload[historyPayload.length - 1].role === 'user') {
+      historyPayload.pop()
+    }
     try {
       const res = await apiFetch(`${API_BASE_URL}/interview/onboard`, {
         method: 'POST',
@@ -96,6 +103,7 @@
     event?.preventDefault()
     const text = inputText.trim()
     if (!text || isLoading) return
+    lastUserMessage = text
     const historyBefore = [...messages]
     messages = [...messages, { role: 'user', content: text }]
     inputText = ''
@@ -286,7 +294,7 @@
               <p class="text-xs text-rose-300">{aiError}</p>
               <button
                 type="button"
-                onclick={() => { aiError = ''; callOnboard('', []) }}
+onclick={() => { aiError = ''; callOnboard(lastUserMessage, null) }}
                 class="mt-2 text-xs font-medium text-rose-200 underline underline-offset-2 hover:text-white transition"
               >
                 Try again
