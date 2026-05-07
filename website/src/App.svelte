@@ -6,7 +6,7 @@
   import FeedbackPrompt from './components/feedback/FeedbackPrompt.svelte'
   import { API_BASE_URL, apiFetch, getAuthProviders } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
-  import { identifyUser, resetUser } from './config/posthog'
+  import { identifyUser, resetUser } from './config/mixpanel'
 
   // ── URL routing ──────────────────────────────────────────────────────────────
   // Map URL pathnames → page keys and back.  No router library needed —

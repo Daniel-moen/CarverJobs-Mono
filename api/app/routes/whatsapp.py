@@ -19,7 +19,6 @@ import json
 import secrets
 import threading
 import time
-import urllib.request
 from contextvars import ContextVar
 from datetime import datetime, timezone, timedelta
 
@@ -34,7 +33,8 @@ from app.logger import get_logger
 from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
 from app.security import issue_session_token
 from app.settings import settings
-from app.services.ai_client import AIClientError, _posthog_config
+from app.services.ai_client import AIClientError
+from app.services.mixpanel_server import track as mixpanel_track
 from app.services.credits import add_credits, get_credit_balance, is_subscribed, spend_credits
 from app.services.feedback_settings import feedback_is_eligible
 
@@ -54,7 +54,7 @@ _ACTIVE_MATCH_RUNS: set[str] = set()
 _ACTIVE_MATCH_RUNS_LOCK = threading.Lock()
 _MATCH_SCOPE_ALL = "all"
 _MATCH_SCOPE_RECENT = "recent"
-_POSTHOG_CAPTURE_TIMEOUT = 2
+_MIXPANEL_CAPTURE_TIMEOUT = 2
 
 
 def _parse_meta_timestamp(timestamp_str: str | None) -> int | None:
@@ -149,13 +149,14 @@ def _messages_url() -> str:
 def _wa_configured() -> bool:
     return bool(settings.WHATSAPP_PHONE_NUMBER_ID and settings.WHATSAPP_ACCESS_TOKEN)
 
-def _posthog_whatsapp_distinct_id(phone_number: str) -> str:
+
+def _mixpanel_whatsapp_distinct_id(phone_number: str) -> str:
     """Stable, non-reversible distinct id for WhatsApp users."""
     raw = f"{settings.SECRET_KEY}:{phone_number}".encode()
     return "whatsapp:" + hashlib.sha256(raw).hexdigest()[:24]
 
 
-def _capture_whatsapp_posthog_event(
+def _capture_whatsapp_mixpanel_event(
     phone_number: str,
     direction: str,
     message_type: str,
@@ -165,16 +166,11 @@ def _capture_whatsapp_posthog_event(
     graph_phone_number_id: str | None = None,
     payload: dict | None = None,
 ) -> None:
-    """Best-effort PostHog channel event for WhatsApp traffic; never sends message text."""
-    api_key, host, _capture_content = _posthog_config()
-    if not api_key:
-        return
-
+    """Best-effort Mixpanel event for WhatsApp traffic; never sends message text."""
     event_name = "whatsapp_message_received" if direction == "inbound" else "whatsapp_message_sent"
     payload = payload or {}
     status_code = payload.get("status_code")
     properties = {
-        "distinct_id": _posthog_whatsapp_distinct_id(phone_number),
         "channel": "whatsapp",
         "source": "whatsapp",
         "direction": direction,
@@ -187,22 +183,12 @@ def _capture_whatsapp_posthog_event(
         "has_error": bool(payload.get("error")),
         "button_count": len(payload.get("buttons") or []) if isinstance(payload.get("buttons"), list) else None,
     }
-    body = {
-        "api_key": api_key,
-        "event": event_name,
-        "properties": {key: value for key, value in properties.items() if value is not None},
-    }
-    req = urllib.request.Request(
-        f"{host}/i/v0/e/",
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    mixpanel_track(
+        event=event_name,
+        distinct_id=_mixpanel_whatsapp_distinct_id(phone_number),
+        properties={key: value for key, value in properties.items() if value is not None},
+        timeout=_MIXPANEL_CAPTURE_TIMEOUT,
     )
-    try:
-        with urllib.request.urlopen(req, timeout=_POSTHOG_CAPTURE_TIMEOUT):
-            pass
-    except Exception as exc:
-        log.debug("PostHog WhatsApp capture failed | direction=%s | type=%s | error=%s", direction, message_type, exc)
 
 
 def _record_whatsapp_message(
@@ -233,7 +219,7 @@ def _record_whatsapp_message(
         log.warning("WhatsApp message audit failed | phone=%s | %s", phone_number[:6] + "****", exc)
     finally:
         db.close()
-    _capture_whatsapp_posthog_event(
+    _capture_whatsapp_mixpanel_event(
         phone_number,
         direction,
         message_type,
