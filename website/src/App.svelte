@@ -99,7 +99,7 @@
     if (pathname.startsWith('/crew/')) return 'public-profile'
     if (pathname.startsWith('/wa/')) return 'whatsapp-auth'
     if (pathname.startsWith('/matches/')) return 'match-session'
-    if (pathname === '/signup') return 'signup'
+    if (pathname === '/signup' || pathname === '/signup/agency') return 'signup'
     return PATH_TO_PAGE[pathname] ?? 'auto-apply'
   }
 

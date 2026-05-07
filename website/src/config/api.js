@@ -2,7 +2,7 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localho
 
 const CSRF_HEADER = 'X-CSRF-Token'
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
-const CSRF_EXEMPT_PATHS = ['/auth/login', '/auth/google', '/auth/signup', '/auth/waitlist']
+const CSRF_EXEMPT_PATHS = ['/auth/login', '/auth/google', '/auth/waitlist']
 
 let _csrfToken = ''
 /** In-flight or last single-flight GET /auth/providers (CSRF + Google config). */
