@@ -133,6 +133,8 @@ class Settings:
   FREE_MONTHLY_TOKENS: int = int(os.getenv("FREE_MONTHLY_TOKENS", "25"))
   # One-time token grant for brand-new accounts (before any subscription)
   FREE_SIGNUP_TOKENS: int = int(os.getenv("FREE_SIGNUP_TOKENS", "2"))
+  # Website feedback prompt is only eligible once an account is at least this many hours old.
+  FEEDBACK_MIN_ACCOUNT_AGE_HOURS: int = int(os.getenv("FEEDBACK_MIN_ACCOUNT_AGE_HOURS", "24"))
 
   # Static bearer token for the AI agent monitoring endpoint (/agent/stats)
   AGENT_API_TOKEN: str = os.getenv("AGENT_API_TOKEN", "").strip()

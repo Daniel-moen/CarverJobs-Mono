@@ -1,3 +1,6 @@
+from app.settings import settings
+
+
 def test_feedback_status_initially_not_submitted(client):
     resp = client.get("/feedback/status")
 
@@ -78,3 +81,22 @@ def test_feedback_specific_target_allows_matching_user(client):
     body = status.json()
     assert body["eligible"] is True
     assert body["force_prompt"] is True
+
+
+def test_feedback_status_blocks_new_website_accounts_until_min_age(auth_client, monkeypatch):
+    monkeypatch.setattr(settings, "FEEDBACK_MIN_ACCOUNT_AGE_HOURS", 24)
+
+    signup = auth_client.post("/auth/signup", json={
+        "email": "new-feedback-user@example.com",
+        "full_name": "New Feedback User",
+        "password": "very-secure-password",
+    })
+    assert signup.status_code == 201
+
+    website_status = auth_client.get("/feedback/status?source=website_popup")
+    assert website_status.status_code == 200
+    assert website_status.json()["eligible"] is False
+
+    whatsapp_status = auth_client.get("/feedback/status?source=whatsapp_message")
+    assert whatsapp_status.status_code == 200
+    assert whatsapp_status.json()["eligible"] is True

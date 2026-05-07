@@ -1,8 +1,10 @@
 import json
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app import models
+from app.settings import settings
 
 FEEDBACK_CAMPAIGN = "feedback_2_tokens"
 FEEDBACK_REWARD_TOKENS = 2
@@ -32,6 +34,30 @@ def _parse_targets(raw: str | None) -> list[str]:
 
 def _targets_json(target_user_keys: list[str]) -> str:
     return json.dumps([_normalise_user_key(k) for k in target_user_keys if _normalise_user_key(k)])
+
+
+def _user_is_old_enough_for_website_feedback(db: Session, *, user_key: str) -> bool:
+    min_age_hours = max(0, int(settings.FEEDBACK_MIN_ACCOUNT_AGE_HOURS))
+    if min_age_hours <= 0:
+        return True
+
+    normalised_key = _normalise_user_key(user_key)
+    if not normalised_key:
+        return False
+
+    user_created_at = (
+        db.query(models.User.created_at)
+        .filter(models.User.email == normalised_key)
+        .scalar()
+    )
+    # Keep non-website identities (e.g. admin tests, phone-based users) compatible.
+    if user_created_at is None:
+        return True
+
+    if user_created_at.tzinfo is None:
+        user_created_at = user_created_at.replace(tzinfo=timezone.utc)
+    account_age_seconds = (datetime.now(timezone.utc) - user_created_at).total_seconds()
+    return account_age_seconds >= (min_age_hours * 3600)
 
 
 def get_feedback_setting(db: Session) -> models.FeedbackCampaignSetting:
@@ -96,12 +122,19 @@ def feedback_is_eligible(
         return False, setting
 
     if mode == "all":
-        return True, setting
-    if mode == "website":
-        return source == "website_popup", setting
-    if mode == "whatsapp":
-        return source == "whatsapp_message", setting
-    if mode == "specific":
+        mode_eligible = True
+    elif mode == "website":
+        mode_eligible = source == "website_popup"
+    elif mode == "whatsapp":
+        mode_eligible = source == "whatsapp_message"
+    elif mode == "specific":
         targets = set(_parse_targets(setting.target_user_keys_json))
-        return _normalise_user_key(user_key) in targets, setting
-    return False, setting
+        mode_eligible = _normalise_user_key(user_key) in targets
+    else:
+        mode_eligible = False
+
+    if not mode_eligible:
+        return False, setting
+    if source == "website_popup" and not _user_is_old_enough_for_website_feedback(db, user_key=user_key):
+        return False, setting
+    return True, setting
