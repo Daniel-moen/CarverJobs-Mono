@@ -103,6 +103,24 @@
     return PATH_TO_PAGE[pathname] ?? 'auto-apply'
   }
 
+  function analyticsPageName(pageKey = currentPage) {
+    const path = window.location.pathname
+    if (path.startsWith('/articles/')) {
+      const slug = extractArticleSlug(path)
+      return slug ? `article:${slug}` : 'articles'
+    }
+    if (path.startsWith('/crew/')) return `public-profile:${extractCrewSlug(path) || 'unknown'}`
+    if (path.startsWith('/wa/')) return 'whatsapp-auth'
+    if (path.startsWith('/matches/')) return `match-session:${extractMatchSessionId(path) || 'unknown'}`
+    if (path === '/signup/agency') return 'signup:agency'
+    if (path === '/dashboard/job-ingest') return 'dashboard:job-ingest'
+    return pageKey
+  }
+
+  function trackCurrentPageView(pageKey = currentPage) {
+    trackPageView(analyticsPageName(pageKey))
+  }
+
   function navigate(pageKey) {
     if (!SITE_LAUNCHED && !isPublicContentPage(pageKey)) return
     if (currentPage === pageKey) return
@@ -110,7 +128,7 @@
     publicSlug = ''
     const path = PAGE_TO_PATH[pageKey] ?? '/'
     history.pushState({ page: pageKey }, '', path)
-    trackPageView(pageKey)
+    trackCurrentPageView(pageKey)
   }
 
   function enforceRoleAccess() {
@@ -472,7 +490,7 @@
         if (isPublicContentPage(next)) {
           currentPage = next
           articleSlug = extractArticleSlug(window.location.pathname)
-          trackPageView(next)
+          trackCurrentPageView(next)
           return
         }
         enforceLaunchGate()
@@ -490,12 +508,12 @@
       forceFeedbackPrompt = new URLSearchParams(window.location.search).get('feedback') === '1'
       showSignup = currentPage === 'signup'
       showLogin = false
-      trackPageView(currentPage)
+      trackCurrentPageView(currentPage)
     })
 
     if (!SITE_LAUNCHED) {
       if (isPublicContentPage(currentPage)) {
-        trackPageView(currentPage)
+        trackCurrentPageView(currentPage)
         return
       }
       enforceLaunchGate()
@@ -507,7 +525,7 @@
     forceFeedbackPrompt = new URLSearchParams(window.location.search).get('feedback') === '1'
     startAutoFlush()
     trackSessionStart()
-    trackPageView(currentPage)
+    trackCurrentPageView(currentPage)
 
     window.addEventListener('unhandledrejection', (e) => {
       trackError('unhandledrejection', e.reason?.message ?? String(e.reason), { page: currentPage })

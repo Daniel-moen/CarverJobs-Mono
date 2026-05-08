@@ -272,8 +272,9 @@ def _json_ld_date_modified(article: dict) -> str:
 #
 # All author-controlled text is HTML-escaped before being inlined, and the
 # JSON-LD payload has every "</" sequence escaped so it cannot break out of
-# the <script> element. The SSR page loads no third-party JS and carries a
-# strict Content-Security-Policy via nginx.
+# the <script> element. The SSR page carries a strict Content-Security-Policy
+# via nginx, with only the Mixpanel browser SDK allowed for product analytics
+# and session replay coverage.
 
 def _site_origin() -> str:
     base = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
@@ -330,12 +331,42 @@ def _render_related_section(related: list[Article]) -> str:
         </aside>"""
 
 
+def _mixpanel_browser_snippet(page: str) -> str:
+    """Return a minimal Mixpanel browser snippet for SSR article pages."""
+    token = settings.MIXPANEL_PROJECT_TOKEN
+    if not token:
+        return ""
+    try:
+        record_percent = max(0, min(100, int(settings.MIXPANEL_SESSION_RECORD_PERCENT)))
+    except (TypeError, ValueError):
+        record_percent = 100
+    config = {
+        "api_host": settings.MIXPANEL_API_HOST or "https://api-eu.mixpanel.com",
+        "track_pageview": False,
+        "persistence": "localStorage",
+        "record_sessions_percent": record_percent,
+        "record_mask_all_text": True,
+        "record_mask_all_inputs": True,
+    }
+    token_js = json.dumps(token)
+    config_js = json.dumps(config, separators=(",", ":"))
+    page_js = json.dumps(page)
+    return f"""    <script>
+      (function(f,b){{if(!b.__SV){{var e,g,i,h;window.mixpanel=b;b._i=[];b.init=function(e,f,c){{function g(a,d){{var b=d.split(".");2==b.length&&(a=a[b[0]],d=b[1]);a[d]=function(){{a.push([d].concat(Array.prototype.slice.call(arguments,0)))}}}}var a=b;"undefined"!==typeof c?a=b[c]=[]:c="mixpanel";a.people=a.people||[];a.toString=function(a){{var d="mixpanel";"mixpanel"!==c&&(d+="."+c);a||(d+=" (stub)");return d}};a.people.toString=function(){{return a.toString(1)+".people (stub)"}};i="disable time_event track track_pageview track_links track_forms track_with_groups add_group set_group remove_group register register_once alias unregister identify name_tag set_config reset opt_in_tracking opt_out_tracking has_opted_in_tracking has_opted_out_tracking clear_opt_in_out_tracking start_batch_senders people.set people.set_once people.unset people.increment people.append people.union people.track_charge people.clear_charges people.delete_user people.remove start_session_recording stop_session_recording pause_session_recording resume_session_recording get_session_replay_url get_config".split(" ");for(h=0;h<i.length;h++)g(a,i[h]);b._i.push([e,f,c])}};b.__SV=1.2;e=f.createElement("script");e.type="text/javascript";e.async=!0;e.src="https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js";g=f.getElementsByTagName("script")[0];g.parentNode.insertBefore(e,g)}}}})(document,window.mixpanel||[]);
+      mixpanel.init({token_js}, {config_js});
+      mixpanel.track("Page View", {{ page: {page_js}, path: window.location.pathname, current_url: window.location.href }});
+      window.__mixpanel = mixpanel;
+      window.__mixpanel_status = "ready";
+    </script>
+"""
+
+
 def _render_article_html(article: dict, related: list[Article] | None = None) -> str:
     """Return a fully server-rendered HTML page for a single article.
 
-    The page is self-contained (no third-party scripts, no SPA hydration)
-    so crawlers and social previewers receive the article body and meta
-    tags in the initial response.
+    Crawlers and social previewers receive the article body and meta tags in
+    the initial response. A minimal Mixpanel snippet is included so browser
+    visitors on SSR article pages are covered by analytics and Session Replay.
     """
     origin = _site_origin()
     slug = article["slug"]
@@ -371,6 +402,7 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
                 body_parts.append(f"<ul>{items}</ul>")
     body_html = "\n          ".join(body_parts)
     related_html = _render_related_section(related or [])
+    mixpanel_snippet = _mixpanel_browser_snippet(f"article:{slug}")
 
     json_ld = {
         "@context": "https://schema.org",
@@ -384,7 +416,6 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
         "mainEntityOfPage": canonical,
         "keywords": ", ".join(keywords_raw),
     }
-    # Prevent </script> breakout inside the JSON-LD block.
     json_ld_safe = json.dumps(json_ld, ensure_ascii=True).replace("</", "<\\/")
 
     return f"""<!doctype html>
@@ -415,7 +446,7 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
     <meta name="twitter:description" content="{description_html}" />
     <meta name="twitter:image" content="{_esc(origin)}/og-image.svg" />
     <script type="application/ld+json">{json_ld_safe}</script>
-    <style>
+{mixpanel_snippet}    <style>
       :root {{ --bg:#05080c; --text:#e8e6e1; --muted:#8a8378; --brass:#d4b97a; --border:rgba(255,255,255,0.06); }}
       *,*::before,*::after {{ box-sizing: border-box; }}
       html,body {{ margin:0; padding:0; background:var(--bg); color:var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }}
@@ -540,6 +571,7 @@ def _render_articles_list_html(rows: list[Article]) -> str:
         },
     }
     json_ld_safe = json.dumps(json_ld, ensure_ascii=True).replace("</", "<\\/")
+    mixpanel_snippet = _mixpanel_browser_snippet("articles")
 
     return f"""<!doctype html>
 <html lang="en">
@@ -566,7 +598,7 @@ def _render_articles_list_html(rows: list[Article]) -> str:
     <meta name="twitter:description" content="{description_html}" />
     <meta name="twitter:image" content="{_esc(origin)}/og-image.svg" />
     <script type="application/ld+json">{json_ld_safe}</script>
-    <style>
+{mixpanel_snippet}    <style>
       :root {{ --bg:#05080c; --text:#e8e6e1; --muted:#8a8378; --brass:#d4b97a; --border:rgba(255,255,255,0.06); }}
       *,*::before,*::after {{ box-sizing: border-box; }}
       html,body {{ margin:0; padding:0; background:var(--bg); color:var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }}
@@ -607,7 +639,6 @@ def _render_articles_list_html(rows: list[Article]) -> str:
   </body>
 </html>
 """
-
 
 def _render_articles_sitemap(rows: list[Article]) -> str:
     origin = _site_origin()

@@ -67,7 +67,11 @@ class Settings:
       "MIXPANEL_PROJECT_TOKEN",
       os.getenv("MIXPANEL_TOKEN", os.getenv("VITE_MIXPANEL_TOKEN", "")),
   ).strip()
-  MIXPANEL_API_HOST = os.getenv("MIXPANEL_API_HOST", "https://api.mixpanel.com").strip().rstrip("/")
+  MIXPANEL_API_HOST = os.getenv("MIXPANEL_API_HOST", "https://api-eu.mixpanel.com").strip().rstrip("/")
+  MIXPANEL_SESSION_RECORD_PERCENT = int(os.getenv(
+      "MIXPANEL_SESSION_RECORD_PERCENT",
+      os.getenv("VITE_MIXPANEL_SESSION_RECORD_PERCENT", "100"),
+  ))
   MIXPANEL_LLM_CAPTURE_CONTENT = os.getenv("MIXPANEL_LLM_CAPTURE_CONTENT", "false").lower() == "true"
 
   CORS_ORIGINS = _csv_env(
