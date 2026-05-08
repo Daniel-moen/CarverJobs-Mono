@@ -1,11 +1,27 @@
 import mixpanel from 'mixpanel-browser'
 
 // ── Mixpanel product analytics ────────────────────────────────────────────────
-// Inert when VITE_MIXPANEL_TOKEN is unset. Manual pageviews for SPA routing.
-// Identify sends only user id + role + subscription flag — no email by default.
+// Inert when VITE_MIXPANEL_TOKEN is unset. Mirrors the dashboard snippet options:
+// EU api_host, autocapture on, optional session replay sampling — all env-driven.
+// SPA: manual Page View via capturePageView(); autocapture pageview stays off to avoid duplicates.
+// Identify: only user id + role + subscription flag by default.
 
 const TOKEN = import.meta.env.VITE_MIXPANEL_TOKEN
 const API_HOST = import.meta.env.VITE_MIXPANEL_API_HOST || 'https://api.mixpanel.com'
+
+function envBool(name, fallback) {
+  const raw = import.meta.env[name]
+  if (raw === undefined || raw === '') return fallback
+  return String(raw).toLowerCase() === 'true'
+}
+
+function envRecordPercent() {
+  const raw = import.meta.env.VITE_MIXPANEL_SESSION_RECORD_PERCENT
+  if (raw === undefined || raw === '') return 0
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return 0
+  return Math.min(100, Math.max(0, Math.round(n)))
+}
 
 let _ready = false
 
@@ -16,10 +32,27 @@ export function initMixpanel() {
     return
   }
   try {
+    const autocaptureOn = envBool('VITE_MIXPANEL_AUTOCAPTURE', true)
+    const recordPercent = envRecordPercent()
+
     mixpanel.init(TOKEN, {
       api_host: API_HOST,
       track_pageview: false,
       persistence: 'localStorage',
+      autocapture: autocaptureOn
+        ? {
+            pageview: false,
+            click: true,
+            input: true,
+            submit: true,
+            scroll: true,
+            rage_click: true,
+            dead_click: true,
+          }
+        : false,
+      record_sessions_percent: recordPercent,
+      record_mask_all_text: true,
+      record_mask_all_inputs: true,
     })
     _ready = true
     if (typeof window !== 'undefined') {
