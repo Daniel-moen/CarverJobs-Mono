@@ -5,12 +5,60 @@
 
   let { isSubscribed = false, creditsBalance = 0, onCreditsChanged = () => {}, onNavigate = () => {}, autoStartMatch = false, onMatchStarted = () => {} } = $props()
 
+  // sessionStorage key for persisting the most recent match result across
+  // in-app tab switches. Without this the component re-mounts in 'idle' and
+  // the user sees 'Start Matching' again instead of their previous results.
+  const STORAGE_KEY = 'carver_auto_apply_state'
+
   let mounted = $state(false)
   let state = $state('idle')
   let error = $state('')
   let matches = $state([])
   let totalScanned = $state(0)
+  let sessionId = $state(0)
   let retries = $state(0)
+
+  function persistMatchState() {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        state, matches, totalScanned, sessionId, error,
+      }))
+    } catch { /* storage unavailable / quota */ }
+  }
+
+  function clearPersistedMatchState() {
+    try { sessionStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
+  }
+
+  function restoreMatchState() {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY)
+      if (!raw) return false
+      const saved = JSON.parse(raw)
+      // Only restore terminal states — never resume 'loading' (the SSE
+      // stream is gone) or 'idle' (nothing useful to remember).
+      if (!saved || !['done', 'no-match', 'error'].includes(saved.state)) {
+        return false
+      }
+      state        = saved.state
+      matches      = Array.isArray(saved.matches) ? saved.matches : []
+      totalScanned = Number(saved.totalScanned) || 0
+      sessionId    = Number(saved.sessionId) || 0
+      error        = typeof saved.error === 'string' ? saved.error : ''
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function resetToIdle() {
+    state = 'idle'
+    matches = []
+    error = ''
+    totalScanned = 0
+    sessionId = 0
+    clearPersistedMatchState()
+  }
 
   let draftingJob = $state(null)
   let draftTo = $state('')
@@ -43,9 +91,14 @@
 
   onMount(async () => {
     requestAnimationFrame(() => (mounted = true))
-    if (autoStartMatch && state === 'idle') {
+    const restored = restoreMatchState()
+    if (autoStartMatch && state === 'idle' && !restored) {
       onMatchStarted()
       runMatch()
+    } else if (autoStartMatch) {
+      // Consume the flag so we don't auto-start later — the user already
+      // has a previous result on screen.
+      onMatchStarted()
     }
   })
 
@@ -56,8 +109,11 @@
     if (!isRetry) {
       matches = []
       totalScanned = 0
+      sessionId = 0
       retries = 0
     }
+    // 'loading' is intentionally not persisted — clear any stale prior result.
+    clearPersistedMatchState()
 
     try {
       const res = await apiFetch(`${API_BASE_URL}/matching/find`, {
@@ -93,6 +149,7 @@
             if (currentEvent === 'complete') {
               gotComplete = true
               totalScanned = parsed.total_jobs_scanned ?? 0
+              sessionId = Number(parsed.session_id) || 0
               if (typeof parsed.credits_remaining === 'number') {
                 onCreditsChanged(parsed.credits_remaining)
               }
@@ -102,9 +159,11 @@
               } else {
                 state = 'no-match'
               }
+              persistMatchState()
             } else if (currentEvent === 'error') {
               error = parsed.detail ?? 'Matching failed.'
               state = 'error'
+              persistMatchState()
             }
           } catch { /* ignore parse errors on progress events */ }
           currentEvent = ''
@@ -127,6 +186,7 @@
       if (!gotComplete && state === 'loading') {
         error = 'Connection lost before matching finished. Please try again.'
         state = 'error'
+        persistMatchState()
       }
     } catch {
       if (retries < MAX_RETRIES) {
@@ -136,6 +196,7 @@
       }
       error = 'Could not reach matching service. Check your connection and try again.'
       state = 'error'
+      persistMatchState()
     }
   }
 
@@ -379,7 +440,7 @@
           </button>
           <button
             type="button"
-            onclick={() => { state = 'idle'; matches = []; error = '' }}
+            onclick={resetToIdle}
             class="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-400 transition hover:text-white"
           >
             Cancel
@@ -394,7 +455,7 @@
           </button>
           <button
             type="button"
-            onclick={() => { state = 'idle'; matches = []; error = '' }}
+            onclick={resetToIdle}
             class="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-400 transition hover:text-white"
           >
             Cancel
@@ -409,7 +470,7 @@
       <p class="mt-1 text-xs text-slate-500">No open positions closely match your profile. Check back soon or update your profile.</p>
       <button
         type="button"
-        onclick={() => { state = 'idle'; matches = [] }}
+        onclick={resetToIdle}
         class="mt-4 rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-400 transition hover:text-white"
       >
         Try Again
@@ -425,7 +486,7 @@
       </div>
       <button
         type="button"
-        onclick={() => { state = 'idle'; matches = [] }}
+        onclick={resetToIdle}
         class="rounded-lg border border-white/10 px-4 py-2 text-xs text-slate-400 transition hover:text-white"
       >
         Run Again
