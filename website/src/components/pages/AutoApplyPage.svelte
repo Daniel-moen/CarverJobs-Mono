@@ -5,10 +5,12 @@
 
   let { isSubscribed = false, creditsBalance = 0, onCreditsChanged = () => {}, onNavigate = () => {}, autoStartMatch = false, onMatchStarted = () => {} } = $props()
 
-  // sessionStorage key for persisting the most recent match result across
-  // in-app tab switches. Without this the component re-mounts in 'idle' and
-  // the user sees 'Start Matching' again instead of their previous results.
-  const STORAGE_KEY = 'carver_auto_apply_state'
+  // sessionStorage key used purely as a flag: once the user explicitly
+  // dismisses a session (Run Again / Cancel / Try Again) we stop
+  // auto-restoring the previous match from the server until they start a
+  // new run. The actual match data always comes from the API so it works
+  // across browser tabs, devices and refreshes.
+  const DISMISSED_KEY = 'carver_auto_apply_dismissed'
 
   let mounted = $state(false)
   let state = $state('idle')
@@ -18,37 +20,16 @@
   let sessionId = $state(0)
   let retries = $state(0)
 
-  function persistMatchState() {
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-        state, matches, totalScanned, sessionId, error,
-      }))
-    } catch { /* storage unavailable / quota */ }
+  function markDismissed() {
+    try { sessionStorage.setItem(DISMISSED_KEY, '1') } catch { /* ignore */ }
   }
 
-  function clearPersistedMatchState() {
-    try { sessionStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
+  function clearDismissed() {
+    try { sessionStorage.removeItem(DISMISSED_KEY) } catch { /* ignore */ }
   }
 
-  function restoreMatchState() {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY)
-      if (!raw) return false
-      const saved = JSON.parse(raw)
-      // Only restore terminal states — never resume 'loading' (the SSE
-      // stream is gone) or 'idle' (nothing useful to remember).
-      if (!saved || !['done', 'no-match', 'error'].includes(saved.state)) {
-        return false
-      }
-      state        = saved.state
-      matches      = Array.isArray(saved.matches) ? saved.matches : []
-      totalScanned = Number(saved.totalScanned) || 0
-      sessionId    = Number(saved.sessionId) || 0
-      error        = typeof saved.error === 'string' ? saved.error : ''
-      return true
-    } catch {
-      return false
-    }
+  function isDismissed() {
+    try { return sessionStorage.getItem(DISMISSED_KEY) === '1' } catch { return false }
   }
 
   function resetToIdle() {
@@ -57,7 +38,53 @@
     error = ''
     totalScanned = 0
     sessionId = 0
-    clearPersistedMatchState()
+    markDismissed()
+  }
+
+  // Pulls the user's most recent match session from the API and renders it,
+  // so navigating away and back (or refreshing, or coming in from another
+  // device) shows the previous result instead of the idle 'Start Matching'
+  // screen.
+  async function loadLatestSessionFromServer() {
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/matching/sessions`, {
+        method: 'GET',
+        credentials: 'include',
+      })
+      if (!res.ok) return false
+      const data = await res.json().catch(() => ({}))
+      const sessions = Array.isArray(data?.sessions) ? data.sessions : []
+      const latest = sessions.find(s => s && s.status === 'completed')
+      if (!latest) return false
+
+      sessionId = Number(latest.id) || 0
+      totalScanned = Number(latest.total_jobs_scanned) || 0
+
+      if ((Number(latest.total_matched) || 0) <= 0) {
+        matches = []
+        state = 'no-match'
+        return true
+      }
+
+      const detailRes = await apiFetch(`${API_BASE_URL}/matching/sessions/${latest.id}`, {
+        method: 'GET',
+        credentials: 'include',
+      })
+      if (!detailRes.ok) return false
+      const detail = await detailRes.json().catch(() => ({}))
+      const results = Array.isArray(detail?.results) ? detail.results : []
+      if (!results.length) {
+        matches = []
+        state = 'no-match'
+        return true
+      }
+      matches = [...results].sort((a, b) => (b.compatibility ?? 0) - (a.compatibility ?? 0))
+      totalScanned = Number(detail.total_jobs_scanned) || totalScanned
+      state = 'done'
+      return true
+    } catch {
+      return false
+    }
   }
 
   let draftingJob = $state(null)
@@ -90,16 +117,21 @@
   )
 
   onMount(async () => {
-    requestAnimationFrame(() => (mounted = true))
-    const restored = restoreMatchState()
-    if (autoStartMatch && state === 'idle' && !restored) {
+    // autoStartMatch (e.g. arriving from the landing-page CTA) always wins:
+    // the user explicitly asked to run a new match, so don't show stale
+    // results.
+    if (autoStartMatch) {
       onMatchStarted()
+      clearDismissed()
+      requestAnimationFrame(() => (mounted = true))
       runMatch()
-    } else if (autoStartMatch) {
-      // Consume the flag so we don't auto-start later — the user already
-      // has a previous result on screen.
-      onMatchStarted()
+      return
     }
+
+    if (!isDismissed()) {
+      await loadLatestSessionFromServer()
+    }
+    requestAnimationFrame(() => (mounted = true))
   })
 
   async function runMatch(isRetry = false) {
@@ -112,8 +144,9 @@
       sessionId = 0
       retries = 0
     }
-    // 'loading' is intentionally not persisted — clear any stale prior result.
-    clearPersistedMatchState()
+    // Starting a new match clears the 'user dismissed previous result' flag
+    // so that, if they navigate away and back, the new result is restored.
+    clearDismissed()
 
     try {
       const res = await apiFetch(`${API_BASE_URL}/matching/find`, {
@@ -159,11 +192,9 @@
               } else {
                 state = 'no-match'
               }
-              persistMatchState()
             } else if (currentEvent === 'error') {
               error = parsed.detail ?? 'Matching failed.'
               state = 'error'
-              persistMatchState()
             }
           } catch { /* ignore parse errors on progress events */ }
           currentEvent = ''
@@ -184,9 +215,14 @@
       }
 
       if (!gotComplete && state === 'loading') {
-        error = 'Connection lost before matching finished. Please try again.'
-        state = 'error'
-        persistMatchState()
+        // The stream dropped, but the backend may still finish writing the
+        // session to the DB. Re-fetch the latest session so the user lands
+        // on real results instead of an error screen.
+        const restored = await loadLatestSessionFromServer()
+        if (!restored) {
+          error = 'Connection lost before matching finished. Please try again.'
+          state = 'error'
+        }
       }
     } catch {
       if (retries < MAX_RETRIES) {
@@ -194,9 +230,12 @@
         await new Promise(r => setTimeout(r, 1500 * retries))
         return runMatch(true)
       }
-      error = 'Could not reach matching service. Check your connection and try again.'
-      state = 'error'
-      persistMatchState()
+      // Network blew up — the backend may still have completed the run.
+      const restored = await loadLatestSessionFromServer()
+      if (!restored) {
+        error = 'Could not reach matching service. Check your connection and try again.'
+        state = 'error'
+      }
     }
   }
 
