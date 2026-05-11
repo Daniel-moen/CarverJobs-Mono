@@ -50,6 +50,19 @@
 
   // ── AI chat ──
 
+  // Backend's InterviewRequest.profile is a strict dict[str, str]. mergeUpdates
+  // only ever assigns strings, but stringify defensively in case future code
+  // pushes a non-string into collectedProfile.
+  function buildProfilePayload() {
+    const out = {}
+    for (const [key, value] of Object.entries(collectedProfile || {})) {
+      if (value === null || value === undefined) continue
+      const str = String(value).trim()
+      if (str) out[key] = str
+    }
+    return out
+  }
+
   async function callOnboard(userMessage = '', history = null) {
     isLoading = true
     aiError = ''
@@ -68,7 +81,7 @@
         body: JSON.stringify({
           user_message: userMessage,
           history: historyPayload,
-          profile: collectedProfile,
+          profile: buildProfilePayload(),
         }),
       })
       if (!res.ok) {
