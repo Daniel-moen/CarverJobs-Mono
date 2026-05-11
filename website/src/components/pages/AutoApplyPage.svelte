@@ -35,6 +35,12 @@
   const MAX_RETRIES = 2
   const MAX_DRAFT_PROMPT_LEN = 500
 
+  // True when matching failed because the user has no CrewProfile row yet.
+  // In that case Retry will keep failing — we route them to the profile page.
+  const needsProfileSetup = $derived(
+    state === 'error' && /save your profile/i.test(error || '')
+  )
+
   onMount(async () => {
     requestAnimationFrame(() => (mounted = true))
     if (autoStartMatch && state === 'idle') {
@@ -362,21 +368,38 @@
   {:else if state === 'error'}
     <div class="rounded-2xl border border-rose-400/20 bg-zinc-950 p-6 sm:p-8 text-center">
       <p class="text-sm text-rose-300">{error}</p>
-      <div class="mt-4 flex justify-center gap-3">
-        <button
-          type="button"
-          onclick={() => runMatch()}
-          class="rounded-lg border border-cyan-300/30 bg-cyan-300/8 px-5 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-300/18 hover:text-white active:scale-95"
-        >
-          Retry
-        </button>
-        <button
-          type="button"
-          onclick={() => { state = 'idle'; matches = []; error = '' }}
-          class="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-400 transition hover:text-white"
-        >
-          Cancel
-        </button>
+      <div class="mt-4 flex flex-wrap justify-center gap-3">
+        {#if needsProfileSetup}
+          <button
+            type="button"
+            onclick={() => { trackClick('match_error_go_to_profile'); onNavigate('profile') }}
+            class="rounded-lg border border-cyan-300/35 bg-cyan-300/10 px-5 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/20 hover:text-white active:scale-95"
+          >
+            Go to Profile
+          </button>
+          <button
+            type="button"
+            onclick={() => { state = 'idle'; matches = []; error = '' }}
+            class="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-400 transition hover:text-white"
+          >
+            Cancel
+          </button>
+        {:else}
+          <button
+            type="button"
+            onclick={() => runMatch()}
+            class="rounded-lg border border-cyan-300/30 bg-cyan-300/8 px-5 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-300/18 hover:text-white active:scale-95"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onclick={() => { state = 'idle'; matches = []; error = '' }}
+            class="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-400 transition hover:text-white"
+          >
+            Cancel
+          </button>
+        {/if}
       </div>
     </div>
 

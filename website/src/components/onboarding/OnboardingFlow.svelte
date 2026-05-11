@@ -145,22 +145,67 @@
     if (chatEl) chatEl.scrollTop = chatEl.scrollHeight
   }
 
-  function saveAndContinue() {
+  // Map the camelCase fields collected during the chat to the snake_case
+  // payload expected by /profile/save and POST it so a CrewProfile row exists
+  // server-side. Without this the API rejects matching with
+  // "Save your profile first before matching."
+  async function persistCollectedProfile() {
+    const p = collectedProfile || {}
+    const body = {
+      first_name: p.firstName || null,
+      last_name: p.lastName || null,
+      sex: p.sex || null,
+      nationality: p.nationality || null,
+      current_location: p.currentLocation || null,
+      desired_role: p.desiredRole || null,
+      contract_type: p.contractType || null,
+      preferred_locations: p.preferredLocations || null,
+      rotation_preference: p.rotationPreference || null,
+      years_experience: p.yearsExperience || null,
+      available_from: p.availableFrom || null,
+      salary_min: p.salaryMin || null,
+      salary_max: p.salaryMax || null,
+      certifications: p.certifications || null,
+      languages: p.languages || null,
+      bio: p.bio || null,
+    }
+    // Skip the call if we have absolutely nothing to save. Sending an empty
+    // payload still creates the row, which is exactly what we want, but in the
+    // "skip setup" path the user may not even be authenticated yet — guard the
+    // request behind a single non-null field to avoid noisy 401s on the public
+    // landing flow.
+    const hasAny = Object.values(body).some(v => v !== null && v !== '')
+    if (!hasAny) return
+    try {
+      await apiFetch(`${API_BASE_URL}/profile/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      })
+    } catch {
+      /* best-effort — the user can still save manually from the profile page */
+    }
+  }
+
+  async function saveAndContinue() {
     const fieldsFilled = REQUIRED_FIELDS.length - missingFields.length
     trackClick('onboard_save_continue')
     trackFunnel('onboard_chat_skipped', { value: String(fieldsFilled) })
     try {
       localStorage.setItem('carver_profile', JSON.stringify(collectedProfile))
     } catch { /* ignore */ }
+    await persistCollectedProfile()
     goToStep(2)
   }
 
-  function finish() {
+  async function finish() {
     const fieldsFilled = REQUIRED_FIELDS.length - missingFields.length
     trackFunnel('onboard_complete', { value: String(fieldsFilled) })
     try {
       localStorage.setItem('carver_onboarding_complete', 'true')
     } catch { /* ignore */ }
+    await persistCollectedProfile()
     onComplete()
   }
 
