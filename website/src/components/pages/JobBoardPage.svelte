@@ -311,8 +311,8 @@
               </div>
             {/if}
 
-            <!-- Actions — visible on mobile, appear on hover on desktop -->
-            <div class="mt-4 flex items-center gap-2 transition-opacity duration-200 sm:opacity-0 sm:group-hover:opacity-100">
+            <!-- Actions -->
+            <div class="mt-4 flex items-center gap-2">
               <button
                 type="button"
                 onclick={() => openDraft(job)}
