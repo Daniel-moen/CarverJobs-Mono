@@ -295,14 +295,25 @@
   }
 
   // ── AI Interview ──
+  // The backend's InterviewRequest.profile is a strict dict[str, str], so every
+  // value MUST be a string. Number-typed inputs (yearsExperience, salaryMin,
+  // salaryMax) are coerced to Number by Svelte's bind:value, which would 422
+  // the request. Stringify everything and drop empties before sending.
   function buildInterviewProfilePayload() {
-    return {
+    const raw = {
       sex: profile.sex, desiredRole: profile.desiredRole, contractType: profile.contractType,
       preferredLocations: profile.preferredLocations, rotationPreference: profile.rotationPreference,
       availableFrom: profile.availableFrom, salaryMin: profile.salaryMin, salaryMax: profile.salaryMax,
       yearsExperience: profile.yearsExperience, languages: profile.languages,
       certifications: profile.certifications, currentLocation: profile.currentLocation,
     }
+    const out = {}
+    for (const [key, value] of Object.entries(raw)) {
+      if (value === null || value === undefined) continue
+      const str = String(value).trim()
+      if (str) out[key] = str
+    }
+    return out
   }
 
   function mergeSuggestedUpdates(updates) {
