@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import { API_BASE_URL, apiFetch } from '../../config/api'
   import { trackClick } from '../../config/analytics'
 
@@ -11,6 +11,8 @@
   // new run. The actual match data always comes from the API so it works
   // across browser tabs, devices and refreshes.
   const DISMISSED_KEY = 'carver_auto_apply_dismissed'
+  const RESTORE_POLL_MS = 2000
+  const RESTORE_MAX_POLLS = 150
 
   let mounted = $state(false)
   let state = $state('idle')
@@ -19,6 +21,8 @@
   let totalScanned = $state(0)
   let sessionId = $state(0)
   let retries = $state(0)
+  let restorePollTimer = null
+  let restorePollAttempts = 0
 
   function markDismissed() {
     try { sessionStorage.setItem(DISMISSED_KEY, '1') } catch { /* ignore */ }
@@ -32,7 +36,97 @@
     try { return sessionStorage.getItem(DISMISSED_KEY) === '1' } catch { return false }
   }
 
+  function clearRestorePollTimer() {
+    if (restorePollTimer) {
+      clearTimeout(restorePollTimer)
+      restorePollTimer = null
+    }
+  }
+
+  function stopRestorePolling() {
+    clearRestorePollTimer()
+    restorePollAttempts = 0
+  }
+
+  function renderSessionDetail(detail) {
+    if (!detail) return ''
+
+    sessionId = Number(detail.id) || 0
+    totalScanned = Number(detail.total_jobs_scanned) || totalScanned
+
+    if (detail.status === 'running') {
+      matches = []
+      error = ''
+      state = 'loading'
+      return 'running'
+    }
+
+    if (detail.status === 'failed') {
+      matches = []
+      error = 'Matching failed. Please try again.'
+      state = 'error'
+      return 'settled'
+    }
+
+    const results = Array.isArray(detail?.results) ? detail.results : []
+    if (!results.length) {
+      matches = []
+      state = 'no-match'
+      return 'settled'
+    }
+
+    matches = [...results].sort((a, b) => (b.compatibility ?? 0) - (a.compatibility ?? 0))
+    state = 'done'
+    return 'settled'
+  }
+
+  async function loadSessionDetail(id) {
+    const detailRes = await apiFetch(`${API_BASE_URL}/matching/sessions/${id}`, {
+      method: 'GET',
+      credentials: 'include',
+    })
+    if (!detailRes.ok) return ''
+    const detail = await detailRes.json().catch(() => ({}))
+    return renderSessionDetail(detail)
+  }
+
+  function scheduleSessionRefresh(id) {
+    clearRestorePollTimer()
+    restorePollTimer = setTimeout(async () => {
+      restorePollTimer = null
+      restorePollAttempts += 1
+      try {
+        const result = await loadSessionDetail(id)
+        if (result === 'running' && sessionId === Number(id)) {
+          if (restorePollAttempts >= RESTORE_MAX_POLLS) {
+            error = 'Matching is still running. Please try again in a moment.'
+            state = 'error'
+            stopRestorePolling()
+            return
+          }
+          scheduleSessionRefresh(id)
+        } else {
+          stopRestorePolling()
+        }
+      } catch {
+        if (restorePollAttempts < RESTORE_MAX_POLLS) {
+          scheduleSessionRefresh(id)
+        }
+      }
+    }, RESTORE_POLL_MS)
+  }
+
+  async function restoreSessionById(id) {
+    stopRestorePolling()
+    const result = await loadSessionDetail(id)
+    if (result === 'running') {
+      scheduleSessionRefresh(id)
+    }
+    return Boolean(result)
+  }
+
   function resetToIdle() {
+    stopRestorePolling()
     state = 'idle'
     matches = []
     error = ''
@@ -43,8 +137,8 @@
 
   // Pulls the user's most recent match session from the API and renders it,
   // so navigating away and back (or refreshing, or coming in from another
-  // device) shows the previous result instead of the idle 'Start Matching'
-  // screen.
+  // device) shows the active run or previous result instead of the idle
+  // 'Start Matching' screen.
   async function loadLatestSessionFromServer() {
     try {
       const res = await apiFetch(`${API_BASE_URL}/matching/sessions`, {
@@ -54,34 +148,9 @@
       if (!res.ok) return false
       const data = await res.json().catch(() => ({}))
       const sessions = Array.isArray(data?.sessions) ? data.sessions : []
-      const latest = sessions.find(s => s && s.status === 'completed')
+      const latest = sessions.find(s => s && (s.status === 'running' || s.status === 'completed'))
       if (!latest) return false
-
-      sessionId = Number(latest.id) || 0
-      totalScanned = Number(latest.total_jobs_scanned) || 0
-
-      if ((Number(latest.total_matched) || 0) <= 0) {
-        matches = []
-        state = 'no-match'
-        return true
-      }
-
-      const detailRes = await apiFetch(`${API_BASE_URL}/matching/sessions/${latest.id}`, {
-        method: 'GET',
-        credentials: 'include',
-      })
-      if (!detailRes.ok) return false
-      const detail = await detailRes.json().catch(() => ({}))
-      const results = Array.isArray(detail?.results) ? detail.results : []
-      if (!results.length) {
-        matches = []
-        state = 'no-match'
-        return true
-      }
-      matches = [...results].sort((a, b) => (b.compatibility ?? 0) - (a.compatibility ?? 0))
-      totalScanned = Number(detail.total_jobs_scanned) || totalScanned
-      state = 'done'
-      return true
+      return restoreSessionById(latest.id)
     } catch {
       return false
     }
@@ -116,26 +185,41 @@
     state === 'error' && /save your profile/i.test(error || '')
   )
 
-  onMount(async () => {
-    // autoStartMatch (e.g. arriving from the landing-page CTA) always wins:
-    // the user explicitly asked to run a new match, so don't show stale
-    // results.
+  onMount(() => {
+    let destroyed = false
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible' && sessionId && state === 'loading') {
+        loadSessionDetail(sessionId)
+      }
+    }
     if (autoStartMatch) {
       onMatchStarted()
       clearDismissed()
       requestAnimationFrame(() => (mounted = true))
       runMatch()
-      return
+      return () => { destroyed = true }
     }
 
-    if (!isDismissed()) {
-      await loadLatestSessionFromServer()
+    ;(async () => {
+      if (!isDismissed()) {
+        await loadLatestSessionFromServer()
+      }
+      if (!destroyed) requestAnimationFrame(() => (mounted = true))
+    })()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      destroyed = true
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-    requestAnimationFrame(() => (mounted = true))
+  })
+
+  onDestroy(() => {
+    stopRestorePolling()
   })
 
   async function runMatch(isRetry = false) {
     trackClick(isRetry ? 'retry_match' : 'start_match')
+    stopRestorePolling()
     state = 'loading'
     error = ''
     if (!isRetry) {
@@ -180,6 +264,7 @@
           try {
             const parsed = JSON.parse(line.slice(6))
             if (currentEvent === 'complete') {
+              stopRestorePolling()
               gotComplete = true
               totalScanned = parsed.total_jobs_scanned ?? 0
               sessionId = Number(parsed.session_id) || 0
@@ -193,6 +278,7 @@
                 state = 'no-match'
               }
             } else if (currentEvent === 'error') {
+              stopRestorePolling()
               error = parsed.detail ?? 'Matching failed.'
               state = 'error'
             }

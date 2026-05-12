@@ -36,6 +36,7 @@ from app.settings import settings
 
 log = get_logger("carver.crew_match")
 _limiter = Limiter(key_func=get_remote_address)
+_background_match_tasks: set[asyncio.Task] = set()
 
 router = APIRouter(prefix="/matching", tags=["crew-matching"])
 
@@ -262,6 +263,7 @@ async def find_match(
     log.info("Match session %d | user=%s | jobs=%d", session_id, user_key, total_job_count)
 
     progress_queue: queue.Queue[dict] = queue.Queue()
+    result_queue: queue.Queue[dict] = queue.Queue()
 
     def on_progress(jobs_scanned: int, total_jobs: int, matches_so_far: int, batch_num: int, total_batches: int):
         progress_queue.put({
@@ -272,73 +274,44 @@ async def find_match(
             "total_batches": total_batches,
         })
 
-    async def event_stream():
+    async def run_match_job():
         from app.database import SessionLocal
-        from app.services.matching_engine import BATCH_SIZE
 
         t0 = time.perf_counter()
-
-        match_task = asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: match_candidate_to_jobs(
+        try:
+            results = await asyncio.to_thread(
+                match_candidate_to_jobs,
                 api_key=settings.OPENAI_API_KEY,
                 model=settings.OPENAI_MODEL,
                 candidate=candidate,
                 jobs=job_summaries,
                 on_progress=on_progress,
-            ),
-        )
-
-        _total_batches = (total_job_count + BATCH_SIZE - 1) // BATCH_SIZE
-        yield f"event: progress\ndata: {json.dumps({'jobs_scanned': 0, 'total_jobs': total_job_count, 'matches_so_far': 0, 'batch': 0, 'total_batches': _total_batches})}\n\n"
-
-        last_ping = time.perf_counter()
-        while not match_task.done():
-            await asyncio.sleep(0.5)
-            sent_something = False
-            while not progress_queue.empty():
-                try:
-                    evt = progress_queue.get_nowait()
-                    yield f"event: progress\ndata: {json.dumps(evt)}\n\n"
-                    sent_something = True
-                    last_ping = time.perf_counter()
-                except queue.Empty:
-                    break
-            if not sent_something and (time.perf_counter() - last_ping) > 8:
-                yield ": keepalive\n\n"
-                last_ping = time.perf_counter()
-
-        try:
-            results = match_task.result()
+            )
         except Exception as exc:
-            stream_db = SessionLocal()
+            result_db = SessionLocal()
             try:
-                s = stream_db.query(MatchSession).get(session_id)
+                s = result_db.query(MatchSession).get(session_id)
                 if s:
                     s.status = "failed"
-                add_credits(stream_db, user_key, amount=1)
-                stream_db.commit()
+                add_credits(result_db, user_key, amount=1)
+                result_db.commit()
             finally:
-                stream_db.close()
+                result_db.close()
             log.error("Match session %d failed | user=%s | %s", session_id, user_key, exc)
-            yield f"event: error\ndata: {json.dumps({'detail': 'Matching failed. Please try again.'})}\n\n"
+            result_queue.put({
+                "event": "error",
+                "data": {"detail": "Matching failed. Please try again."},
+            })
             return
         finally:
             metrics.record_ai_response_time(round((time.perf_counter() - t0) * 1000))
 
-        while not progress_queue.empty():
-            try:
-                evt = progress_queue.get_nowait()
-                yield f"event: progress\ndata: {json.dumps(evt)}\n\n"
-            except queue.Empty:
-                break
-
         matched_results = [r for r in results if r.matched]
 
-        stream_db = SessionLocal()
+        result_db = SessionLocal()
         try:
             for r in matched_results:
-                stream_db.add(MatchSessionResult(
+                result_db.add(MatchSessionResult(
                     session_id=session_id,
                     job_id=r.job_id,
                     matched=r.matched,
@@ -348,18 +321,31 @@ async def find_match(
                     gaps=json.dumps(r.gaps),
                     factor_scores=json.dumps(r.factor_scores),
                 ))
-
-            s = stream_db.query(MatchSession).get(session_id)
+            s = result_db.query(MatchSession).get(session_id)
             if s:
                 s.status = "completed"
                 s.total_matched = len(matched_results)
                 s.completed_at = datetime.now(timezone.utc)
-            stream_db.commit()
+            result_db.commit()
         except Exception:
             log.exception("Failed to persist match session %d results", session_id)
-            stream_db.rollback()
+            result_db.rollback()
+            try:
+                s = result_db.query(MatchSession).get(session_id)
+                if s:
+                    s.status = "failed"
+                add_credits(result_db, user_key, amount=1)
+                result_db.commit()
+            except Exception:
+                log.exception("Failed to mark match session %d as failed", session_id)
+                result_db.rollback()
+            result_queue.put({
+                "event": "error",
+                "data": {"detail": "Matching finished but results could not be saved. Please try again."},
+            })
+            return
         finally:
-            stream_db.close()
+            result_db.close()
 
         response_matches = []
         for r in matched_results:
@@ -388,7 +374,62 @@ async def find_match(
             credits_remaining=credits_remaining,
             matches=response_matches,
         )
-        yield f"event: complete\ndata: {final.model_dump_json()}\n\n"
+        result_queue.put({
+            "event": "complete",
+            "data": final.model_dump_json(),
+            "raw_json": True,
+        })
+
+    match_job = asyncio.create_task(run_match_job())
+    _background_match_tasks.add(match_job)
+    match_job.add_done_callback(_background_match_tasks.discard)
+
+    async def event_stream():
+        from app.services.matching_engine import BATCH_SIZE
+
+        _total_batches = (total_job_count + BATCH_SIZE - 1) // BATCH_SIZE
+        yield f"event: progress\ndata: {json.dumps({'session_id': session_id, 'jobs_scanned': 0, 'total_jobs': total_job_count, 'matches_so_far': 0, 'batch': 0, 'total_batches': _total_batches})}\n\n"
+
+        last_ping = time.perf_counter()
+        try:
+            while True:
+                await asyncio.sleep(0.5)
+                sent_something = False
+
+                while not progress_queue.empty():
+                    try:
+                        evt = progress_queue.get_nowait()
+                        evt["session_id"] = session_id
+                        yield f"event: progress\ndata: {json.dumps(evt)}\n\n"
+                        sent_something = True
+                        last_ping = time.perf_counter()
+                    except queue.Empty:
+                        break
+
+                while not result_queue.empty():
+                    try:
+                        evt = result_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    event_name = evt.get("event", "message")
+                    data = evt.get("data", {})
+                    if evt.get("raw_json"):
+                        payload = data
+                    else:
+                        payload = json.dumps(data)
+                    yield f"event: {event_name}\ndata: {payload}\n\n"
+                    return
+
+                if match_job.done() and result_queue.empty():
+                    yield f"event: error\ndata: {json.dumps({'detail': 'Matching finished unexpectedly. Please refresh and try again.'})}\n\n"
+                    return
+
+                if not sent_something and (time.perf_counter() - last_ping) > 8:
+                    yield ": keepalive\n\n"
+                    last_ping = time.perf_counter()
+        except asyncio.CancelledError:
+            log.info("Match session %d stream disconnected | user=%s", session_id, user_key)
+            raise
 
     return StreamingResponse(
         event_stream(),
