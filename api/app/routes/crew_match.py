@@ -2,7 +2,7 @@ import asyncio
 import json
 import queue
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -37,6 +37,8 @@ from app.settings import settings
 log = get_logger("carver.crew_match")
 _limiter = Limiter(key_func=get_remote_address)
 _background_match_tasks: set[asyncio.Task] = set()
+_active_match_session_ids: set[int] = set()
+MATCH_RUN_TIMEOUT_SECONDS = 240
 
 router = APIRouter(prefix="/matching", tags=["crew-matching"])
 
@@ -205,6 +207,36 @@ def _delete_user_match_sessions(db: Session, user_key: str) -> int:
     return deleted
 
 
+def _as_aware_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _expire_stale_running_match_sessions(db: Session, user_key: str) -> int:
+    """Mark abandoned running sessions as failed so the UI does not spin forever."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=MATCH_RUN_TIMEOUT_SECONDS)
+    stale_sessions = (
+        db.query(MatchSession)
+        .filter(MatchSession.user_key == user_key, MatchSession.status == "running")
+        .all()
+    )
+    expired = 0
+    for s in stale_sessions:
+        created_at = _as_aware_utc(s.created_at)
+        if s.id in _active_match_session_ids and created_at and created_at > cutoff:
+            continue
+        s.status = "failed"
+        expired += 1
+        add_credits(db, user_key, amount=1)
+    if expired:
+        db.commit()
+        log.warning("Expired %d stale match sessions | user=%s", expired, user_key)
+    return expired
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/find")
@@ -299,13 +331,16 @@ async def find_match(
 
         t0 = time.perf_counter()
         try:
-            results = await asyncio.to_thread(
-                match_candidate_to_jobs,
-                api_key=settings.OPENAI_API_KEY,
-                model=settings.OPENAI_MODEL,
-                candidate=candidate,
-                jobs=job_summaries,
-                on_progress=on_progress,
+            results = await asyncio.wait_for(
+                asyncio.to_thread(
+                    match_candidate_to_jobs,
+                    api_key=settings.OPENAI_API_KEY,
+                    model=settings.OPENAI_MODEL,
+                    candidate=candidate,
+                    jobs=job_summaries,
+                    on_progress=on_progress,
+                ),
+                timeout=MATCH_RUN_TIMEOUT_SECONDS,
             )
         except Exception as exc:
             result_db = SessionLocal()
@@ -330,6 +365,14 @@ async def find_match(
 
         result_db = SessionLocal()
         try:
+            s = result_db.query(MatchSession).get(session_id)
+            if not s:
+                log.info("Match session %d was superseded before results persisted | user=%s", session_id, user_key)
+                result_queue.put({
+                    "event": "error",
+                    "data": {"detail": "A newer match run was started."},
+                })
+                return
             for r in matched_results:
                 result_db.add(MatchSessionResult(
                     session_id=session_id,
@@ -341,11 +384,9 @@ async def find_match(
                     gaps=json.dumps(r.gaps),
                     factor_scores=json.dumps(r.factor_scores),
                 ))
-            s = result_db.query(MatchSession).get(session_id)
-            if s:
-                s.status = "completed"
-                s.total_matched = len(matched_results)
-                s.completed_at = datetime.now(timezone.utc)
+            s.status = "completed"
+            s.total_matched = len(matched_results)
+            s.completed_at = datetime.now(timezone.utc)
             result_db.commit()
         except Exception:
             log.exception("Failed to persist match session %d results", session_id)
@@ -402,7 +443,9 @@ async def find_match(
 
     match_job = asyncio.create_task(run_match_job())
     _background_match_tasks.add(match_job)
+    _active_match_session_ids.add(session_id)
     match_job.add_done_callback(_background_match_tasks.discard)
+    match_job.add_done_callback(lambda _: _active_match_session_ids.discard(session_id))
 
     async def event_stream():
         from app.services.matching_engine import BATCH_SIZE
@@ -470,6 +513,7 @@ async def list_sessions(
 ):
     """List all past match sessions for the current user, newest first."""
     user_key = session["sub"]
+    _expire_stale_running_match_sessions(db, user_key)
     sessions = (
         db.query(MatchSession)
         .filter(MatchSession.user_key == user_key)
@@ -499,6 +543,14 @@ async def get_session(
     )
     if not match_session:
         raise HTTPException(status_code=404, detail="Session not found.")
+    if match_session.status == "running":
+        created_at = _as_aware_utc(match_session.created_at)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=MATCH_RUN_TIMEOUT_SECONDS)
+        if match_session.id not in _active_match_session_ids or not created_at or created_at <= cutoff:
+            match_session.status = "failed"
+            add_credits(db, user_key, amount=1)
+            db.commit()
+            db.refresh(match_session)
 
     stored_results = (
         db.query(MatchSessionResult)
