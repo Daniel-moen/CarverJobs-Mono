@@ -514,7 +514,7 @@ async def list_sessions(
     sessions = (
         db.query(MatchSession)
         .filter(MatchSession.user_key == user_key)
-        .order_by(MatchSession.created_at.desc())
+        .order_by(MatchSession.id.desc())
         .limit(50)
         .all()
     )

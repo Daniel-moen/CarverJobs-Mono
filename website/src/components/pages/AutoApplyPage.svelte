@@ -11,6 +11,7 @@
   // new run. The actual match data always comes from the API so it works
   // across browser tabs, devices and refreshes.
   const DISMISSED_KEY = 'carver_auto_apply_dismissed'
+  const ACTIVE_SESSION_KEY = 'carver_auto_apply_active_session_id'
   const RESTORE_POLL_MS = 2000
   const RESTORE_MAX_POLLS = 300
 
@@ -36,6 +37,21 @@
     try { return sessionStorage.getItem(DISMISSED_KEY) === '1' } catch { return false }
   }
 
+  function setActiveSessionId(id) {
+    const numericId = Number(id) || 0
+    if (!numericId) return
+    sessionId = numericId
+    try { sessionStorage.setItem(ACTIVE_SESSION_KEY, String(numericId)) } catch { /* ignore */ }
+  }
+
+  function getActiveSessionId() {
+    try { return Number(sessionStorage.getItem(ACTIVE_SESSION_KEY)) || 0 } catch { return 0 }
+  }
+
+  function clearActiveSessionId() {
+    try { sessionStorage.removeItem(ACTIVE_SESSION_KEY) } catch { /* ignore */ }
+  }
+
   function clearRestorePollTimer() {
     if (restorePollTimer) {
       clearTimeout(restorePollTimer)
@@ -51,7 +67,7 @@
   function renderSessionDetail(detail) {
     if (!detail) return ''
 
-    sessionId = Number(detail.id) || 0
+    setActiveSessionId(detail.id)
     totalScanned = Number(detail.total_jobs_scanned) || totalScanned
 
     if (detail.status === 'running') {
@@ -65,6 +81,7 @@
       matches = []
       error = 'Matching failed. Please try again.'
       state = 'error'
+      clearActiveSessionId()
       return 'settled'
     }
 
@@ -132,6 +149,7 @@
     error = ''
     totalScanned = 0
     sessionId = 0
+    clearActiveSessionId()
     markDismissed()
   }
 
@@ -141,6 +159,12 @@
   // 'Start Matching' screen.
   async function loadLatestSessionFromServer() {
     try {
+      const activeId = getActiveSessionId()
+      if (activeId) {
+        const restored = await restoreSessionById(activeId)
+        if (restored) return true
+        clearActiveSessionId()
+      }
       const res = await apiFetch(`${API_BASE_URL}/matching/sessions`, {
         method: 'GET',
         credentials: 'include',
@@ -226,6 +250,7 @@
       matches = []
       totalScanned = 0
       sessionId = 0
+      clearActiveSessionId()
       retries = 0
     }
     // Starting a new match clears the 'user dismissed previous result' flag
@@ -263,11 +288,14 @@
         } else if (line.startsWith('data: ')) {
           try {
             const parsed = JSON.parse(line.slice(6))
+            if (parsed.session_id) {
+              setActiveSessionId(parsed.session_id)
+            }
+
             if (currentEvent === 'complete') {
               stopRestorePolling()
               gotComplete = true
               totalScanned = parsed.total_jobs_scanned ?? 0
-              sessionId = Number(parsed.session_id) || 0
               if (typeof parsed.credits_remaining === 'number') {
                 onCreditsChanged(parsed.credits_remaining)
               }
@@ -279,6 +307,7 @@
               }
             } else if (currentEvent === 'error') {
               stopRestorePolling()
+              clearActiveSessionId()
               error = parsed.detail ?? 'Matching failed.'
               state = 'error'
             }
