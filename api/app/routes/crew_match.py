@@ -188,6 +188,23 @@ def _profile_summary(p: CrewProfile, job_history: list | None = None, document_s
     return "\n".join(parts) if parts else "No profile details available."
 
 
+def _delete_user_match_sessions(db: Session, user_key: str) -> int:
+    """Remove prior website match sessions so restore always follows the latest run."""
+    old_session_ids = [
+        row[0]
+        for row in (
+            db.query(MatchSession.id)
+            .filter(MatchSession.user_key == user_key)
+            .all()
+        )
+    ]
+    if not old_session_ids:
+        return 0
+    db.query(MatchSessionResult).filter(MatchSessionResult.session_id.in_(old_session_ids)).delete(synchronize_session=False)
+    deleted = db.query(MatchSession).filter(MatchSession.id.in_(old_session_ids)).delete(synchronize_session=False)
+    return deleted
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/find")
@@ -239,6 +256,9 @@ async def find_match(
             status_code=402,
             detail="You need at least 1 credit to run matching. Submit a job to earn one.",
         )
+    deleted_sessions = _delete_user_match_sessions(db, user_key)
+    if deleted_sessions:
+        log.info("Deleted %d previous match sessions | user=%s", deleted_sessions, user_key)
 
     match_session = MatchSession(user_key=user_key, status="running", total_jobs_scanned=len(all_jobs))
     db.add(match_session)
