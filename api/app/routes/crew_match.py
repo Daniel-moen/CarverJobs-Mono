@@ -37,8 +37,7 @@ from app.settings import settings
 log = get_logger("carver.crew_match")
 _limiter = Limiter(key_func=get_remote_address)
 _background_match_tasks: set[asyncio.Task] = set()
-_active_match_session_ids: set[int] = set()
-MATCH_RUN_TIMEOUT_SECONDS = 240
+MATCH_RUN_TIMEOUT_SECONDS = 600
 
 router = APIRouter(prefix="/matching", tags=["crew-matching"])
 
@@ -226,7 +225,7 @@ def _expire_stale_running_match_sessions(db: Session, user_key: str) -> int:
     expired = 0
     for s in stale_sessions:
         created_at = _as_aware_utc(s.created_at)
-        if s.id in _active_match_session_ids and created_at and created_at > cutoff:
+        if created_at and created_at > cutoff:
             continue
         s.status = "failed"
         expired += 1
@@ -443,9 +442,7 @@ async def find_match(
 
     match_job = asyncio.create_task(run_match_job())
     _background_match_tasks.add(match_job)
-    _active_match_session_ids.add(session_id)
     match_job.add_done_callback(_background_match_tasks.discard)
-    match_job.add_done_callback(lambda _: _active_match_session_ids.discard(session_id))
 
     async def event_stream():
         from app.services.matching_engine import BATCH_SIZE
@@ -546,7 +543,7 @@ async def get_session(
     if match_session.status == "running":
         created_at = _as_aware_utc(match_session.created_at)
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=MATCH_RUN_TIMEOUT_SECONDS)
-        if match_session.id not in _active_match_session_ids or not created_at or created_at <= cutoff:
+        if not created_at or created_at <= cutoff:
             match_session.status = "failed"
             add_credits(db, user_key, amount=1)
             db.commit()

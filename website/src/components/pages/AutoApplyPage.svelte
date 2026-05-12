@@ -12,7 +12,7 @@
   // across browser tabs, devices and refreshes.
   const DISMISSED_KEY = 'carver_auto_apply_dismissed'
   const RESTORE_POLL_MS = 2000
-  const RESTORE_MAX_POLLS = 150
+  const RESTORE_MAX_POLLS = 300
 
   let mounted = $state(false)
   let state = $state('idle')
