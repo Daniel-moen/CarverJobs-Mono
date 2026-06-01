@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import time
 
@@ -95,6 +93,7 @@ def _job_to_summary(j: Job) -> JobSummary:
         certifications_required=j.certifications_required or "",
         languages_required=j.languages_required or "",
         description=j.description or "",
+        status=j.status or "open",
     )
 
 

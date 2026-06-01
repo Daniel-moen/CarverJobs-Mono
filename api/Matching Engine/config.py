@@ -19,7 +19,16 @@ class Settings:
     def __init__(self) -> None:
         self._load_dotenv()
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
-        self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        self.openai_model = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+        self.openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        self.match_max_tokens = int(os.getenv("MATCH_MAX_TOKENS", "2048"))
+        # GPT-5 family only accepts the default temperature, so we omit it unless
+        # MATCH_TEMPERATURE is explicitly set (e.g. for older models like gpt-4o-mini).
+        _temp = os.getenv("MATCH_TEMPERATURE")
+        self.match_temperature = float(_temp) if _temp not in (None, "") else None
+        # seed gives reproducible scores on models that ignore temperature.
+        _seed = os.getenv("MATCH_SEED", "7")
+        self.match_seed = int(_seed) if _seed not in (None, "") else None
         self.batch_size = int(os.getenv("MATCH_BATCH_SIZE", "5"))
         self.verbose = os.getenv("MATCH_VERBOSE", "1").lower() in {"1", "true", "yes", "on"}
         self.queue_max_size = int(os.getenv("MATCH_QUEUE_MAX_SIZE", "100"))

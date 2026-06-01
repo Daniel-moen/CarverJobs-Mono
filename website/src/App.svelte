@@ -45,7 +45,8 @@
   const PATH_TO_PAGE = {
     '/launch':       'launch-signup',
     '/signup':       'signup',
-    '/signup/agency': 'signup',
+    // Note: '/signup/agency' maps to 'signup' via pageFromPath() directly;
+    // it is intentionally absent here so PAGE_TO_PATH['signup'] = '/signup'.
     '/':             'auto-apply',
     '/jobs':         'job-board',
     '/profile':      'profile',

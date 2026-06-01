@@ -230,6 +230,26 @@ def _record_whatsapp_message(
     )
 
 
+def _record_unsupported_inbound_whatsapp_message(
+    phone_number: str,
+    message_type: str,
+    graph_phone_number_id: str = "",
+    meta_message_id: str = "",
+    *,
+    reason: str = "unsupported",
+) -> None:
+    """Record inbound WhatsApp traffic we do not otherwise process."""
+    _record_whatsapp_message(
+        phone_number,
+        "inbound",
+        message_type or "unknown",
+        "",
+        meta_message_id=meta_message_id,
+        graph_phone_number_id=graph_phone_number_id,
+        payload={"reason": reason},
+    )
+
+
 def _meta_response_message_id(resp: httpx.Response) -> str | None:
     try:
         messages = resp.json().get("messages") or []
@@ -1855,6 +1875,14 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
             if msg_type == "text":
                 user_text = (msg.get("text") or {}).get("body", "").strip()
                 if not user_text:
+                    background_tasks.add_task(
+                        _record_unsupported_inbound_whatsapp_message,
+                        phone_number,
+                        "text",
+                        graph_phone_number_id,
+                        msg_id,
+                        reason="empty_text",
+                    )
                     continue
             elif msg_type == "interactive":
                 interactive = msg.get("interactive") or {}
@@ -1864,6 +1892,14 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
                 elif itype == "list_reply":
                     bid = (interactive.get("list_reply") or {}).get("id", "")
                 else:
+                    background_tasks.add_task(
+                        _record_unsupported_inbound_whatsapp_message,
+                        phone_number,
+                        "interactive",
+                        graph_phone_number_id,
+                        msg_id,
+                        reason=f"unsupported_interactive:{itype or 'unknown'}",
+                    )
                     continue
                 user_text = _INTERACTIVE_CMD_MAP.get(bid, "help")
             elif msg_type == "image":
@@ -1875,6 +1911,14 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
                 background_tasks.add_task(_process_media_message, phone_number, "", graph_phone_number_id, msg_id, msg_type)
                 continue
             else:
+                background_tasks.add_task(
+                    _record_unsupported_inbound_whatsapp_message,
+                    phone_number,
+                    msg_type or "unknown",
+                    graph_phone_number_id,
+                    msg_id,
+                    reason="unsupported_message_type",
+                )
                 continue
 
             background_tasks.add_task(_process_whatsapp_message, phone_number, user_text, graph_phone_number_id, msg_id, msg_type)

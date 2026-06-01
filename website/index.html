@@ -18,7 +18,26 @@
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="theme-color" content="#05080c" />
     <meta name="color-scheme" content="dark" />
-    <link rel="canonical" href="https://jobcarver.co/" />
+    <link id="canonical-link" rel="canonical" href="https://jobcarver.co/" />
+    <!-- Update canonical to the real route before the SPA loads. Googlebot
+         reads the final rendered DOM, so this inline script ensures every
+         public SPA route carries the correct canonical tag and app/auth
+         routes have no canonical (they are disallowed or not intended for
+         indexing). -->
+    <script>
+      (function () {
+        var ORIGIN = 'https://jobcarver.co';
+        var PUBLIC = ['/', '/privacy', '/terms', '/data-deletion', '/articles'];
+        var p = window.location.pathname;
+        var el = document.getElementById('canonical-link');
+        if (!el) return;
+        if (PUBLIC.indexOf(p) !== -1 || p.match(/^\/articles\/[a-z0-9]+(?:-[a-z0-9]+)*$/)) {
+          el.href = ORIGIN + p;
+        } else {
+          el.parentNode.removeChild(el);
+        }
+      })();
+    </script>
 
     <!-- Icons -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />

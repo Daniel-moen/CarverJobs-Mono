@@ -10,7 +10,7 @@ from utils.batching import FixedSizeBatchStrategy
 
 
 class FakeLLM(LLMClient):
-    def generate(self, prompt: str) -> str:
+    def generate(self, user_prompt: str, system_prompt: str | None = None) -> str:
         payload = {
             "matched_jobs": [
                 {

@@ -87,9 +87,10 @@ class MatchingService:
     ) -> list[JobMatch]:
         job_ids = [job.job_id for job in batch]
         log.info("Batch %d | jobs=%s", batch_index, job_ids)
-        prompt = self._prompt_builder.build(user, batch)
-        response_text = self._llm_client.generate(prompt)
-        log.info("Batch %d raw response length=%d | %s", batch_index, len(response_text or ""), (response_text or "")[:400])
+        system_prompt, user_prompt = self._prompt_builder.build(user, batch)
+        response_text = self._llm_client.generate(user_prompt, system_prompt=system_prompt)
+        if self._verbose:
+            log.info("Batch %d raw response length=%d | %s", batch_index, len(response_text or ""), (response_text or "")[:400])
         matches = self._parse_matches(response_text, valid_job_ids)
         log.info("Batch %d parsed | matches=%d | matched_true=%d | avg_compat=%.0f",
                  batch_index, len(matches),

@@ -14,21 +14,43 @@ _BASE_DELAY = 1.5
 
 
 class OpenAIClient(LLMClient):
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-5.4-mini",
+        base_url: str = "https://api.openai.com/v1",
+        temperature: float | None = None,
+        max_tokens: int | None = 2048,
+        seed: int | None = 7,
+    ) -> None:
         normalized_api_key = "".join(ch for ch in api_key.strip() if ch.isprintable() and not ch.isspace())
         if not normalized_api_key:
             raise ValueError("OpenAI API key is required")
         self._api_key = normalized_api_key
         self._model = model
-        self._url = "https://api.openai.com/v1/chat/completions"
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._seed = seed
+        base = base_url.rstrip("/")
+        self._url = base if base.endswith("/chat/completions") else f"{base}/chat/completions"
 
-    def generate(self, prompt: str) -> str:
-        body = {
+    def generate(self, user_prompt: str, system_prompt: str | None = None) -> str:
+        messages: list[dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        body: dict = {
             "model": self._model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "response_format": {"type": "json_object"},
-            "temperature": 0.3,
         }
+        # GPT-5 family rejects non-default temperature; only send it when configured.
+        if self._temperature is not None:
+            body["temperature"] = self._temperature
+        if self._max_tokens is not None:
+            body["max_completion_tokens"] = self._max_tokens
+        if self._seed is not None:
+            body["seed"] = self._seed
         data = json.dumps(body).encode("utf-8")
 
         last_error: Exception | None = None

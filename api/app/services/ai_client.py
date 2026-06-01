@@ -152,6 +152,7 @@ def call_openai(
     max_tokens: int = 1200,
     temperature: float = 0.1,
     response_format: dict[str, Any] | None = None,
+    timeout: float | None = None,
 ) -> str:
     """
     Send a chat completion request to OpenAI and return the raw content string.
@@ -165,6 +166,7 @@ def call_openai(
         max_tokens:      Maximum tokens in the completion.
         temperature:     Sampling temperature (0.0–1.0).
         response_format: Optional response format dict, e.g. {"type": "json_object"}.
+        timeout:         HTTP timeout in seconds (defaults to _REQUEST_TIMEOUT).
 
     Returns:
         The raw content string from choices[0].message.content.
@@ -206,12 +208,14 @@ def call_openai(
         method="POST",
     )
 
+    request_timeout = timeout if timeout is not None else _REQUEST_TIMEOUT
+
     attempt = 0
     while True:
         attempt += 1
         started = time.perf_counter()
         try:
-            with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=request_timeout) as resp:
                 http_status = getattr(resp, "status", 200)
                 body = json.loads(resp.read().decode())
 
@@ -333,10 +337,10 @@ def call_openai(
                     response_format=response_format,
                     latency_seconds=time.perf_counter() - started,
                     attempt=attempt,
-                    error=f"OpenAI request timed out after {_REQUEST_TIMEOUT}s.",
+                    error=f"OpenAI request timed out after {request_timeout}s.",
                 )
                 raise AITimeoutError(
-                    f"OpenAI request timed out after {_REQUEST_TIMEOUT}s.",
+                    f"OpenAI request timed out after {request_timeout}s.",
                     crv_code="CRV-3002",
                 ) from exc
             log.error("OpenAI network error | reason=%s | attempt=%d", exc.reason, attempt)

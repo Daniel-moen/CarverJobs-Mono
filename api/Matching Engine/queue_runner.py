@@ -12,7 +12,14 @@ from utils.batching import FixedSizeBatchStrategy
 
 def build_queue(settings: Settings) -> MatchQueue:
     service = MatchingService(
-        llm_client=OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model),
+        llm_client=OpenAIClient(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            base_url=settings.openai_base_url,
+            temperature=settings.match_temperature,
+            max_tokens=settings.match_max_tokens,
+            seed=settings.match_seed,
+        ),
         batch_strategy=FixedSizeBatchStrategy(batch_size=settings.batch_size),
         prompt_builder=PromptBuilder(),
         verbose=settings.verbose,

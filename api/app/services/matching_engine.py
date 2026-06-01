@@ -17,9 +17,12 @@ from app.services.ai_client import AIClientError, call_openai
 
 log = logging.getLogger("carver.matching_engine")
 
-BATCH_SIZE = 10
+BATCH_SIZE = 8
 MATCH_THRESHOLD = 30
 MAX_WORKERS = 4
+_MATCH_MAX_TOKENS_PER_JOB = 400
+_MATCH_MIN_MAX_TOKENS = 4096
+_MATCH_REQUEST_TIMEOUT = 90
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
 _FEMALE_REQ_PATTERNS = (
     re.compile(r"\bfemale(?:\s+candidates?)?(?:\s+only)?\b"),
@@ -134,15 +137,21 @@ def _job_gender_requirement(job: JobSummary) -> str | None:
 
 # ── OpenAI caller ────────────────────────────────────────────────────────────
 
-def _call_openai(api_key: str, model: str, prompt: str) -> str:
+def _match_max_tokens(job_count: int) -> int:
+    """Size completion budget so a full batch JSON response is not truncated."""
+    return max(_MATCH_MIN_MAX_TOKENS, job_count * _MATCH_MAX_TOKENS_PER_JOB)
+
+
+def _call_openai(api_key: str, model: str, prompt: str, *, job_count: int) -> str:
     try:
         return call_openai(
             api_key=api_key,
             messages=[{"role": "user", "content": prompt}],
             model=model,
-            max_tokens=2000,
+            max_tokens=_match_max_tokens(job_count),
             temperature=0.3,
             response_format={"type": "json_object"},
+            timeout=_MATCH_REQUEST_TIMEOUT,
         )
     except AIClientError as exc:
         raise RuntimeError(str(exc)) from exc
@@ -293,9 +302,10 @@ def _parse_batch(response_text: str, valid_job_ids: set[int]) -> list[MatchResul
                 log.warning("LLM returned unknown job_id=%s, skipping", job_id)
                 continue
             compatibility = max(0.0, min(100.0, float(item.get("compatibility", 0))))
+            matched = compatibility >= MATCH_THRESHOLD
             results.append(MatchResult(
                 job_id=job_id,
-                matched=bool(item.get("matched", False)),
+                matched=matched,
                 compatibility=compatibility,
                 reason=str(item.get("reason", "")),
                 strengths=[str(x) for x in (item.get("strengths") or [])],
@@ -341,8 +351,14 @@ def match_candidate_to_jobs(
 
     def _process_batch(batch_idx: int, batch: list[JobSummary]) -> tuple[int, list[MatchResult]]:
         prompt = _build_prompt(candidate, batch)
-        response_text = _call_openai(api_key, model, prompt)
-        return batch_idx, _parse_batch(response_text, valid_ids)
+        response_text = _call_openai(api_key, model, prompt, job_count=len(batch))
+        batch_results = _parse_batch(response_text, valid_ids)
+        if len(batch_results) < len(batch):
+            log.warning(
+                "Batch %d incomplete parse | expected=%d | parsed=%d",
+                batch_idx, len(batch), len(batch_results),
+            )
+        return batch_idx, batch_results
 
     if len(batches) <= 1:
         for batch_idx, batch in enumerate(batches, start=1):

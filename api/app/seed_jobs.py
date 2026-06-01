@@ -1,6 +1,8 @@
 from app.database import Base, SessionLocal, engine
+from app.logger import get_logger
 from app.models import Job
 
+log = get_logger("carver.seed_jobs")
 
 ROLES = [
   "Deckhand",
@@ -93,7 +95,7 @@ def run_seed():
     jobs = [make_job(i) for i in range(50)]
     db.add_all(jobs)
     db.commit()
-    print(f"Seeded {len(jobs)} jobs")
+    log.info("seeded_jobs", count=len(jobs))
   finally:
     db.close()
 

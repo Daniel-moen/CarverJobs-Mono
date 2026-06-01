@@ -11,7 +11,14 @@ from utils.batching import FixedSizeBatchStrategy
 
 def build_matching_service() -> MatchingService:
     settings = Settings()
-    openai_client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)
+    openai_client = OpenAIClient(
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
+        base_url=settings.openai_base_url,
+        temperature=settings.match_temperature,
+        max_tokens=settings.match_max_tokens,
+        seed=settings.match_seed,
+    )
     batch_strategy = FixedSizeBatchStrategy(batch_size=settings.batch_size)
     prompt_builder = PromptBuilder()
     return MatchingService(

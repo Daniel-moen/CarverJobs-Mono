@@ -73,7 +73,7 @@ def test_save_job_from_ai_fields_dedupes_by_fingerprint(monkeypatch):
 
 
 def test_matching_engine_filters_gender_mismatch_even_if_llm_marks_match(monkeypatch):
-    def _fake_call_openai(api_key, model, prompt):
+    def _fake_call_openai(api_key, model, prompt, **kwargs):
         return json.dumps({
             "matched_jobs": [{
                 "job_id": 1,
@@ -111,7 +111,7 @@ def test_matching_engine_filters_gender_mismatch_even_if_llm_marks_match(monkeyp
 
 
 def test_matching_engine_allows_gender_match(monkeypatch):
-    def _fake_call_openai(api_key, model, prompt):
+    def _fake_call_openai(api_key, model, prompt, **kwargs):
         return json.dumps({
             "matched_jobs": [{
                 "job_id": 1,
@@ -156,8 +156,42 @@ def test_matching_engine_openai_call_uses_shared_ai_client(monkeypatch):
 
     monkeypatch.setattr("app.services.matching_engine.call_openai", _fake_call_openai)
 
-    assert _call_openai("test-key", "test-model", "test prompt") == '{"matched_jobs": []}'
+    assert _call_openai("test-key", "test-model", "test prompt", job_count=8) == '{"matched_jobs": []}'
     assert captured["api_key"] == "test-key"
     assert captured["model"] == "test-model"
     assert captured["messages"] == [{"role": "user", "content": "test prompt"}]
     assert captured["response_format"] == {"type": "json_object"}
+    assert captured["max_tokens"] == 4096
+    assert captured["timeout"] == 90
+
+
+def test_matching_engine_applies_threshold_even_when_llm_marks_not_matched(monkeypatch):
+    def _fake_call_openai(api_key, model, prompt, *, job_count):
+        return json.dumps({
+            "matched_jobs": [{
+                "job_id": 1,
+                "matched": False,
+                "compatibility": 72,
+                "reason": "Good fit.",
+                "strengths": ["Relevant deck experience"],
+                "gaps": [],
+                "factor_scores": {"role": 72},
+            }]
+        })
+
+    monkeypatch.setattr("app.services.matching_engine._call_openai", _fake_call_openai)
+
+    candidate = CandidateProfile(user_key="u3", first_name="Sam", desired_role="Deckhand")
+    jobs = [JobSummary(job_id=1, title="Deckhand", role="Deckhand")]
+
+    results = match_candidate_to_jobs(
+        api_key="test-key",
+        model="test-model",
+        candidate=candidate,
+        jobs=jobs,
+        batch_size=10,
+    )
+
+    assert len(results) == 1
+    assert results[0].matched is True
+    assert results[0].compatibility == 72

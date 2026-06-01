@@ -20,7 +20,7 @@ from app.database import Base, engine, run_migrations, SessionLocal
 from app import metrics, models
 from app.error_codes import CRV_1003, CRV_1004, CRV_1006, STATUS_CODE_TO_CRV
 from app.health_checker import health_check_loop
-from app.logger import get_logger, setup_logging
+from app.logger import bind_request_id, get_logger, reset_context, setup_logging
 from app.routes import admin, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_history, job_submit, jobs, matching, profile, scraper, subscription, telnyx, users, whatsapp
 from app.scheduler import scraper_loop
 from app.seed_users import ensure_default_user
@@ -169,7 +169,7 @@ def _extract_crv_code(exc: HTTPException) -> str | None:
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
-    log.warning("Validation error | path=%s | errors=%s", request.url.path, exc.errors())
+    log.warning("validation_error", path=str(request.url.path), errors=exc.errors())
     return _crv_response(422, "Invalid request data.", CRV_1003)
 
 
@@ -202,7 +202,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     tb = _traceback.format_exc()
-    log.exception("Unhandled exception | path=%s | %s", request.url.path, exc)
+    log.exception("unhandled_exception", path=str(request.url.path), error=str(exc))
     _log_error_to_db(
         level="error",
         status_code=500,
@@ -222,9 +222,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 async def request_id_middleware(request: Request, call_next):
     req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
     request.state.request_id = req_id
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = req_id
-    return response
+    bind_request_id(req_id)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = req_id
+        return response
+    finally:
+        reset_context()
 
 
 # Liveness paths only — must stay fast so load balancers mark the instance up while DB init runs.
@@ -266,7 +270,7 @@ async def request_logger(request: Request, call_next):
     module = _route_module(request.url.path)
     client_ip = request.client.host if request.client else "unknown"
     status_code = 500
-    log.info("→ %s %s | ip=%s | req=%s", request.method, request.url.path, client_ip, req_id)
+    log.info("request_start", method=request.method, path=str(request.url.path), ip=client_ip)
     try:
         response = await call_next(request)
         status_code = response.status_code
@@ -276,8 +280,15 @@ async def request_logger(request: Request, call_next):
         raise
     finally:
         elapsed = round((time.perf_counter() - start) * 1000)
-        level = log.warning if status_code >= 400 else log.info
-        level("← %s %s | status=%d | %dms | req=%s | module=%s", request.method, request.url.path, status_code, elapsed, req_id, module)
+        log_fn = log.warning if status_code >= 400 else log.info
+        log_fn(
+            "request_end",
+            method=request.method,
+            path=str(request.url.path),
+            status=status_code,
+            elapsed_ms=elapsed,
+            module=module,
+        )
         metrics.increment("requests_total")
         if not request.url.path.startswith("/interview/"):
             metrics.record_response_time(elapsed)
@@ -360,4 +371,4 @@ app.include_router(agent_stats.router)
 app.include_router(articles.public_router)
 app.include_router(articles.agent_router)
 
-log.info("CARVER API ready | env=%s | auto_login=%s", settings.APP_ENV, settings.AUTO_LOGIN_AS_ADMIN)
+log.info("api_ready", env=settings.APP_ENV, auto_login=settings.AUTO_LOGIN_AS_ADMIN)
