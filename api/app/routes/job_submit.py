@@ -20,7 +20,7 @@ from app import metrics, models
 from app.database import get_db
 from app.logger import get_logger
 from app.security import require_agency_or_admin_session, require_poster_session
-from app.services.credits import add_credits
+from app.services.credits import award_job_post_credit
 from app.settings import settings
 
 from app.routes.scraper import (
@@ -103,7 +103,7 @@ async def crew_submit_text(
     user_key = session["sub"]
     new_bal = 0
     if session.get("role") == "crew":
-        new_bal = add_credits(db, user_key, amount=1)
+        new_bal = award_job_post_credit(db, user_key)["balance"]
     log.info("Job submit (text) | id=%d | role=%s | sub=%s…",
              result.id, session.get("role"), (user_key or "")[:12])
     metrics.increment("manual_job_imports")
@@ -229,7 +229,7 @@ async def crew_submit_image(
     user_key = session["sub"]
     new_bal = 0
     if session.get("role") == "crew":
-        new_bal = add_credits(db, user_key, amount=1)
+        new_bal = award_job_post_credit(db, user_key)["balance"]
     log.info("Job submit (image) | id=%d | role=%s | sub=%s…",
              result.id, session.get("role"), (user_key or "")[:12])
     metrics.increment("manual_job_imports")
@@ -310,7 +310,7 @@ def crew_submit_form(
     user_key = session["sub"]
     new_bal = 0
     if session.get("role") == "crew":
-        new_bal = add_credits(db, user_key, amount=1)
+        new_bal = award_job_post_credit(db, user_key)["balance"]
     log.info("Job submit (form) | id=%d | role=%s | sub=%s…",
              job.id, session.get("role"), (user_key or "")[:12])
     metrics.increment("manual_job_imports")

@@ -35,7 +35,7 @@ from app.security import issue_session_token
 from app.settings import settings
 from app.services.ai_client import AIClientError
 from app.services.mixpanel_server import track as mixpanel_track
-from app.services.credits import add_credits, get_credit_balance, is_subscribed, spend_credits
+from app.services.credits import add_credits, award_job_post_credit, get_credit_balance, is_subscribed, spend_credits
 from app.services.feedback_settings import feedback_is_eligible
 
 log = get_logger("carver.whatsapp")
@@ -567,7 +567,7 @@ async def _process_job_text_submission(phone_number: str, text: str, db: Session
     db.add(job)
     db.commit()
     db.refresh(job)
-    credits_balance = add_credits(db, phone_number, amount=1)
+    credits_balance = award_job_post_credit(db, phone_number)["balance"]
 
     metrics.increment("whatsapp_job_submissions")
     title = job.title or "Yacht Crew Position"
@@ -644,7 +644,7 @@ async def _process_job_image_submission(phone_number: str, media_id: str, db: Se
     db.add(job)
     db.commit()
     db.refresh(job)
-    credits_balance = add_credits(db, phone_number, amount=1)
+    credits_balance = award_job_post_credit(db, phone_number)["balance"]
 
     metrics.increment("whatsapp_job_submissions")
     title = job.title or "Yacht Crew Position"

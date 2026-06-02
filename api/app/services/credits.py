@@ -83,6 +83,41 @@ def add_credits(db: Session, user_key: str, amount: int = 1) -> int:
     return account.balance
 
 
+def award_job_post_credit(db: Session, user_key: str) -> dict:
+    """Grant +1 free token for posting a job, capped per 30-day window.
+
+    Replaces the old unlimited "post a job → get a token" loop. The cap
+    (FREE_JOB_POST_TOKENS_PER_MONTH) is shared across web + WhatsApp because it
+    keys off the same credit account. Returns:
+        {"granted": bool, "balance": int, "remaining": int}
+    where ``remaining`` is how many more free tokens can still be earned this window.
+    """
+    cap = settings.FREE_JOB_POST_TOKENS_PER_MONTH
+    account = _get_or_create_account(db, user_key)
+
+    now = datetime.now(timezone.utc)
+    start = account.job_post_window_start
+    if start is not None and start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if start is None or now - start >= timedelta(days=30):
+        account.job_post_tokens_earned = 0
+        account.job_post_window_start = now
+
+    if account.job_post_tokens_earned >= cap:
+        db.commit()
+        return {"granted": False, "balance": account.balance, "remaining": 0}
+
+    account.balance += 1
+    account.job_post_tokens_earned += 1
+    db.commit()
+    db.refresh(account)
+    return {
+        "granted": True,
+        "balance": account.balance,
+        "remaining": max(0, cap - account.job_post_tokens_earned),
+    }
+
+
 def spend_credits(db: Session, user_key: str, amount: int = 1) -> int | None:
     if amount < 0:
         raise ValueError("amount must be non-negative")

@@ -1,9 +1,11 @@
 import { API_BASE_URL, apiFetch } from './api'
 
-export const DEFAULT_TOKEN_PRICE = '10.00'
+export const DEFAULT_TOKEN_PRICE = '11.00'
 export const DEFAULT_TOKEN_PACKAGES = [
-  { tokens: 10, price: '100.00' },
-  { tokens: 20, price: '200.00' },
+  { tokens: 5, price: '65.00', label: 'Starter', badge: null, highlight: false, price_per_token: '13.00' },
+  { tokens: 20, price: '220.00', label: 'Standard', badge: 'Most Popular', highlight: false, price_per_token: '11.00' },
+  { tokens: 50, price: '600.00', label: 'Plus', badge: null, highlight: false, price_per_token: '12.00' },
+  { tokens: 75, price: '675.00', label: 'Premium', badge: 'Best Value', highlight: true, price_per_token: '9.00' },
 ]
 
 export function defaultTokenPackages() {

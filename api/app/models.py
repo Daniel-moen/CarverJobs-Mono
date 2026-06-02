@@ -135,6 +135,9 @@ class CrewProfile(Base):
   certifications = Column(Text, nullable=True)
   languages = Column(String(200), nullable=True)
   bio = Column(Text, nullable=True)
+  # When True, this crew member is listed in the recruiter candidate search and
+  # agencies can spend tokens to unlock their contact details.
+  discoverable = Column(Boolean, nullable=False, default=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),
@@ -272,6 +275,10 @@ class CreditAccount(Base):
   balance = Column(Integer, nullable=False, default=0)
   # Tracks when the free monthly token grant was last applied.
   last_reset_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+  # Free tokens earned from job posting in the current 30-day window, and when
+  # that window started — caps the "post a job, earn a token" loop.
+  job_post_tokens_earned = Column(Integer, nullable=False, default=0)
+  job_post_window_start = Column(DateTime(timezone=True), server_default=func.now(), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),
@@ -279,6 +286,24 @@ class CreditAccount(Base):
     onupdate=func.now(),
     nullable=False,
   )
+
+
+class ContactUnlock(Base):
+  """Records that an agency spent tokens to unlock a crew member's contact.
+
+  Once unlocked, the agency can re-view the contact details for free.
+  """
+  __tablename__ = "contact_unlocks"
+  __table_args__ = (
+    UniqueConstraint("agency_user_key", "crew_user_key", name="uq_contact_unlock_agency_crew"),
+  )
+
+  id = Column(Integer, primary_key=True, index=True)
+  agency_user_key = Column(String(160), nullable=False, index=True)
+  crew_user_key = Column(String(160), nullable=False, index=True)
+  profile_slug = Column(String(16), nullable=False, index=True)
+  cost_tokens = Column(Integer, nullable=False, default=0)
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class FeedbackSubmission(Base):

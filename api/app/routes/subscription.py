@@ -33,10 +33,28 @@ def _yoco_configured() -> bool:
     return bool(settings.YOCO_SECRET_KEY)
 
 
+def _find_package(tokens: int) -> dict | None:
+    """Return the configured pack matching this token count, if any."""
+    for pkg in settings.TOKEN_PACKAGES:
+        if int(pkg["tokens"]) == tokens:
+            return pkg
+    return None
+
+
 def _package_amount(tokens: int) -> int:
     """Return the total price in cents for a token package."""
-    price_per_token = _amount_str_to_cents(settings.TOKEN_PRICE)
-    return price_per_token * tokens
+    pkg = _find_package(tokens)
+    if pkg is None:
+        raise ValueError(f"Unknown token package: {tokens}")
+    return _amount_str_to_cents(pkg["price"])
+
+
+def _package_for_amount(cents: int) -> dict | None:
+    """Reverse-lookup a pack from a charged amount (webhook fallback)."""
+    for pkg in settings.TOKEN_PACKAGES:
+        if _amount_str_to_cents(pkg["price"]) == cents:
+            return pkg
+    return None
 
 
 def _verify_yoco_webhook_signature(
@@ -86,10 +104,12 @@ def create_checkout(body: CheckoutRequest, session: dict = Depends(require_sessi
             detail="Payment provider is not configured yet.",
         )
 
-    if body.tokens not in settings.TOKEN_PACKAGES:
+    pkg = _find_package(body.tokens)
+    if pkg is None:
+        valid = [p["tokens"] for p in settings.TOKEN_PACKAGES]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid package. Choose one of: {settings.TOKEN_PACKAGES}",
+            detail=f"Invalid package. Choose one of: {valid}",
         )
 
     user_key = session.get("sub", "")
@@ -128,8 +148,8 @@ def create_checkout(body: CheckoutRequest, session: dict = Depends(require_sessi
         "metadata": {"m_payment_id": payment_id, "user_key": user_key, "tokens": body.tokens},
         "lineItems": [
             {
-                "displayName": f"CARVER {body.tokens} Token Pack",
-                "description": f"{body.tokens} tokens — R{settings.TOKEN_PRICE} each",
+                "displayName": f"CARVER {pkg['label']} Pack",
+                "description": f"{body.tokens} tokens for R{pkg['price']}",
                 "quantity": 1,
                 "pricingDetails": {"price": cents},
             }
@@ -251,11 +271,12 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
             add_credits(db, sub.user_key, int(tokens_to_add))
             log.info("Tokens credited | user=%s | tokens=%d", sub.user_key, int(tokens_to_add))
         else:
-            price_cents = _amount_str_to_cents(settings.TOKEN_PRICE)
-            tokens_from_amount = _amount_str_to_cents(sub.amount) // price_cents
-            if tokens_from_amount > 0:
-                add_credits(db, sub.user_key, tokens_from_amount)
-                log.info("Tokens credited (from amount) | user=%s | tokens=%d", sub.user_key, tokens_from_amount)
+            fallback_pkg = _package_for_amount(_amount_str_to_cents(sub.amount))
+            if fallback_pkg is not None:
+                add_credits(db, sub.user_key, int(fallback_pkg["tokens"]))
+                log.info("Tokens credited (from amount) | user=%s | tokens=%d", sub.user_key, int(fallback_pkg["tokens"]))
+            else:
+                log.warning("Could not resolve token count for completed payment | user=%s | amount=%s", sub.user_key, sub.amount)
 
         log.info("Token purchase completed | user=%s", sub.user_key)
     elif event_type == "payment.failed":
@@ -274,7 +295,15 @@ def subscription_status(session: dict = Depends(require_session), db: Session = 
     balance = get_credit_balance(db, user_key)
     token_price = settings.TOKEN_PRICE
     packages = [
-        {"tokens": t, "price": f"{(t * float(token_price)):.2f}"} for t in settings.TOKEN_PACKAGES
+        {
+            "tokens": int(p["tokens"]),
+            "price": p["price"],
+            "label": p.get("label", f"{p['tokens']} Token Pack"),
+            "badge": p.get("badge"),
+            "highlight": bool(p.get("highlight", False)),
+            "price_per_token": f"{(float(p['price']) / int(p['tokens'])):.2f}",
+        }
+        for p in settings.TOKEN_PACKAGES
     ]
     return {
         "ok": True,

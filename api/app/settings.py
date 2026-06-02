@@ -133,13 +133,33 @@ class Settings:
   YOCO_PUBLIC_KEY: str = os.getenv("YOCO_PUBLIC_KEY", "").strip()
   YOCO_SECRET_KEY: str = os.getenv("YOCO_SECRET_KEY", "").strip()
   YOCO_WEBHOOK_SECRET: str = os.getenv("YOCO_WEBHOOK_SECRET", "").strip()
-  TOKEN_PRICE: str = os.getenv("TOKEN_PRICE", "10.00").strip()
-  TOKEN_PACKAGES: list[int] = [10, 20]
+  # Reference unit price (ZAR) — used only as a display fallback. Real pricing
+  # lives per-pack below, with a volume discount baked in.
+  TOKEN_PRICE: str = os.getenv("TOKEN_PRICE", "11.00").strip()
+  # Token packs (ZAR). The unit price drops as the pack grows (volume discount).
+  # "Plus" is an intentional decoy — priced just below "Premium" for far fewer
+  # tokens — so the best-value pack looks like the obvious choice.
+  #   tokens   = credits granted on purchase
+  #   price    = total charge in ZAR
+  #   label    = pack name
+  #   badge    = optional marketing tag shown on the card
+  #   highlight= visually emphasise this card as the recommended pack
+  TOKEN_PACKAGES: list[dict] = [
+      {"tokens": 5, "price": "65.00", "label": "Starter"},
+      {"tokens": 20, "price": "220.00", "label": "Standard", "badge": "Most Popular"},
+      {"tokens": 50, "price": "600.00", "label": "Plus"},
+      {"tokens": 75, "price": "675.00", "label": "Premium", "badge": "Best Value", "highlight": True},
+  ]
 
   # Free tier — tokens granted to every user each month (reset every 30 days)
   FREE_MONTHLY_TOKENS: int = int(os.getenv("FREE_MONTHLY_TOKENS", "25"))
   # One-time token grant for brand-new accounts (before any subscription)
   FREE_SIGNUP_TOKENS: int = int(os.getenv("FREE_SIGNUP_TOKENS", "2"))
+  # Max free tokens a user can earn per 30-day window by posting jobs (web +
+  # WhatsApp combined). Caps the old unlimited "post a job, get a token" loop.
+  FREE_JOB_POST_TOKENS_PER_MONTH: int = int(os.getenv("FREE_JOB_POST_TOKENS_PER_MONTH", "5"))
+  # Tokens an agency/recruiter spends to unlock a crew member's contact details.
+  RECRUITER_UNLOCK_COST_TOKENS: int = int(os.getenv("RECRUITER_UNLOCK_COST_TOKENS", "5"))
   # Website feedback prompt is only eligible once an account is at least this many hours old.
   FEEDBACK_MIN_ACCOUNT_AGE_HOURS: int = int(os.getenv("FEEDBACK_MIN_ACCOUNT_AGE_HOURS", "24"))
 

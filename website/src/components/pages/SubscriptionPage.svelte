@@ -107,9 +107,10 @@
   {/if}
 
   <!-- Token packages -->
-  <div class="grid gap-4 sm:grid-cols-2">
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
     {#each packages as pkg, i}
-      {@const isPopular = i === 1}
+      {@const isPopular = pkg.highlight || pkg.badge === 'Best Value'}
+      {@const perToken = pkg.price_per_token || (pkg.tokens ? (parseFloat(pkg.price) / pkg.tokens).toFixed(2) : tokenPrice)}
       <article
         class="sub-card group relative overflow-hidden rounded-2xl border p-6 transition-all duration-300 hover:-translate-y-0.5 {isPopular
           ? 'border-cyan-400/22 bg-gradient-to-br from-sky-950/60 via-indigo-950/50 to-fuchsia-950/40 hover:shadow-[0_24px_60px_-20px_rgba(34,211,238,0.35)]'
@@ -125,11 +126,11 @@
         <div class="relative z-10">
           <div class="flex items-center gap-2.5">
             <p class="text-[10px] font-bold uppercase tracking-[0.28em] {isPopular ? 'text-cyan-300/70' : 'text-slate-500'}">
-              {pkg.tokens} Token Pack
+              {pkg.label || `${pkg.tokens} Token Pack`}
             </p>
-            {#if isPopular}
+            {#if pkg.badge}
               <span class="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-cyan-200">
-                Best Value
+                {pkg.badge}
               </span>
             {/if}
           </div>
@@ -138,7 +139,7 @@
             <span class="text-4xl font-black text-white">{formatPrice(pkg.price)}</span>
           </div>
           <p class="mt-1 text-sm {isPopular ? 'text-slate-300' : 'text-slate-500'}">
-            {pkg.tokens} tokens at {formatPrice(tokenPrice)} each
+            {pkg.tokens} tokens · {formatPrice(perToken)} each
           </p>
 
           <ul class="mt-5 space-y-2 text-sm">

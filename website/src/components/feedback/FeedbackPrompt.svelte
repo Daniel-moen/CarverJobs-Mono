@@ -13,6 +13,7 @@
   let showIntro = $state(false)
   let error = $state('')
   let rewardMessage = $state('')
+  let rewardAmount = $state(0)
   let rating = $state(5)
   let liked = $state('')
   let improved = $state('')
@@ -51,10 +52,12 @@
       return
     }
     checkedStatus = true
+    rewardAmount = Number(statusData?.reward_amount ?? 0)
     if (statusData?.eligible) {
       window.setTimeout(() => {
         if (!submitted) {
-          showIntro = source === 'website_popup'
+          // Only show the reward-themed intro when there is actually a reward.
+          showIntro = source === 'website_popup' && rewardAmount > 0
           visible = true
         }
       }, 250)
@@ -87,10 +90,10 @@
       }
       submitted = true
       markSubmitted()
-      if (data.reward_granted) {
-        rewardMessage = `Thanks — ${data.reward_amount ?? 2} tokens have been added to your account.`
+      if (data.reward_granted && data.reward_amount > 0) {
+        rewardMessage = `Thanks — ${data.reward_amount} tokens have been added to your account.`
       } else {
-        rewardMessage = 'Thanks — your feedback has already been recorded for this reward.'
+        rewardMessage = 'Thanks — your feedback has been recorded. We really appreciate it!'
       }
       if (data.credits_balance != null) onRewarded(data.credits_balance)
     } catch {
@@ -124,12 +127,12 @@
       {:else if showIntro}
         <div class="text-center">
           <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-300/30 bg-cyan-300/10 text-cyan-100 shadow-[0_0_40px_-12px_rgba(34,211,238,0.7)]">
-            <span class="font-display text-2xl">+2</span>
+            <span class="font-display text-2xl">+{rewardAmount}</span>
           </div>
           <p class="mt-5 font-mono text-[10px] uppercase tracking-[0.28em] text-cyan-300/80">Free token reward</p>
-          <h2 id="feedback-title" class="mt-2 font-display text-3xl text-white">We want to give you 2 free tokens</h2>
+          <h2 id="feedback-title" class="mt-2 font-display text-3xl text-white">We want to give you {rewardAmount} free tokens</h2>
           <p class="mt-3 text-sm leading-relaxed text-slate-300">
-            Please share quick feedback about your CARVER experience. In return, we’ll add 2 free tokens to your account as soon as you submit.
+            Please share quick feedback about your CARVER experience. In return, we’ll add {rewardAmount} free tokens to your account as soon as you submit.
           </p>
           <div class="mt-5 rounded-xl border border-cyan-300/15 bg-cyan-300/[0.06] px-4 py-3 text-left">
             <p class="text-sm font-semibold text-cyan-100">This takes less than 2 minutes.</p>
@@ -146,10 +149,18 @@
       {:else}
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-cyan-300/80">2 token reward</p>
-            <h2 id="feedback-title" class="mt-2 font-display text-2xl text-white">Quick feedback required</h2>
+            {#if rewardAmount > 0}
+              <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-cyan-300/80">{rewardAmount} token reward</p>
+            {:else}
+              <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-cyan-300/80">Help us improve</p>
+            {/if}
+            <h2 id="feedback-title" class="mt-2 font-display text-2xl text-white">Quick feedback</h2>
             <p class="mt-2 text-sm leading-relaxed text-slate-400">
-              Please answer these quick questions about your experience. We’ll add 2 tokens to your account when you submit.
+              {#if rewardAmount > 0}
+                Please answer these quick questions about your experience. We’ll add {rewardAmount} tokens to your account when you submit.
+              {:else}
+                Please answer these quick questions about your experience — it helps us make CARVER better for crew.
+              {/if}
             </p>
           </div>
         </div>
@@ -214,7 +225,7 @@
               {submitting ? 'Submitting...' : 'Submit feedback'}
             </button>
           </div>
-          <p class="text-[11px] leading-relaxed text-slate-500">Takes less than 2 minutes. Reward available once per user.</p>
+          <p class="text-[11px] leading-relaxed text-slate-500">Takes less than 2 minutes.{rewardAmount > 0 ? ' Reward available once per user.' : ''}</p>
         </form>
       {/if}
     </section>

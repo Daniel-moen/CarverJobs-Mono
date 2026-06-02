@@ -78,6 +78,32 @@ def run_migrations() -> None:
     _add("users", "early_bird", "BOOLEAN NOT NULL DEFAULT 0", users_cols)
     _add("users", "agency_name", "VARCHAR(160)", users_cols)
 
+    credit_cols = _existing("credit_accounts")
+    _add("credit_accounts", "job_post_tokens_earned", "INTEGER NOT NULL DEFAULT 0", credit_cols)
+    _add("credit_accounts", "job_post_window_start", "DATETIME", credit_cols)
+
+    crew_cols = _existing("crew_profiles")
+    _add("crew_profiles", "discoverable", "BOOLEAN NOT NULL DEFAULT 1", crew_cols)
+
+    # contact_unlocks — recruiter pay-per-unlock records (additive).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS contact_unlocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agency_user_key VARCHAR(160) NOT NULL,
+            crew_user_key VARCHAR(160) NOT NULL,
+            profile_slug VARCHAR(16) NOT NULL,
+            cost_tokens INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_contact_unlock_agency_crew "
+        "ON contact_unlocks (agency_user_key, crew_user_key)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_contact_unlocks_agency ON contact_unlocks (agency_user_key)"
+    )
+
     ae_cols = _existing("analytics_events")
     _add("analytics_events", "error_code", "VARCHAR(20)", ae_cols)
     _add("analytics_events", "client_ts",  "VARCHAR(30)", ae_cols)

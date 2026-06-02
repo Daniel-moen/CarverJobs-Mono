@@ -2,18 +2,21 @@
   import { onMount, onDestroy } from 'svelte'
   import AgencyDashboardPage from '../pages/AgencyDashboardPage.svelte'
   import AgencySubmitJobPage from '../pages/AgencySubmitJobPage.svelte'
+  import RecruiterCandidatesPage from '../pages/RecruiterCandidatesPage.svelte'
   import { trackPageView } from '../../config/analytics'
 
   let { agencyName = '', onLogout = () => {} } = $props()
 
-  // Local routing — only '/agency' and '/agency/submit' live here.
+  // Local routing — agency sub-pages live here.
   const PATH_TO_PAGE = {
     '/agency': 'dashboard',
     '/agency/submit': 'submit',
+    '/agency/crew': 'crew',
   }
   const PAGE_TO_PATH = {
     dashboard: '/agency',
     submit: '/agency/submit',
+    crew: '/agency/crew',
   }
 
   function pageFromPath(pathname) {
@@ -57,6 +60,7 @@
   const tabs = [
     { key: 'dashboard', label: 'My Jobs' },
     { key: 'submit',    label: 'Post a Job' },
+    { key: 'crew',      label: 'Find Crew' },
   ]
 </script>
 
@@ -102,7 +106,9 @@
   </header>
 
   <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
-    {#if currentPage === 'submit'}
+    {#if currentPage === 'crew'}
+      <RecruiterCandidatesPage />
+    {:else if currentPage === 'submit'}
       <AgencySubmitJobPage onNavigate={(key) => navigate(key === 'agency-dashboard' ? 'dashboard' : key === 'agency-submit' ? 'submit' : currentPage)} />
     {:else}
       <AgencyDashboardPage onNavigate={(key) => navigate(key === 'agency-submit' ? 'submit' : key === 'agency-dashboard' ? 'dashboard' : currentPage)} />

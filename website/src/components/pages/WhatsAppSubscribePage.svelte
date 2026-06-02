@@ -132,8 +132,9 @@
         </p>
         <h1 class="ws-title ws-title-lg">Buy tokens</h1>
         <p class="ws-price-line">
-          <span class="ws-price-amount">{formatPrice(tokenPrice)}</span>
-          <span class="ws-price-unit">per token</span>
+          <span class="ws-price-unit">Pay as you go</span>
+          <span class="ws-price-dot" aria-hidden="true">·</span>
+          <span class="ws-price-unit">bigger packs save more</span>
           <span class="ws-price-dot" aria-hidden="true">·</span>
           <span class="ws-price-unit">no recurring charges</span>
         </p>
@@ -151,7 +152,8 @@
 
       <div class="ws-packages">
         {#each packages as pkg, i}
-          {@const isPopular = i === 1}
+          {@const isPopular = pkg.highlight || pkg.badge === 'Best Value'}
+          {@const perToken = pkg.price_per_token || (pkg.tokens ? (parseFloat(pkg.price) / pkg.tokens).toFixed(2) : tokenPrice)}
           <button
             type="button"
             onclick={() => startCheckout(pkg.tokens)}
@@ -159,8 +161,8 @@
             class="ws-pkg"
             class:is-popular={isPopular}
           >
-            {#if isPopular}
-              <span class="ws-pkg-flag">Best value</span>
+            {#if pkg.badge}
+              <span class="ws-pkg-flag">{pkg.badge}</span>
             {/if}
             <div class="ws-pkg-row">
               <div class="ws-pkg-lead">
@@ -168,7 +170,7 @@
                 <span class="ws-pkg-tokens-label">tokens</span>
               </div>
               <div class="ws-pkg-meta">
-                <span class="ws-pkg-runs">{pkg.tokens} matching runs</span>
+                <span class="ws-pkg-runs">{formatPrice(perToken)} each</span>
               </div>
               <div class="ws-pkg-price">
                 {#if isLoading === pkg.tokens}
@@ -330,15 +332,6 @@
     letter-spacing: 0.14em;
     color: var(--text-muted);
     text-transform: uppercase;
-  }
-  .ws-price-amount {
-    color: var(--ivory);
-    font-family: var(--font-serif);
-    font-style: italic;
-    font-weight: 400;
-    font-size: 14px;
-    letter-spacing: 0;
-    text-transform: none;
   }
   .ws-price-unit { color: var(--text-muted); }
   .ws-price-dot { margin: 0 0.35rem; opacity: 0.5; }

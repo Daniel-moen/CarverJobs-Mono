@@ -9,10 +9,14 @@ def test_feedback_status_initially_not_submitted(client):
     assert body["ok"] is True
     assert body["submitted"] is False
     assert body["eligible"] is True
-    assert body["reward_amount"] == 2
+    # Feedback reward removed (FEEDBACK_REWARD_TOKENS=0) — no tokens advertised.
+    assert body["reward_amount"] == 0
 
 
-def test_feedback_submit_rewards_tokens_once(client):
+def test_feedback_submit_records_without_reward(client):
+    # Baseline balance is the signup grant only.
+    baseline = client.get("/auth/session").json()["session"]["credits_balance"]
+
     first = client.post("/feedback/submit", json={
         "source": "website_popup",
         "rating": 5,
@@ -26,9 +30,10 @@ def test_feedback_submit_rewards_tokens_once(client):
     assert first.status_code == 201
     first_body = first.json()
     assert first_body["submitted"] is True
-    assert first_body["reward_granted"] is True
-    assert first_body["reward_amount"] == 2
-    assert first_body["credits_balance"] == 4
+    # No token reward is granted now.
+    assert first_body["reward_granted"] is False
+    assert first_body["reward_amount"] == 0
+    assert first_body["credits_balance"] == baseline
 
     duplicate = client.post("/feedback/submit", json={
         "source": "whatsapp_message",
@@ -40,7 +45,7 @@ def test_feedback_submit_rewards_tokens_once(client):
     duplicate_body = duplicate.json()
     assert duplicate_body["submitted"] is True
     assert duplicate_body["reward_granted"] is False
-    assert duplicate_body["credits_balance"] == 4
+    assert duplicate_body["credits_balance"] == baseline
 
     status = client.get("/feedback/status")
     assert status.status_code == 200

@@ -7,7 +7,9 @@ from app import models
 from app.settings import settings
 
 FEEDBACK_CAMPAIGN = "feedback_2_tokens"
-FEEDBACK_REWARD_TOKENS = 2
+# Token reward for submitting feedback. Set to 0 to disable the reward (feedback
+# is still recorded). Raise it if you want to incentivise feedback again.
+FEEDBACK_REWARD_TOKENS = 0
 TARGET_MODES = {"all", "website", "whatsapp", "specific", "off"}
 
 

@@ -95,7 +95,7 @@ def submit_feedback(
         recommend=payload.recommend,
         anything_else=payload.anything_else,
         reward_amount=FEEDBACK_REWARD_TOKENS,
-        rewarded=True,
+        rewarded=FEEDBACK_REWARD_TOKENS > 0,
     )
     db.add(submission)
     try:
@@ -110,7 +110,11 @@ def submit_feedback(
             "credits_balance": get_credit_balance(db, user_key),
         }
 
-    credits_balance = add_credits(db, user_key, amount=FEEDBACK_REWARD_TOKENS)
+    if FEEDBACK_REWARD_TOKENS > 0:
+        credits_balance = add_credits(db, user_key, amount=FEEDBACK_REWARD_TOKENS)
+    else:
+        db.commit()
+        credits_balance = get_credit_balance(db, user_key)
     metrics.increment("feedback_submissions")
     log.info(
         "Feedback submitted | user=%s | source=%s | reward=%d",
@@ -121,7 +125,7 @@ def submit_feedback(
     return {
         "ok": True,
         "submitted": True,
-        "reward_granted": True,
+        "reward_granted": FEEDBACK_REWARD_TOKENS > 0,
         "reward_amount": FEEDBACK_REWARD_TOKENS,
         "credits_balance": credits_balance,
     }

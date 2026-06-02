@@ -409,6 +409,46 @@ class PublicProfileResponse(APIModel):
     job_history: Annotated[list["JobHistoryRead"], Field(default_factory=list)]
 
 
+# ── Recruiter (pay-per-unlock) schemas ───────────────────────────────────────
+class RecruiterCandidate(APIModel):
+    """A crew member shown in the recruiter search — no contact details."""
+    profile_slug: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    nationality: Optional[str] = None
+    current_location: Optional[str] = None
+    desired_role: Optional[str] = None
+    contract_type: Optional[str] = None
+    years_experience: Optional[str] = None
+    available_from: Optional[str] = None
+    certifications: Optional[str] = None
+    languages: Optional[str] = None
+    bio: Optional[str] = None
+    has_cv: bool = False
+    has_photo: bool = False
+    photo_url: Optional[str] = None
+    unlocked: bool = False
+    # Contact details — only populated for already-unlocked candidates.
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class RecruiterCandidateList(APIModel):
+    candidates: Annotated[list[RecruiterCandidate], Field(default_factory=list)]
+    total: int = 0
+    unlock_cost: int = 0
+    balance: int = 0
+
+
+class RecruiterUnlockResponse(APIModel):
+    ok: bool = True
+    already_unlocked: bool = False
+    cost: int = 0
+    balance: int = 0
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
 # ── Job history schemas ──────────────────────────────────────────────────────
 
 class JobHistoryCreate(APIModel):
