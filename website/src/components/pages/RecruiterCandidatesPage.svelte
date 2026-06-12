@@ -2,6 +2,8 @@
   import { onMount } from 'svelte'
   import { API_BASE_URL, apiFetch } from '../../config/api'
 
+  let { onNavigate = () => {} } = $props()
+
   let candidates = $state([])
   let total = $state(0)
   let unlockCost = $state(0)
@@ -95,6 +97,13 @@
     <div class="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-right">
       <p class="text-[10px] uppercase tracking-[0.2em] text-slate-500">Token balance</p>
       <p class="text-lg font-bold text-white">{balance}</p>
+      <button
+        type="button"
+        onclick={() => onNavigate('subscription')}
+        class="mt-0.5 text-[11px] font-semibold text-cyan-300 transition hover:text-cyan-200 hover:underline"
+      >
+        Top up →
+      </button>
     </div>
   </header>
 
@@ -172,18 +181,22 @@
                 {#if c.phone}<a href={`tel:${c.phone}`} class="text-cyan-300 hover:underline">{c.phone}</a>{/if}
                 {#if !c.email && !c.phone}<span class="text-slate-500">No contact details on file.</span>{/if}
               </div>
+            {:else if balance < unlockCost}
+              <button
+                type="button"
+                onclick={() => onNavigate('subscription')}
+                class="w-full rounded-lg border border-amber-300/30 bg-amber-300/10 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/20"
+              >
+                Top up to unlock — {unlockCost} tokens
+              </button>
             {:else}
               <button
                 type="button"
                 onclick={() => unlock(c.profile_slug)}
-                disabled={unlockingSlug === c.profile_slug || balance < unlockCost}
+                disabled={unlockingSlug === c.profile_slug}
                 class="w-full rounded-lg border border-cyan-300/30 bg-cyan-300/10 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {unlockingSlug === c.profile_slug
-                  ? 'Unlocking…'
-                  : balance < unlockCost
-                    ? `Need ${unlockCost} tokens`
-                    : `Unlock contact — ${unlockCost} tokens`}
+                {unlockingSlug === c.profile_slug ? 'Unlocking…' : `Unlock contact — ${unlockCost} tokens`}
               </button>
             {/if}
           </div>

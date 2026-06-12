@@ -3,6 +3,7 @@
   import AgencyDashboardPage from '../pages/AgencyDashboardPage.svelte'
   import AgencySubmitJobPage from '../pages/AgencySubmitJobPage.svelte'
   import RecruiterCandidatesPage from '../pages/RecruiterCandidatesPage.svelte'
+  import SubscriptionPage from '../pages/SubscriptionPage.svelte'
   import { trackPageView } from '../../config/analytics'
 
   let { agencyName = '', onLogout = () => {} } = $props()
@@ -12,14 +13,20 @@
     '/agency': 'dashboard',
     '/agency/submit': 'submit',
     '/agency/crew': 'crew',
+    '/agency/tokens': 'tokens',
   }
   const PAGE_TO_PATH = {
     dashboard: '/agency',
     submit: '/agency/submit',
     crew: '/agency/crew',
+    tokens: '/agency/tokens',
   }
 
   function pageFromPath(pathname) {
+    // Yoco checkout return URLs land on /subscription?status=… — show the
+    // tokens page so the agency sees the payment result instead of bouncing
+    // to the dashboard.
+    if (pathname.startsWith('/subscription')) return 'tokens'
     return PATH_TO_PAGE[pathname] ?? 'dashboard'
   }
 
@@ -46,8 +53,12 @@
     // If we landed on a non-agency path (e.g. user typed /dashboard) snap back
     // to the agency dashboard so the URL matches what's actually rendered.
     if (!window.location.pathname.startsWith('/agency')) {
-      history.replaceState({ page: 'dashboard', scope: 'agency' }, '', '/agency')
-      currentPage = 'dashboard'
+      if (window.location.pathname.startsWith('/subscription')) {
+        history.replaceState({ page: 'tokens', scope: 'agency' }, '', '/agency/tokens')
+      } else {
+        history.replaceState({ page: 'dashboard', scope: 'agency' }, '', '/agency')
+        currentPage = 'dashboard'
+      }
     }
     trackPageView(`agency-${currentPage}`)
     window.addEventListener('popstate', onPopState)
@@ -61,6 +72,7 @@
     { key: 'dashboard', label: 'My Jobs' },
     { key: 'submit',    label: 'Post a Job' },
     { key: 'crew',      label: 'Find Crew' },
+    { key: 'tokens',    label: 'Buy Tokens' },
   ]
 </script>
 
@@ -107,7 +119,9 @@
 
   <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
     {#if currentPage === 'crew'}
-      <RecruiterCandidatesPage />
+      <RecruiterCandidatesPage onNavigate={(key) => navigate(key === 'subscription' ? 'tokens' : key)} />
+    {:else if currentPage === 'tokens'}
+      <SubscriptionPage onNavigate={(key) => navigate(key === 'subscription' ? 'tokens' : key)} />
     {:else if currentPage === 'submit'}
       <AgencySubmitJobPage onNavigate={(key) => navigate(key === 'agency-dashboard' ? 'dashboard' : key === 'agency-submit' ? 'submit' : currentPage)} />
     {:else}

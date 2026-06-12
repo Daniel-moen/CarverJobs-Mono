@@ -286,7 +286,7 @@ async def find_match(
     if credits_remaining is None:
         raise HTTPException(
             status_code=402,
-            detail="You need at least 1 credit to run matching. Submit a job to earn one.",
+            detail="You're out of tokens. Top up to keep matching, or submit a job to earn a free token.",
         )
     deleted_sessions = _delete_user_match_sessions(db, user_key)
     if deleted_sessions:

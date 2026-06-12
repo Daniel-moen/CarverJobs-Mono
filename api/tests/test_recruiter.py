@@ -81,6 +81,13 @@ def test_unlock_spends_tokens_then_is_free_to_review(client):
     assert unlocked["total"] == 1
     assert unlocked["candidates"][0]["phone"] == "+27123456789"
 
+    # And the browse list also returns the contact for an already-unlocked
+    # candidate — revisiting the "Find Crew" tab must not hide what was paid for.
+    listing = client.get("/recruiter/candidates").json()
+    card = next(c for c in listing["candidates"] if c["profile_slug"] == slug)
+    assert card["unlocked"] is True
+    assert card["phone"] == "+27123456789"
+
 
 def test_unknown_slug_returns_404(client):
     _award("admin", 10)

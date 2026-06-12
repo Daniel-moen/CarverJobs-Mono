@@ -35,6 +35,7 @@ from app.security import issue_session_token
 from app.settings import settings
 from app.services.ai_client import AIClientError
 from app.services.mixpanel_server import track as mixpanel_track
+from app.routes.subscription import _is_first_purchase
 from app.services.credits import add_credits, award_job_post_credit, get_credit_balance, is_subscribed, spend_credits
 from app.services.feedback_settings import feedback_is_eligible
 
@@ -382,7 +383,7 @@ def _credits_summary_for_menu(balance: int, subscribed: bool = False) -> str:
     return (
         f"💳 *Your balance: {balance} {w}.*\n"
         "Each *Find Matches* run uses 1 token. "
-        "Submit a valid job to earn tokens, or type *buy tokens* to top up."
+        "Type *buy tokens* to top up, or submit a valid job to earn a free token."
     )
 
 
@@ -868,7 +869,7 @@ Style rules for WhatsApp:
 - When all done, celebrate big — they just joined the fleet.
 
 First reply only (empty conversation history in the messages you receive):
-- Include exactly one brief sentence explaining tokens: Each *Find Matches* run uses *1 token*. Submit a valid job to earn tokens, or type *buy tokens* to top up.
+- Include exactly one brief sentence explaining tokens: Each *Find Matches* run uses *1 token*. Type *buy tokens* to top up, or submit a valid job to earn a free token.
 
 Data rules:
 - ONLY set "done": true when ALL 13 fields are collected (missing list is empty).
@@ -1094,7 +1095,7 @@ async def _handle_profile_command(phone_number: str, db: Session) -> str:
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone_number).first()
     bal = get_credit_balance(db, phone_number)
     tok_w = "token" if bal == 1 else "tokens"
-    token_line = f"\n\n💳 *Tokens:* {bal} {tok_w} — each *Find Matches* uses 1; submit a job to earn 1."
+    token_line = f"\n\n💳 *Tokens:* {bal} {tok_w} — each *Find Matches* uses 1; *buy tokens* to top up or submit a job to earn 1."
     if not profile:
         return (
             "👋 *Welcome aboard CARVER!*\n\n"
@@ -1220,7 +1221,7 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         await _send_whatsapp(
             phone_number,
             "⚠️ You need *1 token* to run matching.\n\n"
-            "Submit a job to earn tokens, or type *buy tokens* to top up.\n"
+            "Type *buy tokens* to top up, or submit a job to earn a free token.\n"
             f"Current balance: *{current_credits}* token{'s' if current_credits != 1 else ''}.",
         )
         await _send_whatsapp_buttons(
@@ -1404,7 +1405,7 @@ _FALLBACK_GREETING = (
     "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
     "I'm going to build your crew profile in a quick chat — takes about 2 minutes "
     "and gets you in front of recruiters and vessels straight away.\n\n"
-    "💳 *Tokens:* Each *Find Matches* uses *1 token*. Submit a valid job to earn tokens, or type *buy tokens* to top up.\n\n"
+    "💳 *Tokens:* Each *Find Matches* uses *1 token*. Type *buy tokens* to top up, or submit a valid job to earn a free token.\n\n"
     "Let's start with the basics — what's your *full name*? 🪪"
 )
 
@@ -1477,7 +1478,7 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
             f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
             f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
-            f"submit a valid job to earn tokens, or type *buy tokens* to top up.\n\n"
+            f"type *buy tokens* to top up, or submit a valid job to earn a free token.\n\n"
             f"_Link expires in 30 min. Type *help* anytime to see what I can do for you._ ⚡"
         )
     else:
@@ -1516,13 +1517,21 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         link = _make_magic_link(phone, db, redirect_to="/subscription")
         bal = get_credit_balance(db, phone)
         w = "token" if bal == 1 else "tokens"
+        pack_lines = []
+        for p in settings.TOKEN_PACKAGES:
+            price = f"{float(p['price']):g}"
+            badge = f" — _{p['badge']}_" if p.get("badge") else ""
+            pack_lines.append(f"• *{int(p['tokens'])} tokens* — R{price}{badge}")
+        bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
+        bonus_line = ""
+        if bonus > 0 and _is_first_purchase(db, phone):
+            bonus_line = f"🎁 First purchase? You get *+{bonus} bonus tokens* on any pack.\n\n"
         await _send_whatsapp(
             phone,
             f"🪙 *Buy Tokens*\n\n"
             f"Your balance: *{bal} {w}*\n\n"
-            f"Token packs available:\n"
-            f"• *10 tokens* — R100\n"
-            f"• *20 tokens* — R200\n\n"
+            f"Token packs available:\n" + "\n".join(pack_lines) + "\n\n"
+            f"{bonus_line}"
             f"👉 {link}\n\n"
             "_Link expires in 30 minutes._",
         )

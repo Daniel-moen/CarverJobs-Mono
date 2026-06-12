@@ -128,7 +128,12 @@ def list_candidates(
     }
 
     candidates = [
-        _candidate(p, unlocked=p.user_key in unlocked_keys, db=db)
+        _candidate(
+            p,
+            unlocked=p.user_key in unlocked_keys,
+            db=db,
+            with_contact=p.user_key in unlocked_keys,
+        )
         for p in profiles
     ]
     return RecruiterCandidateList(

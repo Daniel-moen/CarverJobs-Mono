@@ -8,8 +8,22 @@ export const DEFAULT_TOKEN_PACKAGES = [
   { tokens: 75, price: '675.00', label: 'Premium', badge: 'Best Value', highlight: true, price_per_token: '9.00' },
 ]
 
+export const DEFAULT_FIRST_PURCHASE_BONUS = 5
+
 export function defaultTokenPackages() {
   return DEFAULT_TOKEN_PACKAGES.map((pkg) => ({ ...pkg }))
+}
+
+// Savings vs the most expensive per-token rate in the lineup (the Starter
+// rate), so bigger packs can show "Save RX" and a strikethrough anchor price.
+export function packSavings(pkg, packages) {
+  const rate = (p) => parseFloat(p.price_per_token || parseFloat(p.price) / p.tokens)
+  const baseRate = Math.max(...packages.map(rate).filter((r) => !isNaN(r)))
+  if (!baseRate || !pkg.tokens) return null
+  const anchor = Math.round(baseRate * pkg.tokens)
+  const savings = Math.round(anchor - parseFloat(pkg.price))
+  if (!(savings >= 5)) return null
+  return { anchor: String(anchor), savings: String(savings) }
 }
 
 export function formatTokenPrice(amountStr) {

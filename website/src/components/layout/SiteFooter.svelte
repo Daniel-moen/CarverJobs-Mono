@@ -20,8 +20,10 @@
 
       <div class="flex flex-col gap-5 sm:items-end">
         <nav class="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-slate-400" aria-label="Legal">
+          <a href="/pricing" class="transition hover:text-white">Pricing</a>
           <a href="/privacy" class="transition hover:text-white">Privacy</a>
           <a href="/terms" class="transition hover:text-white">Terms</a>
+          <a href="/refund-policy" class="transition hover:text-white">Refund Policy</a>
           <a href="/data-deletion" class="transition hover:text-white">Delete my data</a>
         </nav>
 

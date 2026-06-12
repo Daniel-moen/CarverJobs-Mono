@@ -561,14 +561,26 @@
       <p class="mx-auto mt-2 max-w-md text-xs text-slate-500">
         Matching costs 1 token. Spot a job in a group or post? Submit it (paste or screenshot) to earn 1 token.
       </p>
-      <button
-        type="button"
-        disabled={creditsBalance < 1}
-        onclick={() => runMatch()}
-        class="mt-6 rounded-lg border border-cyan-300/35 bg-cyan-300/8 px-8 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/55 hover:bg-cyan-300/18 hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
-      >
-        {creditsBalance < 1 ? 'Need 1 Token' : 'Start Matching'}
-      </button>
+      {#if creditsBalance < 1}
+        <button
+          type="button"
+          onclick={() => { trackClick('match_idle_topup'); onNavigate('subscription') }}
+          class="mt-6 rounded-lg border border-amber-300/35 bg-amber-300/10 px-8 py-3 text-sm font-semibold text-amber-100 transition hover:border-amber-300/55 hover:bg-amber-300/20 hover:text-white active:scale-95"
+        >
+          Top Up Tokens
+        </button>
+        <p class="mx-auto mt-2 max-w-md text-xs text-slate-500">
+          You're out of tokens — packs start at R65, or submit a job below to earn 1 free.
+        </p>
+      {:else}
+        <button
+          type="button"
+          onclick={() => runMatch()}
+          class="mt-6 rounded-lg border border-cyan-300/35 bg-cyan-300/8 px-8 py-3 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/55 hover:bg-cyan-300/18 hover:text-white active:scale-95"
+        >
+          Start Matching
+        </button>
+      {/if}
     </div>
 
   {:else if state === 'loading'}
@@ -629,6 +641,13 @@
       >
         Try Again
       </button>
+      {#if creditsBalance <= 1}
+        <p class="mt-3 text-xs text-slate-500">
+          {creditsBalance === 0 ? 'Out of tokens?' : 'Only 1 token left —'}
+          <button type="button" onclick={() => { trackClick('match_nomatch_topup'); onNavigate('subscription') }} class="font-semibold text-amber-200 underline-offset-4 transition hover:text-amber-100 hover:underline">top up</button>
+          so you're ready when new positions land.
+        </p>
+      {/if}
     </div>
 
   {:else if state === 'done'}
@@ -637,6 +656,15 @@
         <h1 class="text-xl font-bold text-white">{matches.length} Match{matches.length !== 1 ? 'es' : ''} Found</h1>
         <p class="text-xs text-slate-500">Scanned {totalScanned} positions</p>
         <p class="mt-1 text-xs text-cyan-200">{creditsBalance} token{creditsBalance === 1 ? '' : 's'} remaining</p>
+        {#if creditsBalance <= 1}
+          <button
+            type="button"
+            onclick={() => { trackClick('match_done_topup'); onNavigate('subscription') }}
+            class="mt-2 rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:border-amber-300/50 hover:bg-amber-300/20 hover:text-white active:scale-95"
+          >
+            Running low — top up tokens
+          </button>
+        {/if}
       </div>
       <button
         type="button"

@@ -5,6 +5,7 @@
     defaultTokenPackages,
     formatTokenPrice,
     loadSubscriptionStatus,
+    packSavings,
     readCheckoutReturnStatus,
     startSubscriptionCheckout,
   } from '../../config/subscriptionCheckout'
@@ -18,22 +19,63 @@
   let balance = $state(0)
   let tokenPrice = $state(DEFAULT_TOKEN_PRICE)
   let packages = $state(defaultTokenPackages())
+  let firstPurchaseBonus = $state(0)
+  let tokensAdded = $state(0)
 
   function formatPrice(amountStr) {
     return formatTokenPrice(amountStr)
   }
 
-  onMount(async () => {
+  onMount(() => {
     requestAnimationFrame(() => (mounted = true))
     returnStatus = readCheckoutReturnStatus()
-    try {
-      const data = await loadSubscriptionStatus()
-      if (data) {
-        if (data.balance != null) balance = data.balance
-        if (data.token_price) tokenPrice = data.token_price
-        if (data.packages) packages = data.packages
+    let pollTimer = null
+
+    ;(async () => {
+      let initialBalance = null
+      try {
+        const data = await loadSubscriptionStatus()
+        if (data) {
+          if (data.balance != null) {
+            balance = data.balance
+            initialBalance = data.balance
+          }
+          if (data.token_price) tokenPrice = data.token_price
+          if (data.packages) packages = data.packages
+          if (data.first_purchase_bonus != null) firstPurchaseBonus = data.first_purchase_bonus
+        }
+      } catch { /* fallback to defaults */ }
+
+      // After a successful checkout the webhook credits tokens asynchronously.
+      // Poll until the balance lands so the user never has to refresh by hand.
+      if (returnStatus === 'success') {
+        let attempts = 0
+        pollTimer = setInterval(async () => {
+          attempts += 1
+          if (attempts > 15) {
+            clearInterval(pollTimer)
+            pollTimer = null
+            return
+          }
+          try {
+            const data = await loadSubscriptionStatus()
+            if (data?.balance != null) {
+              if (initialBalance != null && data.balance > initialBalance) {
+                tokensAdded = data.balance - initialBalance
+                clearInterval(pollTimer)
+                pollTimer = null
+              }
+              balance = data.balance
+              if (data.first_purchase_bonus != null) firstPurchaseBonus = data.first_purchase_bonus
+            }
+          } catch { /* keep polling */ }
+        }, 2500)
       }
-    } catch { /* fallback to defaults */ }
+    })()
+
+    return () => {
+      if (pollTimer) clearInterval(pollTimer)
+    }
   })
 
   async function startCheckout(tokens) {
@@ -81,10 +123,24 @@
       <div class="flex items-start gap-3">
         <span class="mt-0.5 text-lg">🎉</span>
         <div>
-          <p class="font-semibold text-emerald-200">Payment received!</p>
-          <p class="mt-1 text-sm text-slate-400">Your tokens are being added. This usually takes a few seconds — refresh the page shortly to see your updated balance.</p>
+          {#if tokensAdded > 0}
+            <p class="font-semibold text-emerald-200">+{tokensAdded} token{tokensAdded === 1 ? '' : 's'} added!</p>
+            <p class="mt-1 text-sm text-slate-400">Your new balance is {balance}. Happy matching!</p>
+          {:else}
+            <p class="font-semibold text-emerald-200">Payment received!</p>
+            <p class="mt-1 text-sm text-slate-400">Your tokens are being added — your balance will update here automatically in a few seconds.</p>
+          {/if}
         </div>
       </div>
+    </div>
+  {/if}
+
+  {#if firstPurchaseBonus > 0}
+    <div class="sub-card rounded-2xl border border-amber-300/20 bg-amber-950/20 p-4" class:visible={mounted} style="--delay:70ms;">
+      <p class="text-sm text-amber-100">
+        <span class="mr-1.5">🎁</span><span class="font-bold">First purchase bonus:</span>
+        get <span class="font-bold">+{firstPurchaseBonus} extra tokens</span> free with any pack — added automatically.
+      </p>
     </div>
   {/if}
 
@@ -111,6 +167,7 @@
     {#each packages as pkg, i}
       {@const isPopular = pkg.highlight || pkg.badge === 'Best Value'}
       {@const perToken = pkg.price_per_token || (pkg.tokens ? (parseFloat(pkg.price) / pkg.tokens).toFixed(2) : tokenPrice)}
+      {@const savings = packSavings(pkg, packages)}
       <article
         class="sub-card group relative overflow-hidden rounded-2xl border p-6 transition-all duration-300 hover:-translate-y-0.5 {isPopular
           ? 'border-cyan-400/22 bg-gradient-to-br from-sky-950/60 via-indigo-950/50 to-fuchsia-950/40 hover:shadow-[0_24px_60px_-20px_rgba(34,211,238,0.35)]'
@@ -135,11 +192,17 @@
             {/if}
           </div>
 
-          <div class="mt-3 flex items-end gap-1">
+          <div class="mt-3 flex items-end gap-2">
             <span class="text-4xl font-black text-white">{formatPrice(pkg.price)}</span>
+            {#if savings}
+              <span class="mb-1 text-sm text-slate-500 line-through">{formatPrice(savings.anchor)}</span>
+            {/if}
           </div>
           <p class="mt-1 text-sm {isPopular ? 'text-slate-300' : 'text-slate-500'}">
             {pkg.tokens} tokens · {formatPrice(perToken)} each
+            {#if savings}
+              <span class="ml-1 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">Save {formatPrice(savings.savings)}</span>
+            {/if}
           </p>
 
           <ul class="mt-5 space-y-2 text-sm">

@@ -57,6 +57,17 @@ def _package_for_amount(cents: int) -> dict | None:
     return None
 
 
+def _is_first_purchase(db: Session, user_key: str, exclude_payment_id: str | None = None) -> bool:
+    """True if the user has no completed purchase other than the one being processed."""
+    q = db.query(models.Subscription).filter(
+        models.Subscription.user_key == user_key,
+        models.Subscription.status == "completed",
+    )
+    if exclude_payment_id:
+        q = q.filter(models.Subscription.m_payment_id != exclude_payment_id)
+    return q.first() is None
+
+
 def _verify_yoco_webhook_signature(
     raw_body: bytes,
     webhook_id: str | None,
@@ -251,6 +262,12 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
 
     if event_type == "payment.succeeded":
+        if sub.status == "completed":
+            # Yoco delivers webhooks at-least-once, so the same payment.succeeded
+            # can arrive more than once. Tokens were already credited on the
+            # first delivery — ignore duplicates to avoid double-crediting.
+            log.info("Yoco webhook duplicate succeeded ignored | user=%s | ref=%s", sub.user_key, m_payment_id)
+            return {"ok": True}
         amount_cents = payload.get("amount")
         if amount_cents is not None:
             expected = _amount_str_to_cents(sub.amount)
@@ -260,6 +277,8 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount mismatch")
             except (TypeError, ValueError):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount mismatch")
+
+        first_purchase = _is_first_purchase(db, sub.user_key, exclude_payment_id=sub.m_payment_id)
 
         sub.status = "completed"
         if payload.get("id"):
@@ -277,6 +296,11 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
                 log.info("Tokens credited (from amount) | user=%s | tokens=%d", sub.user_key, int(fallback_pkg["tokens"]))
             else:
                 log.warning("Could not resolve token count for completed payment | user=%s | amount=%s", sub.user_key, sub.amount)
+
+        bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
+        if first_purchase and bonus > 0:
+            add_credits(db, sub.user_key, bonus)
+            log.info("First-purchase bonus credited | user=%s | bonus=%d", sub.user_key, bonus)
 
         log.info("Token purchase completed | user=%s", sub.user_key)
     elif event_type == "payment.failed":
@@ -305,9 +329,11 @@ def subscription_status(session: dict = Depends(require_session), db: Session = 
         }
         for p in settings.TOKEN_PACKAGES
     ]
+    bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
     return {
         "ok": True,
         "balance": balance,
         "token_price": token_price,
         "packages": packages,
+        "first_purchase_bonus": bonus if (bonus > 0 and _is_first_purchase(db, user_key)) else 0,
     }

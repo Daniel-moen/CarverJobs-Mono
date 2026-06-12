@@ -54,8 +54,10 @@
     '/dashboard':    'dashboard',
     '/dashboard/job-ingest': 'admin-job-ingest',
     '/subscription': 'subscription',
+    '/pricing':      'pricing',
     '/privacy':      'privacy',
     '/terms':        'terms',
+    '/refund-policy': 'refund-policy',
     '/data-deletion': 'data-deletion',
     '/articles':      'articles',
   }
@@ -84,16 +86,18 @@
   }
 
   function isLegalDocumentPage(key) {
-    return key === 'privacy' || key === 'terms' || key === 'data-deletion'
+    return key === 'privacy' || key === 'terms' || key === 'refund-policy' || key === 'data-deletion'
   }
 
   function isPublicContentPage(key) {
-    return isLegalDocumentPage(key) || key === 'articles'
+    return isLegalDocumentPage(key) || key === 'articles' || key === 'pricing'
   }
 
   function pageFromPath(pathname) {
     if (pathname === '/privacy') return 'privacy'
     if (pathname === '/terms') return 'terms'
+    if (pathname === '/refund-policy') return 'refund-policy'
+    if (pathname === '/pricing') return 'pricing'
     if (pathname === '/data-deletion') return 'data-deletion'
     if (pathname === '/articles' || pathname.startsWith('/articles/')) return 'articles'
     if (!SITE_LAUNCHED) return 'launch-signup'
@@ -580,6 +584,12 @@
       {:then { default: TermsOfServicePage }}
         <TermsOfServicePage />
       {/await}
+    {:else if currentPage === 'refund-policy'}
+      {#await pageChunk('legal-refund', () => import('./components/pages/RefundPolicyPage.svelte'))}
+        <RouteLoading />
+      {:then { default: RefundPolicyPage }}
+        <RefundPolicyPage />
+      {/await}
     {:else}
       {#await pageChunk('legal-data-deletion', () => import('./components/pages/DataDeletionPage.svelte'))}
         <RouteLoading />
@@ -587,6 +597,12 @@
         <DataDeletionPage />
       {/await}
     {/if}
+  {:else if currentPage === 'pricing'}
+    {#await pageChunk('pricing', () => import('./components/pages/PricingPage.svelte'))}
+      <RouteLoading />
+    {:then { default: PricingPage }}
+      <PricingPage />
+    {/await}
   {:else if waToken}
     {#await pageChunk('whatsapp-auth', () => import('./components/pages/WhatsAppAuthPage.svelte'))}
       <RouteLoading />

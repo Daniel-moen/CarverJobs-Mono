@@ -151,6 +151,10 @@ class Settings:
       {"tokens": 75, "price": "675.00", "label": "Premium", "badge": "Best Value", "highlight": True},
   ]
 
+  # Bonus tokens credited on a user's very first completed purchase (any pack).
+  # Bonus framing converts better than discounting and keeps pack prices intact.
+  FIRST_PURCHASE_BONUS_TOKENS: int = int(os.getenv("FIRST_PURCHASE_BONUS_TOKENS", "5"))
+
   # Free tier — tokens granted to every user each month (reset every 30 days)
   FREE_MONTHLY_TOKENS: int = int(os.getenv("FREE_MONTHLY_TOKENS", "25"))
   # One-time token grant for brand-new accounts (before any subscription)
