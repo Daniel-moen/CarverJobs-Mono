@@ -116,6 +116,14 @@ class Settings:
   # WhatsApp "Recent Posts" matching window, based on when jobs entered the database.
   WA_MATCH_RECENT_DAYS: int = int(os.getenv("WA_MATCH_RECENT_DAYS", "7"))
 
+  # Job retention — prunes the ever-growing `jobs` table (see services/job_retention.py).
+  # Active jobs older than this are soft-expired (status -> "expired").
+  JOB_EXPIRE_AFTER_DAYS: int = int(os.getenv("JOB_EXPIRE_AFTER_DAYS", "30"))
+  # Any job older than this is deleted outright to keep the table small.
+  JOB_DELETE_AFTER_DAYS: int = int(os.getenv("JOB_DELETE_AFTER_DAYS", "90"))
+  # How often the retention background loop runs.
+  JOB_RETENTION_INTERVAL_HOURS: int = int(os.getenv("JOB_RETENTION_INTERVAL_HOURS", "24"))
+
   # Web job board scrapers
   DOCKWALK_ENABLED: bool = os.getenv("DOCKWALK_ENABLED", "true").lower() == "true"
   WORKONAYACHT_ENABLED: bool = os.getenv("WORKONAYACHT_ENABLED", "true").lower() == "true"

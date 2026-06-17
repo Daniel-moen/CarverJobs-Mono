@@ -19,22 +19,69 @@
     <meta name="theme-color" content="#05080c" />
     <meta name="color-scheme" content="dark" />
     <link id="canonical-link" rel="canonical" href="https://jobcarver.co/" />
-    <!-- Update canonical to the real route before the SPA loads. Googlebot
-         reads the final rendered DOM, so this inline script ensures every
-         public SPA route carries the correct canonical tag and app/auth
-         routes have no canonical (they are disallowed or not intended for
-         indexing). -->
+    <!-- Per-route SEO before the SPA loads. Googlebot reads the final rendered
+         DOM, so this inline script gives every public SPA route its own
+         canonical, <title> and description. Without this, every route inherits
+         the homepage title/description and Google treats them as duplicates
+         ("Crawled - currently not indexed" / "Alternate page with proper
+         canonical tag"). App/auth routes get no canonical (they are
+         robots-disallowed and not intended for indexing).
+         NOTE: /articles and /articles/{slug} are server-rendered by the API
+         (see docker/nginx/default.conf), so Googlebot never sees this shell
+         for them — they are only listed here so client-side navigation keeps
+         a correct canonical. -->
     <script>
       (function () {
         var ORIGIN = 'https://jobcarver.co';
-        var PUBLIC = ['/', '/privacy', '/terms', '/data-deletion', '/articles'];
+        // Public, indexable routes → their own title + meta description.
+        // Keep descriptions under ~160 chars. The homepage ('/') keeps the
+        // static tags already in the document.
+        var ROUTES = {
+          '/privacy': {
+            title: 'Privacy Policy — Carver',
+            desc: 'How Carver collects, uses, and protects superyacht crew data, plus your data rights and how to contact us.'
+          },
+          '/terms': {
+            title: 'Terms of Service — Carver',
+            desc: 'The terms governing your use of Carver — superyacht crew job matching and WhatsApp applications.'
+          },
+          '/data-deletion': {
+            title: 'Data Deletion — Carver',
+            desc: 'Request deletion of your Carver account and personal data. Steps and contact details for superyacht crew.'
+          },
+          '/pricing': {
+            title: 'Pricing & Tokens — Carver | Superyacht crew job matching',
+            desc: 'Carver pricing and token packs for superyacht crew. Pay only for the matches and applications you use — no subscription.'
+          },
+          '/refund-policy': {
+            title: 'Refund Policy — Carver',
+            desc: "Carver's refund policy for token purchases — when refunds apply and how superyacht crew can request one."
+          }
+        };
         var p = window.location.pathname;
         var el = document.getElementById('canonical-link');
-        if (!el) return;
-        if (PUBLIC.indexOf(p) !== -1 || p.match(/^\/articles\/[a-z0-9]+(?:-[a-z0-9]+)*$/)) {
-          el.href = ORIGIN + p;
-        } else {
-          el.parentNode.removeChild(el);
+        var isArticle = /^\/articles(\/[a-z0-9]+(?:-[a-z0-9]+)*)?$/.test(p);
+        var isPublic = p === '/' || isArticle || ROUTES.hasOwnProperty(p);
+
+        if (el) {
+          if (isPublic) el.href = ORIGIN + p;
+          else el.parentNode.removeChild(el);
+        }
+
+        function setMeta(selector, attr, value) {
+          var m = document.querySelector(selector);
+          if (m) m.setAttribute(attr, value);
+        }
+
+        var r = ROUTES[p];
+        if (r) {
+          document.title = r.title;
+          setMeta('meta[name="description"]', 'content', r.desc);
+          setMeta('meta[property="og:title"]', 'content', r.title);
+          setMeta('meta[property="og:description"]', 'content', r.desc);
+          setMeta('meta[property="og:url"]', 'content', ORIGIN + p);
+          setMeta('meta[name="twitter:title"]', 'content', r.title);
+          setMeta('meta[name="twitter:description"]', 'content', r.desc);
         }
       })();
     </script>

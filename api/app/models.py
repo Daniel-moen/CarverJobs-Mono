@@ -1,10 +1,14 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func
 
 from app.database import Base
 
 
 class Job(Base):
   __tablename__ = "jobs"
+  # Composite index speeds the active-listing query (filter status + order by
+  # created_at) AND the retention scan (filter created_at within statuses).
+  # Single-column indexes on `status`/`created_at` below are kept intentionally.
+  __table_args__ = (Index("ix_jobs_status_created_at", "status", "created_at"),)
 
   id = Column(Integer, primary_key=True, index=True)
   title = Column(String(160), nullable=False)

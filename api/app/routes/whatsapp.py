@@ -42,7 +42,20 @@ from app.services.feedback_settings import feedback_is_eligible
 log = get_logger("carver.whatsapp")
 
 router = APIRouter(tags=["whatsapp"])
-_http = httpx.AsyncClient(timeout=20.0)
+
+# Shared async client for all Meta Graph API calls. Connection pooling + keep-alive
+# lets repeated outbound sends reuse an established TCP/TLS connection instead of
+# paying a fresh handshake every message — the biggest latency win for the hot path.
+# Split timeouts: a short connect timeout fails fast on a dead network, while a
+# longer read/write budget keeps overall behaviour ~equivalent to the old flat 20s
+# (no call hangs longer than before; per-call `timeout=` overrides still apply).
+_HTTP_TIMEOUT = httpx.Timeout(20.0, connect=5.0)
+_HTTP_LIMITS = httpx.Limits(
+    max_connections=20,
+    max_keepalive_connections=10,
+    keepalive_expiry=30.0,
+)
+_http = httpx.AsyncClient(timeout=_HTTP_TIMEOUT, limits=_HTTP_LIMITS)
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
 # Keep the last 500 processed Meta message IDs in memory.
@@ -281,7 +294,8 @@ def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
 
 async def _send_whatsapp(to: str, text: str) -> None:
     """Send a text message via Meta Cloud API."""
-    url = _messages_url()
+    phone_id = _active_wa_phone_number_id()
+    url = f"{_GRAPH_URL}/{phone_id}/messages"
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -289,7 +303,7 @@ async def _send_whatsapp(to: str, text: str) -> None:
         "text": {"body": text},
     }
     headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
-    audit_payload: dict = {"graph_phone_number_id": _active_wa_phone_number_id()}
+    audit_payload: dict = {"graph_phone_number_id": phone_id}
     meta_message_id = None
     try:
         resp = await _http.post(url, json=payload, headers=headers)
@@ -309,17 +323,19 @@ async def _send_whatsapp(to: str, text: str) -> None:
             "text",
             text,
             meta_message_id=meta_message_id,
-            graph_phone_number_id=_active_wa_phone_number_id(),
+            graph_phone_number_id=phone_id,
             payload=audit_payload,
         )
 
 
 async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, str]]) -> None:
     """Send an interactive quick-reply button message (up to 3 buttons)."""
-    url = _messages_url()
+    phone_id = _active_wa_phone_number_id()
+    url = f"{_GRAPH_URL}/{phone_id}/messages"
+    top_buttons = buttons[:3]
     btn_list = [
         {"type": "reply", "reply": {"id": bid, "title": title[:20]}}
-        for bid, title in buttons[:3]
+        for bid, title in top_buttons
     ]
     payload = {
         "messaging_product": "whatsapp",
@@ -333,8 +349,8 @@ async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, st
     }
     headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
     audit_payload: dict = {
-        "graph_phone_number_id": _active_wa_phone_number_id(),
-        "buttons": [{"id": bid, "title": title[:20]} for bid, title in buttons[:3]],
+        "graph_phone_number_id": phone_id,
+        "buttons": [{"id": bid, "title": title[:20]} for bid, title in top_buttons],
     }
     meta_message_id = None
     try:
@@ -353,16 +369,24 @@ async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, st
             "interactive_button",
             body,
             meta_message_id=meta_message_id,
-            graph_phone_number_id=_active_wa_phone_number_id(),
+            graph_phone_number_id=phone_id,
             payload=audit_payload,
         )
 
 
-async def _send_job_review_wait(to: str) -> None:
-    """Interim message while AI reviews a job submission (text or image)."""
+# Instant acks sent the moment a job submission lands, before the slow
+# download/AI-extraction work, so the user isn't left staring at silence.
+_JOB_REVIEW_WAIT_ACKS = {
+    "image": "📸 Got it — reading your screenshot now… this can take a moment.",
+    "text": "📝 Reading that job post… this can take a moment.",
+}
+
+
+async def _send_job_review_wait(to: str, kind: str = "text") -> None:
+    """Instant ack while AI reviews a job submission, tailored to the input type."""
     await _send_whatsapp(
         to,
-        "⏳ Reading your posting… this can take a moment.",
+        _JOB_REVIEW_WAIT_ACKS.get(kind, _JOB_REVIEW_WAIT_ACKS["text"]),
     )
 
 
@@ -1727,7 +1751,7 @@ async def _process_whatsapp_message(
                 if not settings.OPENAI_API_KEY:
                     await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
                 else:
-                    await _send_job_review_wait(phone_number)
+                    await _send_job_review_wait(phone_number, "text")
                     await _process_job_text_submission(phone_number, user_text, db)
                 await _send_whatsapp_buttons(
                     phone_number,
@@ -1788,7 +1812,7 @@ async def _process_media_message(
                 if not settings.OPENAI_API_KEY:
                     await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
                 else:
-                    await _send_job_review_wait(phone_number)
+                    await _send_job_review_wait(phone_number, "image")
                     await _process_job_image_submission(phone_number, media_id, db)
                 await _send_whatsapp_buttons(
                     phone_number,

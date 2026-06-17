@@ -6,8 +6,22 @@ from app import models, schemas
 from app.security import hash_password
 
 
-def list_jobs(db: Session):
-  jobs = db.query(models.Job).order_by(models.Job.created_at.desc()).all()
+# Statuses that mean a job is no longer a live, client-facing listing. Worker 2's
+# retention system soft-expires stale jobs by setting status == "expired"; these
+# are excluded from active listings by default.
+INACTIVE_JOB_STATUSES = ("expired", "closed", "filled", "archived")
+
+# Default/maximum number of rows fetched from the (ever-growing) jobs table so a
+# single listing call never scans or materialises the whole table.
+DEFAULT_JOB_LIMIT = 500
+MAX_JOB_LIMIT = 1000
+
+
+def list_jobs(db: Session, *, limit: int = DEFAULT_JOB_LIMIT, include_inactive: bool = False):
+  query = db.query(models.Job)
+  if not include_inactive:
+    query = query.filter(models.Job.status.notin_(INACTIVE_JOB_STATUSES))
+  jobs = query.order_by(models.Job.created_at.desc()).limit(limit).all()
   seen: set[tuple[str, str]] = set()
   deduped: list[models.Job] = []
 

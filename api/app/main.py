@@ -23,6 +23,7 @@ from app.health_checker import health_check_loop
 from app.logger import bind_request_id, get_logger, reset_context, setup_logging
 from app.routes import admin, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
 from app.scheduler import scraper_loop
+from app.services.job_retention import retention_loop
 from app.seed_users import ensure_default_user
 from app.settings import settings, validate_database_not_configured_for_postgres, validate_production_settings
 
@@ -81,6 +82,8 @@ async def lifespan(app: FastAPI):
         background_tasks.append(asyncio.create_task(metrics_loop()))
         log.info("Starting APIFY scraper scheduler (interval=6h)")
         background_tasks.append(asyncio.create_task(scraper_loop()))
+        log.info("Starting job retention loop (interval=%dh)", settings.JOB_RETENTION_INTERVAL_HOURS)
+        background_tasks.append(asyncio.create_task(retention_loop()))
 
     init_task = asyncio.create_task(_run_init_and_workers())
     yield

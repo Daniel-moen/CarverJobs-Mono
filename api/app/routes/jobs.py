@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app import crud, schemas
@@ -12,11 +12,16 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 @router.get("", response_model=list[schemas.JobRead])
 def list_jobs(
+    limit: int = Query(default=crud.DEFAULT_JOB_LIMIT, ge=1, le=crud.MAX_JOB_LIMIT),
+    include_inactive: bool = Query(default=False),
     _session: dict = Depends(require_session),
     db: Session = Depends(get_db),
 ):
-    jobs = crud.list_jobs(db)
-    log.info("Jobs listed | count=%d", len(jobs))
+    # Normal users always get the active-only, capped listing. Only admins may
+    # opt in to seeing inactive (expired/closed/filled/archived) jobs.
+    allow_inactive = include_inactive and _session.get("role") == "admin"
+    jobs = crud.list_jobs(db, limit=limit, include_inactive=allow_inactive)
+    log.info("Jobs listed | count=%d | include_inactive=%s", len(jobs), allow_inactive)
     return jobs
 
 

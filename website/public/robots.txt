@@ -23,8 +23,10 @@ Disallow: /wa/
 Disallow: /signup/agency
 Allow: /
 Allow: /articles
+Allow: /pricing
 Allow: /privacy
 Allow: /terms
+Allow: /refund-policy
 Allow: /data-deletion
 
 # ---------------------------------------------------------------------------
