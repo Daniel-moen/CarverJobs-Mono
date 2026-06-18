@@ -21,7 +21,7 @@ from app import metrics, models
 from app.error_codes import CRV_1003, CRV_1004, CRV_1006, STATUS_CODE_TO_CRV
 from app.health_checker import health_check_loop
 from app.logger import bind_request_id, get_logger, reset_context, setup_logging
-from app.routes import admin, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
+from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
 from app.scheduler import scraper_loop
 from app.services.job_retention import retention_loop
 from app.seed_users import ensure_default_user
@@ -360,6 +360,8 @@ app.include_router(matching.router)
 app.include_router(interview.router)
 app.include_router(admin.router)
 app.include_router(admin.public_router)
+app.include_router(admin_dashboard.router)
+app.include_router(admin_dashboard.public_router)
 app.include_router(documents.router)
 app.include_router(profile.router)
 app.include_router(profile.public_router)

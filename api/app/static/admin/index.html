@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Carver Admin</title>
+  <link rel="stylesheet" href="/admin/dashboard.css">
+</head>
+<body>
+  <!-- Loading screen (initial probe) -->
+  <div id="loading-screen" class="screen">
+    <div class="spinner"></div>
+    <p class="muted">Loading…</p>
+  </div>
+
+  <!-- Login screen -->
+  <div id="login-screen" class="screen hidden">
+    <form id="login-form" class="login-card" autocomplete="off">
+      <h1 class="login-title">Carver Admin</h1>
+      <p class="muted">Sign in to view the dashboard.</p>
+      <label class="field">
+        <span>Username</span>
+        <input id="login-username" type="text" name="username" autocomplete="username" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="login-password" type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button id="login-submit" type="submit" class="btn btn-primary">Sign in</button>
+      <p id="login-error" class="login-error hidden"></p>
+    </form>
+  </div>
+
+  <!-- Dashboard screen -->
+  <div id="dashboard-screen" class="screen hidden">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 class="brand">Carver Admin</h1>
+        <span id="last-updated" class="muted last-updated">—</span>
+      </div>
+      <div class="topbar-right">
+        <div class="window-selector" id="window-selector" role="group" aria-label="Time window">
+          <button type="button" class="btn btn-chip" data-days="7">7d</button>
+          <button type="button" class="btn btn-chip" data-days="30">30d</button>
+          <button type="button" class="btn btn-chip" data-days="90">90d</button>
+        </div>
+        <button id="refresh-btn" type="button" class="btn">Refresh</button>
+        <button id="logout-btn" type="button" class="btn btn-ghost">Log out</button>
+      </div>
+    </header>
+
+    <main class="content">
+      <!-- KPI cards -->
+      <section class="kpi-grid" id="kpi-grid"></section>
+
+      <!-- Signups -->
+      <section class="panel">
+        <h2 class="panel-title">Signups <span id="signups-window" class="muted"></span></h2>
+        <div class="panel-body">
+          <div class="chart-wrap">
+            <div class="chart-legend">
+              <span class="legend-item"><span class="swatch swatch-web"></span>Website</span>
+              <span class="legend-item"><span class="swatch swatch-wa"></span>WhatsApp</span>
+            </div>
+            <div id="signups-chart" class="bar-chart"></div>
+          </div>
+          <div class="sub-stats" id="signups-substats"></div>
+        </div>
+        <h3 class="sub-title">Recent signups</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Name</th><th>Identifier</th><th>Role</th><th>Source</th><th>Created</th></tr>
+            </thead>
+            <tbody id="signups-recent"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Revenue -->
+      <section class="panel">
+        <h2 class="panel-title">Revenue</h2>
+        <div class="sub-stats" id="revenue-substats"></div>
+        <h3 class="sub-title">Recent payments</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>User</th><th>Amount</th><th>Status</th><th>Created</th></tr>
+            </thead>
+            <tbody id="revenue-recent"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="panel-row">
+        <!-- Tokens -->
+        <section class="panel">
+          <h2 class="panel-title">Tokens</h2>
+          <div class="sub-stats" id="tokens-substats"></div>
+        </section>
+
+        <!-- WhatsApp messaging -->
+        <section class="panel">
+          <h2 class="panel-title">WhatsApp messaging</h2>
+          <div class="sub-stats" id="messages-substats"></div>
+        </section>
+
+        <!-- Engagement -->
+        <section class="panel">
+          <h2 class="panel-title">Engagement</h2>
+          <div class="sub-stats" id="engagement-substats"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="/admin/dashboard.js"></script>
+</body>
+</html>
