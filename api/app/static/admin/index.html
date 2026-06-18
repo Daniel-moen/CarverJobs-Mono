@@ -9,16 +9,17 @@
 </head>
 <body>
   <!-- Loading screen (initial probe) -->
-  <div id="loading-screen" class="screen">
+  <div id="loading-screen" class="screen screen-center">
     <div class="spinner"></div>
-    <p class="muted">Loading…</p>
+    <p class="muted">Loading dashboard…</p>
   </div>
 
   <!-- Login screen -->
-  <div id="login-screen" class="screen hidden">
+  <div id="login-screen" class="screen screen-center hidden">
     <form id="login-form" class="login-card" autocomplete="off">
+      <div class="login-logo">C</div>
       <h1 class="login-title">Carver Admin</h1>
-      <p class="muted">Sign in to view the dashboard.</p>
+      <p class="muted login-sub">Sign in to continue.</p>
       <label class="field">
         <span>Username</span>
         <input id="login-username" type="text" name="username" autocomplete="username" required>
@@ -27,91 +28,128 @@
         <span>Password</span>
         <input id="login-password" type="password" name="password" autocomplete="current-password" required>
       </label>
-      <button id="login-submit" type="submit" class="btn btn-primary">Sign in</button>
+      <button id="login-submit" type="submit" class="btn btn-primary btn-block">Sign in</button>
       <p id="login-error" class="login-error hidden"></p>
     </form>
   </div>
 
-  <!-- Dashboard screen -->
-  <div id="dashboard-screen" class="screen hidden">
-    <header class="topbar">
-      <div class="topbar-left">
-        <h1 class="brand">Carver Admin</h1>
-        <span id="last-updated" class="muted last-updated">—</span>
-      </div>
-      <div class="topbar-right">
-        <div class="window-selector" id="window-selector" role="group" aria-label="Time window">
-          <button type="button" class="btn btn-chip" data-days="7">7d</button>
-          <button type="button" class="btn btn-chip" data-days="30">30d</button>
-          <button type="button" class="btn btn-chip" data-days="90">90d</button>
+  <!-- Dashboard shell -->
+  <div id="dashboard-screen" class="app hidden">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-mark">C</div>
+        <div class="brand-text">
+          <strong>Carver</strong>
+          <span>Admin</span>
         </div>
-        <button id="refresh-btn" type="button" class="btn">Refresh</button>
-        <button id="logout-btn" type="button" class="btn btn-ghost">Log out</button>
       </div>
-    </header>
+      <nav class="sidebar-nav" id="sidebar-nav">
+        <a href="#section-overview" class="nav-link active" data-target="section-overview">Overview</a>
+        <a href="#section-signups" class="nav-link" data-target="section-signups">Signups</a>
+        <a href="#section-revenue" class="nav-link" data-target="section-revenue">Revenue</a>
+        <a href="#section-tokens" class="nav-link" data-target="section-tokens">Tokens</a>
+        <a href="#section-messaging" class="nav-link" data-target="section-messaging">Messaging</a>
+        <a href="#section-engagement" class="nav-link" data-target="section-engagement">Engagement</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="last-updated" class="muted tiny">—</div>
+        <button id="logout-btn" type="button" class="btn btn-ghost btn-block">Log out</button>
+      </div>
+    </aside>
 
-    <main class="content">
-      <!-- KPI cards -->
-      <section class="kpi-grid" id="kpi-grid"></section>
+    <!-- Main -->
+    <main class="main">
+      <header class="main-head">
+        <div>
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-sub" id="page-sub">Live metrics across signups, revenue and engagement.</p>
+        </div>
+        <div class="head-actions">
+          <div class="segmented" id="window-selector" role="group" aria-label="Time window">
+            <button type="button" data-days="7">7d</button>
+            <button type="button" data-days="30">30d</button>
+            <button type="button" data-days="90">90d</button>
+          </div>
+          <button id="refresh-btn" type="button" class="btn btn-icon" title="Refresh">
+            <span class="refresh-glyph">⟳</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Overview -->
+      <section id="section-overview" class="block">
+        <div class="kpi-grid" id="kpi-grid"></div>
+        <div class="card chart-card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Signups over time</h2>
+              <p class="card-sub" id="chart-sub">—</p>
+            </div>
+            <div class="legend">
+              <span class="legend-item"><i class="dot dot-web"></i>Website</span>
+              <span class="legend-item"><i class="dot dot-wa"></i>WhatsApp</span>
+            </div>
+          </div>
+          <div class="chart-host" id="signups-chart"></div>
+        </div>
+      </section>
 
       <!-- Signups -->
-      <section class="panel">
-        <h2 class="panel-title">Signups <span id="signups-window" class="muted"></span></h2>
-        <div class="panel-body">
-          <div class="chart-wrap">
-            <div class="chart-legend">
-              <span class="legend-item"><span class="swatch swatch-web"></span>Website</span>
-              <span class="legend-item"><span class="swatch swatch-wa"></span>WhatsApp</span>
-            </div>
-            <div id="signups-chart" class="bar-chart"></div>
-          </div>
-          <div class="sub-stats" id="signups-substats"></div>
+      <section id="section-signups" class="block">
+        <h2 class="block-title">Signups</h2>
+        <div class="card">
+          <div class="tile-grid" id="signups-tiles"></div>
         </div>
-        <h3 class="sub-title">Recent signups</h3>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>Name</th><th>Identifier</th><th>Role</th><th>Source</th><th>Created</th></tr>
-            </thead>
-            <tbody id="signups-recent"></tbody>
-          </table>
+        <div class="card">
+          <div class="card-head"><h3 class="card-title">Recent signups</h3></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Name</th><th>Identifier</th><th>Role</th><th>Source</th><th>Created</th></tr>
+              </thead>
+              <tbody id="signups-recent"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
       <!-- Revenue -->
-      <section class="panel">
-        <h2 class="panel-title">Revenue</h2>
-        <div class="sub-stats" id="revenue-substats"></div>
-        <h3 class="sub-title">Recent payments</h3>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>User</th><th>Amount</th><th>Status</th><th>Created</th></tr>
-            </thead>
-            <tbody id="revenue-recent"></tbody>
-          </table>
+      <section id="section-revenue" class="block">
+        <h2 class="block-title">Revenue</h2>
+        <div class="card">
+          <div class="tile-grid" id="revenue-tiles"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3 class="card-title">Recent payments</h3></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>User</th><th>Amount</th><th>Status</th><th>Created</th></tr>
+              </thead>
+              <tbody id="revenue-recent"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
-      <div class="panel-row">
-        <!-- Tokens -->
-        <section class="panel">
-          <h2 class="panel-title">Tokens</h2>
-          <div class="sub-stats" id="tokens-substats"></div>
-        </section>
+      <!-- Tokens -->
+      <section id="section-tokens" class="block">
+        <h2 class="block-title">Tokens</h2>
+        <div class="card"><div class="tile-grid" id="tokens-tiles"></div></div>
+      </section>
 
-        <!-- WhatsApp messaging -->
-        <section class="panel">
-          <h2 class="panel-title">WhatsApp messaging</h2>
-          <div class="sub-stats" id="messages-substats"></div>
-        </section>
+      <!-- Messaging -->
+      <section id="section-messaging" class="block">
+        <h2 class="block-title">WhatsApp messaging</h2>
+        <div class="card"><div class="tile-grid" id="messaging-tiles"></div></div>
+      </section>
 
-        <!-- Engagement -->
-        <section class="panel">
-          <h2 class="panel-title">Engagement</h2>
-          <div class="sub-stats" id="engagement-substats"></div>
-        </section>
-      </div>
+      <!-- Engagement -->
+      <section id="section-engagement" class="block">
+        <h2 class="block-title">Engagement</h2>
+        <div class="card"><div class="tile-grid" id="engagement-tiles"></div></div>
+      </section>
     </main>
   </div>
 
