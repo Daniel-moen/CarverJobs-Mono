@@ -1,0 +1,26 @@
+# Local env (never commit secrets)
+.env
+
+# SQLite database + WAL/SHM sidecars
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Uploaded files
+data/uploads/
+
+# Build output
+/server
+/out/
+*.exe
+
+# Go test/coverage
+*.test
+*.out
+coverage.txt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
