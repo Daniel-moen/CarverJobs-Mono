@@ -72,6 +72,23 @@ class Settings:
       "/health,/metrics,/admin/dashboard/static",
   )
 
+  # Go canary routing — serve a slice of live traffic from the Go port
+  # (jobcarver-go) running alongside this API. OFF by default; no-op until
+  # GO_UPSTREAM_URL is set. See jobcarver-go/SHADOW.md (Canary section).
+  GO_ROUTING_ENABLED: bool = os.getenv("GO_ROUTING_ENABLED", "false").lower() == "true"
+  # Base URL of the Go service (e.g. Railway private net: http://jobcarver-go.railway.internal:3000).
+  GO_UPSTREAM_URL: str = os.getenv("GO_UPSTREAM_URL", "").strip()
+  # Percentage of (Go-implemented) requests from non-flagged users to serve from Go.
+  GO_ROUTING_PERCENT: int = int(os.getenv("GO_ROUTING_PERCENT", "20"))
+  GO_ROUTING_TIMEOUT_SECONDS: float = float(os.getenv("GO_ROUTING_TIMEOUT_SECONDS", "15"))
+  # Route prefixes whose feature is NOT yet implemented in Go — always served by
+  # Python (see jobcarver-go/TODO.md). Edit as Go features land.
+  GO_UNIMPLEMENTED_PREFIXES: list[str] = _csv_env(
+      "GO_UNIMPLEMENTED_PREFIXES",
+      "/auth/google,/jobs/submit/text,/jobs/submit/image,/scraper,/interview,"
+      "/crew-match,/matching,/documents,/subscription,/telnyx,/webhooks,/admin/jobs/review",
+  )
+
   ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
   ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-this-password")
   GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()

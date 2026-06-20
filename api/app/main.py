@@ -26,6 +26,7 @@ from app.scheduler import scraper_loop
 from app.services.job_retention import retention_loop
 from app.seed_users import ensure_default_user
 from app.shadow_capture import install_shadow_capture
+from app.go_routing import install_go_canary, load_flagged_users
 from app.settings import settings, validate_database_not_configured_for_postgres, validate_production_settings
 
 setup_logging()
@@ -77,6 +78,7 @@ async def lifespan(app: FastAPI):
             os._exit(1)
         app.state.db_ready = True
         log.info("Database ready — accepting full traffic")
+        load_flagged_users()  # populate the Go-canary per-user registry
         log.info("Starting background health checker (interval=5m)")
         background_tasks.append(asyncio.create_task(health_check_loop()))
         log.info("Starting background metrics recorder (interval=1m)")
@@ -355,6 +357,11 @@ app.add_middleware(
 # Shadow-traffic capture (off unless SHADOW_CAPTURE_ENABLED). Installed last so it
 # is the outermost layer and records the final client-facing request/response.
 install_shadow_capture(app)
+
+# Go canary routing (off unless GO_ROUTING_ENABLED). Installed after capture so it
+# is the outermost layer: requests routed to Go skip the Python stack entirely
+# (and are not captured), while pass-through requests proceed normally.
+install_go_canary(app)
 
 app.include_router(health.router)
 app.include_router(auth.router)

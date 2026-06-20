@@ -87,6 +87,9 @@ class User(Base):
   early_bird = Column(Boolean, nullable=False, default=False)
   # Set when role == "agency": the agency/recruitment-firm name shown on jobs they post.
   agency_name = Column(String(160), nullable=True, index=True)
+  # Canary flag: when true, this user's requests are served by the Go port
+  # (jobcarver-go) for every Go-implemented route. Toggled via /admin/users/{id}/routing.
+  route_to_go = Column(Boolean, nullable=False, default=False)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),

@@ -1,4 +1,89 @@
-# Shadow traffic — validate the Go port against real requests
+# Validating the Go port against real traffic
+
+Two complementary mechanisms, both driven from the **Python API** which runs
+alongside the Go server:
+
+- **[Canary routing](#canary--serve-live-traffic-from-go)** — serve a slice of
+  *live* traffic from Go (users get Go's response). Best for real rollout.
+- **[Shadow capture + replay](#shadow-capture--replay)** — record real requests
+  and replay them at Go offline, diffing responses. Best for batch regression.
+
+---
+
+# Canary — serve live traffic from Go
+
+`api/app/go_routing.py` is an ASGI middleware in the Python API that forwards a
+slice of requests to the Go service and returns **Go's** response. It is
+capability-aware and fail-safe.
+
+```
+                         ┌─ unimplemented-in-Go route? ──────────────▶ Python (always)
+  request ─▶ Python API ─┤ flagged user (users.route_to_go)? ────────▶ Go
+                         ├─ else ~GO_ROUTING_PERCENT% (stable/user) ──▶ Go
+                         └─ else ───────────────────────────────────▶ Python
+                                         │
+                            Go errors / times out / 5xx ─────────────▶ Python (fallback)
+```
+
+* **Unimplemented routes always stay on Python.** `GO_UNIMPLEMENTED_PREFIXES`
+  lists the paths whose feature is still stubbed in Go (AI, Yoco checkout,
+  scrapers, Google login, AI job-submit, WhatsApp/Telnyx — see `TODO.md`). Edit
+  it as Go features land.
+* **Flagged users → Go** for every Go-implemented route. **20%** of everyone
+  else → Go (stable per user, so a user doesn't flip backends mid-session).
+* **Auth just works:** Python `itsdangerous` cookies aren't Go-compatible, so the
+  proxy mints a *native Go* session cookie + CSRF token from the principal Python
+  authenticated. Go-served responses carry `X-Carver-Backend: go`.
+* **Fail-safe:** if Go errors, times out, or returns 5xx, the request falls back
+  to Python transparently — users are never impacted.
+
+## Configure
+
+```bash
+GO_ROUTING_ENABLED=true
+GO_UPSTREAM_URL=http://jobcarver-go.railway.internal:3000   # the Go service (private net)
+GO_ROUTING_PERCENT=20
+GO_UNIMPLEMENTED_PREFIXES=/auth/google,/jobs/submit/text,/jobs/submit/image,/scraper,/interview,/crew-match,/matching,/documents,/subscription,/telnyx,/webhooks,/admin/jobs/review
+```
+
+The Go service must run with the **same `SECRET_KEY`** (so minted sessions
+validate).
+
+## Flag a user onto Go
+
+```bash
+# Pin a user to Go for all Go-implemented routes:
+curl -X PATCH https://<api>/admin/users/123/routing \
+  -H 'X-CSRF-Token: <token>' -H 'Content-Type: application/json' \
+  -b 'carver_session=<admin session>' \
+  -d '{"route_to_go": true}'
+
+# List flagged users:
+curl https://<api>/admin/users/routing -b 'carver_session=<admin session>'
+```
+
+The flag is persisted (`users.route_to_go`) and held in an in-memory registry
+loaded at startup.
+
+## ⚠️ Data divergence
+
+The Go server uses its **own** database. A request Go serves writes to *Go's* DB,
+not Python's. For read-only routes this is harmless; for writes it means a
+flagged user's data can land only in Go's DB. Options:
+1. **Point Go at the same SQLite file** (shared volume, WAL) so there's one source
+   of truth — simplest correctness, watch for write-lock contention under load.
+2. Use **dedicated test accounts** as the flagged users and accept the split until
+   full cutover.
+
+Start with the 20% sample on read-heavy routes and flagged test accounts before
+flagging real users.
+
+---
+
+# Shadow capture + replay
+
+Record real requests to a JSONL corpus and replay them at Go offline — no user
+impact, and you can replay the same corpus repeatedly as you harden Go.
 
 A way to **duplicate production traffic, replay it through the Go server, and log
 every divergence** before `jobcarver-go` replaces the Python API. It has two

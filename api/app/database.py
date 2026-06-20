@@ -77,6 +77,7 @@ def run_migrations() -> None:
     _add("users", "gender", "VARCHAR(20)", users_cols)
     _add("users", "early_bird", "BOOLEAN NOT NULL DEFAULT 0", users_cols)
     _add("users", "agency_name", "VARCHAR(160)", users_cols)
+    _add("users", "route_to_go", "BOOLEAN NOT NULL DEFAULT 0", users_cols)
 
     credit_cols = _existing("credit_accounts")
     _add("credit_accounts", "job_post_tokens_earned", "INTEGER NOT NULL DEFAULT 0", credit_cols)

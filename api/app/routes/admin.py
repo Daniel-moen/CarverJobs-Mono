@@ -8,7 +8,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import analytics, flags, metrics, telnyx_inbound_buffer
+from app import analytics, flags, go_routing, metrics, telnyx_inbound_buffer
 from app.database import get_db
 from app.error_codes import CRV_1005, CRV_5001, CRV_5002, CRV_5003, CRV_5004
 from app.logger import get_logger
@@ -153,6 +153,37 @@ def update_flag(request: Request, payload: FlagUpdate):
             headers={"X-Error-Code": CRV_5002},
         )
     return {"ok": True, "flags": flags.get_all()}
+
+
+# ── Go canary routing (per-user) ──────────────────────────────────────────────
+
+@router.get("/users/routing")
+def list_user_routing(db: Session = Depends(get_db)):
+    """List users pinned to the Go port (route_to_go = true)."""
+    rows = db.query(User.id, User.email).filter(User.route_to_go.is_(True)).all()
+    return {"ok": True, "flagged": [{"user_id": r[0], "email": r[1]} for r in rows]}
+
+
+class UserRoutingUpdate(APIModel):
+    route_to_go: bool
+
+
+@router.patch("/users/{user_id}/routing")
+@_limiter.limit("30/minute")
+def set_user_routing(request: Request, user_id: int, payload: UserRoutingUpdate, db: Session = Depends(get_db)):
+    """Flag/unflag a user so their traffic is served by the Go port (jobcarver-go)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+            headers={"X-Error-Code": CRV_5002},
+        )
+    user.route_to_go = payload.route_to_go
+    db.commit()
+    go_routing.flagged.set(user_id, payload.route_to_go)
+    log.warning("user canary routing changed | user_id=%s | route_to_go=%s", user_id, payload.route_to_go)
+    return {"ok": True, "user_id": user_id, "route_to_go": payload.route_to_go}
 
 
 # ── Feedback campaign settings ────────────────────────────────────────────────
