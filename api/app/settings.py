@@ -53,6 +53,25 @@ class Settings:
       "true" if os.getenv("APP_ENV") == "production" else "false",
   ).lower() == "true"
 
+  # Shadow traffic capture — records real requests to a JSONL corpus so the Go
+  # port (jobcarver-go) can be replayed against them and diffed before cutover.
+  # OFF by default; when off the middleware is not even installed (zero overhead).
+  # See jobcarver-go/SHADOW.md.
+  SHADOW_CAPTURE_ENABLED: bool = os.getenv("SHADOW_CAPTURE_ENABLED", "false").lower() == "true"
+  SHADOW_CAPTURE_FILE: str = os.getenv("SHADOW_CAPTURE_FILE", "data/shadow_capture.jsonl")
+  # Fraction of eligible requests to record (0.0–1.0). Lower it in high traffic.
+  SHADOW_CAPTURE_SAMPLE_RATE: float = float(os.getenv("SHADOW_CAPTURE_SAMPLE_RATE", "1.0"))
+  # Per-request body cap. Bodies larger than this are truncated (flagged in the record).
+  SHADOW_CAPTURE_MAX_BODY_BYTES: int = int(os.getenv("SHADOW_CAPTURE_MAX_BODY_BYTES", str(64 * 1024)))
+  # Also store Python's response body (heavier; off by default — structural diff
+  # only needs status + content-type).
+  SHADOW_CAPTURE_RESPONSE_BODY: bool = os.getenv("SHADOW_CAPTURE_RESPONSE_BODY", "false").lower() == "true"
+  # Path prefixes never captured (health checks, static assets, capture noise).
+  SHADOW_CAPTURE_EXCLUDE_PREFIXES: list[str] = _csv_env(
+      "SHADOW_CAPTURE_EXCLUDE_PREFIXES",
+      "/health,/metrics,/admin/dashboard/static",
+  )
+
   ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
   ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-this-password")
   GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()

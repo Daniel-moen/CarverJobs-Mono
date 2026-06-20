@@ -25,6 +25,7 @@ from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew
 from app.scheduler import scraper_loop
 from app.services.job_retention import retention_loop
 from app.seed_users import ensure_default_user
+from app.shadow_capture import install_shadow_capture
 from app.settings import settings, validate_database_not_configured_for_postgres, validate_production_settings
 
 setup_logging()
@@ -350,6 +351,10 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-CSRF-Token"],
 )
+
+# Shadow-traffic capture (off unless SHADOW_CAPTURE_ENABLED). Installed last so it
+# is the outermost layer and records the final client-facing request/response.
+install_shadow_capture(app)
 
 app.include_router(health.router)
 app.include_router(auth.router)
