@@ -8,6 +8,10 @@ external integrations that are currently stubbed.
 > **Out of scope for now (intentionally skipped):** Telnyx SMS, WhatsApp bot.
 > Those handlers exist and persist data but their outbound/verify paths stay stubbed for now.
 
+> **Validate before cutover:** [`SHADOW.md`](SHADOW.md) describes how to capture real
+> production traffic and replay it through the Go server (`cmd/shadowreplay`), logging
+> every routing gap / 5xx / divergence. Use it to verify each item below as it lands.
+
 Legend: 🔴 blocks production · 🟠 important · 🟡 nice-to-have
 
 ---
