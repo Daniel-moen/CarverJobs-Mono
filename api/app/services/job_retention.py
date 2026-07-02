@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.logger import get_logger
-from app.models import Job
+from app.models import Job, MatchSession
 from app.settings import settings
 
 log = get_logger("carver.retention")
@@ -72,6 +72,30 @@ def purge_stale_jobs(db: Session) -> dict[str, int]:
     return {"expired": expired, "deleted": deleted}
 
 
+# Sessions left in "running" leak when the process restarts (or a background
+# task dies) mid-run — they then look permanently in-progress to the UI and
+# pollute funnel stats. Anything running this long has definitely crashed.
+_STUCK_SESSION_TIMEOUT_HOURS = 2
+
+
+def fail_stuck_match_sessions(db: Session) -> int:
+    """Global janitor: flip long-abandoned 'running' match sessions to 'failed'.
+
+    Complements crew_match's per-user cleanup, which only runs when that user
+    revisits the site — WhatsApp-only users never trigger it.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_STUCK_SESSION_TIMEOUT_HOURS)
+    stuck = (
+        db.query(MatchSession)
+        .filter(MatchSession.status == "running", MatchSession.created_at < cutoff)
+        .update({MatchSession.status: "failed"}, synchronize_session=False)
+    )
+    db.commit()
+    if stuck:
+        log.warning("Failed %d stuck match session(s) older than %dh", stuck, _STUCK_SESSION_TIMEOUT_HOURS)
+    return stuck
+
+
 # ── Background loop ──────────────────────────────────────────────────────────
 
 async def retention_loop() -> None:
@@ -94,6 +118,14 @@ async def retention_loop() -> None:
             purge_stale_jobs(db)
         except Exception as exc:
             log.error("Job retention run failed | error=%s", exc)
+        finally:
+            db.close()
+
+        db = SessionLocal()
+        try:
+            fail_stuck_match_sessions(db)
+        except Exception as exc:
+            log.error("Stuck match-session janitor failed | error=%s", exc)
         finally:
             db.close()
 

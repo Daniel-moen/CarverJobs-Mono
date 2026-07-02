@@ -23,6 +23,7 @@ from app.health_checker import health_check_loop
 from app.logger import bind_request_id, get_logger, reset_context, setup_logging
 from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
 from app.scheduler import scraper_loop
+from app.services.job_alerts import job_alert_loop
 from app.services.job_retention import retention_loop
 from app.seed_users import ensure_default_user
 from app.shadow_capture import install_shadow_capture
@@ -87,6 +88,12 @@ async def lifespan(app: FastAPI):
         background_tasks.append(asyncio.create_task(scraper_loop()))
         log.info("Starting job retention loop (interval=%dh)", settings.JOB_RETENTION_INTERVAL_HOURS)
         background_tasks.append(asyncio.create_task(retention_loop()))
+        log.info(
+            "Starting job alert loop (interval=%dh, %s)",
+            settings.JOB_ALERT_CHECK_INTERVAL_HOURS,
+            "template configured" if settings.WHATSAPP_JOB_ALERT_TEMPLATE else "inactive until WHATSAPP_JOB_ALERT_TEMPLATE is set",
+        )
+        background_tasks.append(asyncio.create_task(job_alert_loop()))
 
     init_task = asyncio.create_task(_run_init_and_workers())
     yield

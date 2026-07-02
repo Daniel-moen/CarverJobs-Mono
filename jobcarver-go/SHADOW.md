@@ -43,7 +43,7 @@ capability-aware and fail-safe.
 GO_ROUTING_ENABLED=true
 GO_UPSTREAM_URL=http://jobcarver-go.railway.internal:3000   # the Go service (private net)
 GO_ROUTING_PERCENT=20
-GO_UNIMPLEMENTED_PREFIXES=/auth/google,/jobs/submit/text,/jobs/submit/image,/scraper,/interview,/crew-match,/matching,/documents,/subscription,/telnyx,/webhooks,/admin/jobs/review
+GO_UNIMPLEMENTED_PREFIXES=/auth/google,/jobs/submit/text,/jobs/submit/image,/scraper,/interview,/crew-match,/matching,/documents,/subscription,/telnyx,/webhooks,/wa/,/admin/jobs/review
 ```
 
 The Go service must run with the **same `SECRET_KEY`** (so minted sessions

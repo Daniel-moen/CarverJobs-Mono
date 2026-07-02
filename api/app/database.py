@@ -197,6 +197,11 @@ def run_migrations() -> None:
 
     wmt_cols = _existing("whatsapp_magic_tokens")
     _add("whatsapp_magic_tokens", "redirect_to", "VARCHAR(120)", wmt_cols)
+    _add("whatsapp_magic_tokens", "used_at", "DATETIME", wmt_cols)
+
+    was_cols = _existing("whatsapp_sessions")
+    _add("whatsapp_sessions", "last_match_session_id", "INTEGER", was_cols)
+    _add("whatsapp_sessions", "last_job_alert_at", "DATETIME", was_cols)
 
     cp_cols = _existing("crew_profiles")
     _add("crew_profiles", "sex", "VARCHAR(20)", cp_cols)

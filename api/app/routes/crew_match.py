@@ -609,44 +609,9 @@ async def get_session(
 
 # ── Draft email (unchanged) ─────────────────────────────────────────────────
 
-@router.post("/draft-email", response_model=DraftEmailResponse)
-@_limiter.limit("10/minute")
-async def draft_email(
-    request: Request,
-    payload: DraftEmailRequest = Body(...),
-    session: dict = Depends(require_session),
-    db: Session = Depends(get_db),
-):
-    if not settings.OPENAI_API_KEY:
-        raise HTTPException(status_code=503, detail="AI drafting not configured.")
-
-    user_key = session["sub"]
-    profile = db.query(CrewProfile).filter(CrewProfile.user_key == user_key).first()
-    if not profile:
-        raise HTTPException(status_code=400, detail="Save your profile first.")
-
-    job = db.query(Job).filter(Job.id == payload.job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found.")
-
-    profile_url = ""
-    if profile.profile_slug:
-        profile_url = f"{settings.FRONTEND_BASE_URL}/crew/{profile.profile_slug}"
-
-    first_name = profile.first_name or "the applicant"
-
-    job_history = (
-        db.query(JobHistoryEntry)
-        .filter(JobHistoryEntry.user_key == user_key)
-        .order_by(JobHistoryEntry.start_date.desc())
-        .limit(5)
-        .all()
-    )
-
-    doc_summary = _get_document_summary(db, user_key)
-    profile_text = _profile_summary(profile, job_history, document_summary=doc_summary)
-
-    system_prompt = f"""You ghost-write job application emails for yacht crew. The email must sound like a real person wrote it — professional but natural. Not a cover letter, not a text message. Think: a well-spoken crew member writing a proper email, but without corporate stiffness.
+def build_draft_email_system_prompt(profile_text: str, first_name: str, job: Job, profile_url: str) -> str:
+    """Shared ghost-writer prompt — used by the web draft endpoint and the WhatsApp bot."""
+    return f"""You ghost-write job application emails for yacht crew. The email must sound like a real person wrote it — professional but natural. Not a cover letter, not a text message. Think: a well-spoken crew member writing a proper email, but without corporate stiffness.
 
 TONE:
 - Professional and direct. Polite but not stiff.
@@ -685,6 +650,46 @@ Yacht: {job.yacht}
 
 Respond with JSON only:
 {{"subject": "...", "body": "..."}}"""
+
+
+@router.post("/draft-email", response_model=DraftEmailResponse)
+@_limiter.limit("10/minute")
+async def draft_email(
+    request: Request,
+    payload: DraftEmailRequest = Body(...),
+    session: dict = Depends(require_session),
+    db: Session = Depends(get_db),
+):
+    if not settings.OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="AI drafting not configured.")
+
+    user_key = session["sub"]
+    profile = db.query(CrewProfile).filter(CrewProfile.user_key == user_key).first()
+    if not profile:
+        raise HTTPException(status_code=400, detail="Save your profile first.")
+
+    job = db.query(Job).filter(Job.id == payload.job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    profile_url = ""
+    if profile.profile_slug:
+        profile_url = f"{settings.FRONTEND_BASE_URL}/crew/{profile.profile_slug}"
+
+    first_name = profile.first_name or "the applicant"
+
+    job_history = (
+        db.query(JobHistoryEntry)
+        .filter(JobHistoryEntry.user_key == user_key)
+        .order_by(JobHistoryEntry.start_date.desc())
+        .limit(5)
+        .all()
+    )
+
+    doc_summary = _get_document_summary(db, user_key)
+    profile_text = _profile_summary(profile, job_history, document_summary=doc_summary)
+
+    system_prompt = build_draft_email_system_prompt(profile_text, first_name, job, profile_url)
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},

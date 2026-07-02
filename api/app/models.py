@@ -178,6 +178,11 @@ class WhatsAppSession(Base):
   history = Column(Text, nullable=False, default="[]")
   # JSON object of profile fields collected so far during onboarding
   partial_profile = Column(Text, nullable=False, default="{}")
+  # Most recent completed MatchSession — lets the user reply "1"/"2"/"3" in chat
+  # to drill into a result from their latest run
+  last_match_session_id = Column(Integer, nullable=True)
+  # When the proactive job-alert loop last messaged this user (template message)
+  last_job_alert_at = Column(DateTime(timezone=True), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),
@@ -208,6 +213,8 @@ class WhatsAppMagicToken(Base):
   phone_number = Column(String(30), nullable=False, index=True)
   expires_at = Column(DateTime(timezone=True), nullable=False)
   used = Column(Boolean, nullable=False, default=False)
+  # First successful auth with this token (tokens stay reusable within TTL)
+  used_at = Column(DateTime(timezone=True), nullable=True)
   redirect_to = Column(String(120), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

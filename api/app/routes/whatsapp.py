@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import threading
 import time
@@ -28,6 +29,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app import flags, metrics
+from app.analytics import record_server_event
 from app.database import SessionLocal, get_db
 from app.logger import get_logger
 from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
@@ -720,6 +722,15 @@ _ALLOWED_REDIRECTS = frozenset({
 _ALLOWED_REDIRECT_PREFIXES = ("/matches/",)
 
 
+def _link_expiry_note() -> str:
+    """Human-readable validity window for magic links, derived from settings."""
+    hours = settings.WA_MAGIC_TOKEN_TTL_SECONDS // 3600
+    if hours >= 1:
+        return f"_Link valid for {hours} hour{'s' if hours != 1 else ''}._"
+    minutes = max(1, settings.WA_MAGIC_TOKEN_TTL_SECONDS // 60)
+    return f"_Link valid for {minutes} min._"
+
+
 def _is_safe_redirect(path: str | None) -> bool:
     """Check if a redirect path is allowed (exact match or prefix)."""
     if not path:
@@ -771,6 +782,8 @@ def _get_or_create_session(phone_number: str, db: Session) -> WhatsAppSession:
         db.add(session)
         db.commit()
         db.refresh(session)
+        metrics.increment("onboard_started")
+        record_server_event(phone_number, "wa_signup")
     return session
 
 
@@ -809,10 +822,18 @@ async def _send_feedback_request(phone: str, db: Session) -> None:
 
 # ── AI helpers ────────────────────────────────────────────────────────────────
 
+# Kept deliberately short: every extra required question costs real signups
+# (a third of early users abandoned the old 13-field interrogation). Everything
+# else is captured when volunteered, or added later via *edit profile*.
 REQUIRED_ONBOARD_FIELDS = [
-    "firstName", "lastName", "sex", "desiredRole", "yearsExperience",
-    "nationality", "currentLocation", "preferredLocations",
-    "contractType", "salaryMin", "salaryMax", "certifications", "languages",
+    "firstName", "lastName", "desiredRole", "yearsExperience",
+    "nationality", "currentLocation", "certifications",
+]
+
+# Nice-to-have fields — recorded when the user volunteers them, never asked
+# during onboarding. Sharpen matching once present.
+OPTIONAL_ONBOARD_FIELDS = [
+    "sex", "preferredLocations", "contractType", "salaryMin", "salaryMax", "languages",
 ]
 
 _FIELD_LABELS: dict[str, str] = {
@@ -871,18 +892,17 @@ Profile so far ({filled}/{len(REQUIRED_ONBOARD_FIELDS)} fields):
 Still missing: {missing_text}
 
 Review the conversation history. NEVER re-ask something already answered.
-Ask about fields in this order when missing:
+Ask ONLY about the required fields, in this order when missing:
   1. firstName + lastName (ask together)
-  2. sex (Male, Female, Other, or Prefer not to say)
-  3. desiredRole (e.g. Chief Stew, Bosun, Engineer, Chef, Captain, Deckhand)
-  4. yearsExperience (years in yachting or maritime)
-  5. nationality
-  6. currentLocation (city / country)
-  7. preferredLocations (cruising grounds: Med, Caribbean, etc.)
-  8. contractType (Permanent, Seasonal, Rotational, or Temporary)
-  9. salaryMin + salaryMax (ask together: monthly EUR)
-  10. certifications (STCW, ENG1, Yachtmaster, PYA, etc.)
-  11. languages spoken
+  2. desiredRole (e.g. Chief Stew, Bosun, Engineer, Chef, Captain, Deckhand)
+  3. yearsExperience (years in yachting or maritime)
+  4. nationality
+  5. currentLocation (city / country)
+  6. certifications (STCW, ENG1, Yachtmaster, PYA, etc. — "none yet" is a fine answer)
+
+If the user volunteers extra info (salary range, contract type, preferred cruising
+grounds, languages, gender), capture it in "updates" — but NEVER ask for it during
+onboarding. Those details can be added later via *edit profile*.
 
 Style rules for WhatsApp:
 - Use *bold* for emphasis (WhatsApp markdown).
@@ -896,7 +916,7 @@ First reply only (empty conversation history in the messages you receive):
 - Include exactly one brief sentence explaining tokens: Each *Find Matches* run uses *1 token*. Type *buy tokens* to top up, or submit a valid job to earn a free token.
 
 Data rules:
-- ONLY set "done": true when ALL 13 fields are collected (missing list is empty).
+- ONLY set "done": true when ALL {len(REQUIRED_ONBOARD_FIELDS)} required fields are collected (missing list is empty).
 - Only populate update fields when the user clearly provided that info.
 - Do not invent or assume any facts.
 - Keep values short and clean (e.g. nationality: "British", contractType: "Seasonal").
@@ -1176,7 +1196,7 @@ async def _handle_jobs_command(phone_number: str, db: Session) -> str:
         "🔎 *Browse Open Yacht Positions*\n\n"
         "View all live superyacht crew roles — deck, interior, engineering & more:\n\n"
         f"👉 {link}\n\n"
-        "_Link expires in 30 minutes._"
+        f"{_link_expiry_note()}"
     )
 
 
@@ -1381,6 +1401,14 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         ))
     db.commit()
     metrics.increment("crew_matches")
+    record_server_event(phone_number, "match_completed", str(len(matched)))
+
+    # Remember this session so bare digit replies ("1", "2", …) can drill into
+    # a result without leaving the chat.
+    wa_session = db.query(WhatsAppSession).filter(WhatsAppSession.phone_number == phone_number).first()
+    if wa_session:
+        wa_session.last_match_session_id = match_session.id
+        db.commit()
 
     # Build brief summary for WhatsApp (top 3)
     top = matched[:3]
@@ -1395,10 +1423,13 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     if len(matched) > 3:
         lines.append(f"   _...and {len(matched) - 3} more_")
 
+    digits = " or ".join(f"*{i}*" for i in range(1, min(len(top), 3) + 1))
+    lines.append(f"\n💬 Reply {digits} for full details & how to apply — right here in chat.")
+
     # Magic link to the match session page
     link = _make_magic_link(phone_number, db, redirect_to=f"/matches/{match_session.id}")
     lines.append(f"\nView all matches & draft applications:\n👉 {link}")
-    lines.append("_Link expires in 30 min._")
+    lines.append(_link_expiry_note())
     lines.append(f"\nTokens remaining: *{credits_remaining}*")
 
     await _send_whatsapp(phone_number, "\n".join(lines))
@@ -1423,12 +1454,164 @@ async def _run_match_command_background(
 
 
 
+# ── In-chat match details ─────────────────────────────────────────────────────
+# After a match run, the user can reply "1"/"2"/"3" for full job details or
+# "draft 1" for an application email — without leaving WhatsApp. The web link
+# stays available, but the chat must deliver the full payoff on its own.
+
+def _nth_match_result(db: Session, wa_session: WhatsAppSession, n: int):
+    """Return (result, job, total) for the nth result of the user's last run."""
+    sid = wa_session.last_match_session_id
+    if not sid:
+        return None, None, 0
+    results = (
+        db.query(MatchSessionResult)
+        .filter(MatchSessionResult.session_id == sid, MatchSessionResult.matched.is_(True))
+        .order_by(MatchSessionResult.id.asc())  # insertion order == summary numbering
+        .limit(9)
+        .all()
+    )
+    if n > len(results):
+        return None, None, len(results)
+    result = results[n - 1]
+    job = db.query(Job).filter(Job.id == result.job_id).first()
+    return result, job, len(results)
+
+
+def _job_apply_line(job: Job) -> str:
+    if job.contact_email:
+        return f"📧 *Apply to:* {job.contact_email}"
+    if job.application_url:
+        return f"🔗 *Apply here:* {job.application_url}"
+    return "ℹ️ No direct contact on the listing — use the website link below to apply."
+
+
+async def _send_match_detail(phone: str, db: Session, wa_session: WhatsAppSession, n: int) -> None:
+    result, job, total = _nth_match_result(db, wa_session, n)
+    if total == 0:
+        await _send_whatsapp(phone, "No match run on record yet — type *match* to find jobs for your profile.")
+        return
+    if result is None or job is None:
+        await _send_whatsapp(phone, f"Your last run had *{total}* match{'es' if total != 1 else ''} — reply a number from 1 to {total}.")
+        return
+
+    lines = [f"⚓ *{job.title}*"]
+    facts = []
+    if job.yacht and job.yacht.lower() not in ("unknown", "n/a"):
+        facts.append(f"🛥️ {job.yacht}" + (f" ({job.yacht_length_m}m)" if job.yacht_length_m else ""))
+    if job.location:
+        facts.append(f"📍 {job.location}")
+    if job.salary_min or job.salary_max:
+        cur = job.salary_currency or "EUR"
+        if job.salary_min and job.salary_max:
+            facts.append(f"💰 {cur} {job.salary_min:g}–{job.salary_max:g}/mo")
+        else:
+            facts.append(f"💰 {cur} {(job.salary_min or job.salary_max):g}/mo")
+    if job.contract_type:
+        facts.append(f"📋 {job.contract_type}")
+    if job.start_date:
+        facts.append(f"🗓️ Starts {job.start_date}")
+    lines.append("\n".join(facts))
+    lines.append(f"\n*Match: {int(result.compatibility)}%* — {result.reason or 'good overall fit.'}")
+
+    try:
+        strengths = json.loads(result.strengths or "[]")
+    except ValueError:
+        strengths = []
+    if strengths:
+        lines.append("✅ *Your edge:* " + "; ".join(str(s) for s in strengths[:3]))
+    try:
+        gaps = json.loads(result.gaps or "[]")
+    except ValueError:
+        gaps = []
+    if gaps:
+        lines.append("⚠️ *Mind the gap:* " + "; ".join(str(g) for g in gaps[:2]))
+
+    if job.description:
+        lines.append(f"\n{job.description[:350]}{'…' if len(job.description) > 350 else ''}")
+
+    lines.append(f"\n{_job_apply_line(job)}")
+    lines.append(f"\n✍️ Reply *draft {n}* and I'll write your application email right here.")
+    link = _make_magic_link(phone, db, redirect_to=f"/matches/{wa_session.last_match_session_id}")
+    lines.append(f"\nAll matches on the web:\n👉 {link}\n{_link_expiry_note()}")
+
+    await _send_whatsapp(phone, "\n".join(lines))
+    record_server_event(phone, "match_detail_viewed", str(job.id))
+
+
+async def _send_application_draft(phone: str, db: Session, wa_session: WhatsAppSession, n: int) -> None:
+    result, job, total = _nth_match_result(db, wa_session, n)
+    if total == 0:
+        await _send_whatsapp(phone, "No match run on record yet — type *match* to find jobs first.")
+        return
+    if result is None or job is None:
+        await _send_whatsapp(phone, f"Your last run had *{total}* match{'es' if total != 1 else ''} — reply *draft 1* to *draft {total}*.")
+        return
+    if not settings.OPENAI_API_KEY:
+        await _send_whatsapp(phone, "⚠️ AI drafting is temporarily unavailable. Try again soon.")
+        return
+
+    profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone).first()
+    if not profile:
+        await _send_whatsapp(phone, "Set up your crew profile first — type *edit profile*.")
+        return
+
+    await _send_whatsapp(phone, f"✍️ Drafting your application for *{job.title}* — one moment…")
+
+    from app.routes.crew_match import (
+        _get_document_summary,
+        _profile_summary,
+        build_draft_email_system_prompt,
+    )
+
+    job_history_entries = (
+        db.query(JobHistoryEntry)
+        .filter(JobHistoryEntry.user_key == phone)
+        .order_by(JobHistoryEntry.start_date.desc())
+        .limit(5)
+        .all()
+    )
+    doc_summary = _get_document_summary(db, phone)
+    profile_text = _profile_summary(profile, job_history_entries, document_summary=doc_summary)
+    profile_url = f"{settings.FRONTEND_BASE_URL}/crew/{profile.profile_slug}" if profile.profile_slug else ""
+    system = build_draft_email_system_prompt(profile_text, profile.first_name or "the applicant", job, profile_url)
+
+    parsed = await _call_openai(system, [], "Write the email.", model=settings.EMAIL_AI_MODEL)
+    body = str(parsed.get("body", "")).strip()
+    if not body:
+        await _send_whatsapp(phone, "⚠️ Drafting hit a snag — try *draft " + str(n) + "* again in a moment.")
+        return
+    subject = str(parsed.get("subject", "")).strip() or f"Application — {job.title}"
+
+    msg = f"📨 *Your application draft*\n\n*Subject:* {subject}\n\n{body}"
+    if job.contact_email:
+        msg += f"\n\n📧 Copy it into an email to *{job.contact_email}* — good luck! 🍀"
+    elif job.application_url:
+        msg += f"\n\n🔗 Apply with it here: {job.application_url}"
+    await _send_whatsapp(phone, msg)
+
+    metrics.increment("whatsapp_apply_drafts")
+    record_server_event(phone, "apply_draft", str(job.id))
+    try:
+        from app.models import JobDraftEvent
+        existing = (
+            db.query(JobDraftEvent)
+            .filter(JobDraftEvent.job_id == job.id, JobDraftEvent.user_key == phone)
+            .first()
+        )
+        if existing is None:
+            db.add(JobDraftEvent(job_id=job.id, user_key=phone))
+            db.commit()
+    except Exception:
+        db.rollback()
+
+
 # ── Onboarding flow ───────────────────────────────────────────────────────────
 
 _FALLBACK_GREETING = (
     "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
-    "I'm going to build your crew profile in a quick chat — takes about 2 minutes "
-    "and gets you in front of recruiters and vessels straight away.\n\n"
+    "I'm going to build your crew profile in a quick chat — 6 quick questions, "
+    "about a minute — then I'll run your *first job match on the house*.\n\n"
     "💳 *Tokens:* Each *Find Matches* uses *1 token*. Type *buy tokens* to top up, or submit a valid job to earn a free token.\n\n"
     "Let's start with the basics — what's your *full name*? 🪪"
 )
@@ -1476,7 +1659,7 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
             if clean_updates:
                 _acks = ["Nice one! ✅", "Got it, thanks! 👍", "Solid — noted! ✅", "Great stuff! 🙌"]
                 ack = _acks[filled % len(_acks)]
-                if filled >= 9:
+                if filled >= len(REQUIRED_ONBOARD_FIELDS) - 2:
                     message = f"{ack} Almost there — just a couple more! {question}"
                 else:
                     message = f"{ack} {question}"
@@ -1493,17 +1676,39 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
         _save_profile_to_db(wa_session.phone_number, partial, db)
         _save_session(wa_session, db, history, partial, mode="chat")
         metrics.increment("onboard_completed")
+        record_server_event(wa_session.phone_number, "onboard_completed")
         link = _make_magic_link(wa_session.phone_number, db)
         name = partial.get("firstName", "crew")
+
+        # Activation moment: run the first match immediately on the free signup
+        # token instead of hoping the user discovers the *match* command later.
+        balance = get_credit_balance(db, wa_session.phone_number)
+        first_match_started = balance > 0 and _try_start_match_run(wa_session.phone_number)
+        if first_match_started:
+            graph_phone_number_id = _wa_graph_phone_id.get() or ""
+            phone = wa_session.phone_number
+
+            async def _first_match_run() -> None:
+                # Small delay so the welcome message lands before match updates.
+                await asyncio.sleep(3)
+                await _run_match_command_background(phone, graph_phone_number_id, _MATCH_SCOPE_ALL)
+
+            asyncio.create_task(_first_match_run())
+
         message += (
-            f"\n\n✅ *Interview complete* — we saved your answers as your crew profile.\n\n"
-            f"🎉 *Welcome to the fleet, {name}!*\n\n"
-            f"Your profile is live and ready to match with vessels. "
+            f"\n\n🎉 *Welcome to the fleet, {name}!* Your crew profile is live.\n\n"
+        )
+        if first_match_started:
+            message += (
+                "🚀 I'm already running your *first Find Matches* on the house — "
+                "your top matches will land right here in a minute or two.\n\n"
+            )
+        message += (
             f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
             f"👉 {link}\n\n"
             f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
             f"type *buy tokens* to top up, or submit a valid job to earn a free token.\n\n"
-            f"_Link expires in 30 min. Type *help* anytime to see what I can do for you._ ⚡"
+            f"{_link_expiry_note()} _Type *help* anytime to see what I can do for you._ ⚡"
         )
     else:
         _save_session(wa_session, db, history, partial)
@@ -1557,7 +1762,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
             f"Token packs available:\n" + "\n".join(pack_lines) + "\n\n"
             f"{bonus_line}"
             f"👉 {link}\n\n"
-            "_Link expires in 30 minutes._",
+            f"{_link_expiry_note()}",
         )
         return None
 
@@ -1593,7 +1798,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         link = _make_magic_link(phone, db)
         await _send_whatsapp(
             phone,
-            text + f"\n\n📎 *Upload or update your crew docs:*\n👉 {link}\n\n_Link expires in 30 minutes._",
+            text + f"\n\n📎 *Upload or update your crew docs:*\n👉 {link}\n\n{_link_expiry_note()}",
         )
         await _send_whatsapp_buttons(
             phone,
@@ -1609,7 +1814,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
             "📎 *Upload Crew Documents*\n\n"
             "Tap below to upload your CV, passport, STCW, ENG1 & certs — vessels require these for crew:\n\n"
             f"👉 {link}\n\n"
-            "_Link expires in 30 minutes._",
+            f"{_link_expiry_note()}",
         )
         await _send_whatsapp_buttons(
             phone,
@@ -1625,7 +1830,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
             "✏️ *Edit Your Crew Profile*\n\n"
             "Tap below to update your profile — role, experience, certs, salary expectations & more:\n\n"
             f"👉 {link}\n\n"
-            "_Link expires in 30 minutes._",
+            f"{_link_expiry_note()}",
         )
         await _send_whatsapp_buttons(
             phone,
@@ -1636,6 +1841,18 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
 
     if cmd in ("jobs", "open jobs", "positions", "vacancies"):
         return await _handle_jobs_command(phone, db)
+
+    # Bare digit → drill into that result from the last match run, in chat.
+    digit_match = re.fullmatch(r"[1-9]", cmd)
+    if digit_match:
+        await _send_match_detail(phone, db, wa_session, int(cmd))
+        return None
+
+    # "draft N" → ghost-write the application email for match N, in chat.
+    draft_match = re.fullmatch(r"draft\s*([1-9])", cmd)
+    if draft_match:
+        await _send_application_draft(phone, db, wa_session, int(draft_match.group(1)))
+        return None
 
     if cmd in ("match", "find jobs", "find matches", "matching", "find me jobs", "job match"):
         await _send_match_scope_menu(phone)
@@ -1830,7 +2047,7 @@ async def _process_media_message(
             "📎 *Upload Crew Documents*\n\n"
             "To upload your CV, passport, STCW, certs etc. use the link below:\n\n"
             f"👉 {link}\n\n"
-            "_Link expires in 30 minutes._\n\n"
+            f"{_link_expiry_note()}\n\n"
             "_💡 Tip: Want to submit a job posting? Type *submit job* first, then send the screenshot._",
         )
     except Exception as exc:
@@ -1997,7 +2214,16 @@ async def whatsapp_magic_auth(token: str, request: Request, response: Response, 
     if not redirect:
         qp = request.query_params.get("r", "")
         redirect = qp if _is_safe_redirect(qp) else "/profile"
+    if not record.used:
+        try:
+            record.used = True
+            record.used_at = now
+            db.commit()
+        except Exception:
+            db.rollback()
+            log.warning("Failed to mark magic token used | phone=%s", record.phone_number[:6] + "****")
     log.info("WhatsApp magic auth success | phone=%s | redirect=%s | db_redirect=%s",
              record.phone_number[:6] + "****", redirect, record.redirect_to)
     metrics.increment("whatsapp_magic_logins")
+    record_server_event(record.phone_number, "magic_login", redirect)
     return {"ok": True, "redirect": redirect, "session_token": session_token}

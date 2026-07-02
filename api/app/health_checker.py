@@ -75,6 +75,48 @@ def _check_google() -> dict:
     return {"connected": False, "detail": "Not configured", "checked_at": _ts()}
 
 
+def _check_job_pipeline() -> dict:
+    """Throughput check, not connectivity: the scraper can be 'up' while silently
+    producing nothing (dead actor, dedupe absorbing everything, stalled loop).
+    Stale job supply is a product outage even when every service is reachable."""
+    try:
+        from datetime import timedelta
+
+        from sqlalchemy import func
+
+        from app.database import SessionLocal
+        from app.models import Job
+
+        db = SessionLocal()
+        try:
+            newest = db.query(func.max(Job.created_at)).scalar()
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.JOB_FRESHNESS_ALERT_HOURS)
+            new_in_window = (
+                db.query(func.count(Job.id)).filter(Job.created_at >= cutoff).scalar() or 0
+            )
+        finally:
+            db.close()
+
+        if newest is None:
+            return _fail("No jobs have ever been ingested", "CRV-6006")
+        if new_in_window == 0:
+            newest_aware = newest if newest.tzinfo else newest.replace(tzinfo=timezone.utc)
+            hours_stale = int((datetime.now(timezone.utc) - newest_aware).total_seconds() // 3600)
+            log.error(
+                "Job pipeline stale — no new jobs in %dh (threshold %dh)",
+                hours_stale, settings.JOB_FRESHNESS_ALERT_HOURS,
+            )
+            return _fail(
+                f"No new jobs ingested in {hours_stale}h "
+                f"(alert threshold: {settings.JOB_FRESHNESS_ALERT_HOURS}h) — check the scrapers",
+                "CRV-6006",
+            )
+        return _ok(f"{new_in_window} new job{'s' if new_in_window != 1 else ''} in the last {settings.JOB_FRESHNESS_ALERT_HOURS}h")
+    except Exception as exc:
+        log.error("Job pipeline health check failed: %s", exc)
+        return _fail("Could not check job pipeline", CRV_1001)
+
+
 def _check_openai() -> dict:
     if not settings.OPENAI_API_KEY:
         return _fail("Not configured", CRV_3001)
@@ -112,6 +154,7 @@ def run_checks() -> dict:
         "auth_session": _check_auth(),
         "database":     _check_database(),
         "google_login": _check_google(),
+        "job_pipeline": _check_job_pipeline(),
         "openai_ai":    openai,
         "ai_interview": {
             "connected": openai["connected"],

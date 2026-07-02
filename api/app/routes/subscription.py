@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import models
+from app.analytics import record_server_event
 from app.database import get_db
 from app.logger import get_logger
 from app.security import require_session
@@ -303,6 +304,7 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
             log.info("First-purchase bonus credited | user=%s | bonus=%d", sub.user_key, bonus)
 
         log.info("Token purchase completed | user=%s", sub.user_key)
+        record_server_event(sub.user_key, "purchase_completed", str(sub.amount))
     elif event_type == "payment.failed":
         sub.status = "failed"
         log.warning("Token purchase payment failed | user=%s", sub.user_key)

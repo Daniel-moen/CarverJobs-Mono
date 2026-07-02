@@ -86,7 +86,7 @@ class Settings:
   GO_UNIMPLEMENTED_PREFIXES: list[str] = _csv_env(
       "GO_UNIMPLEMENTED_PREFIXES",
       "/auth/google,/jobs/submit/text,/jobs/submit/image,/scraper,/interview,"
-      "/crew-match,/matching,/documents,/subscription,/telnyx,/webhooks,/admin/jobs/review",
+      "/crew-match,/matching,/documents,/subscription,/telnyx,/webhooks,/wa/,/admin/jobs/review",
   )
 
   ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
@@ -147,10 +147,21 @@ class Settings:
   META_VERIFY_TOKEN: str = os.getenv("META_VERIFY_TOKEN", "carver-whatsapp-verify").strip()
   # Base URL of the frontend — used to build magic links sent via WhatsApp
   FRONTEND_BASE_URL: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").strip()
-  # How long a magic login link is valid (seconds)
-  WA_MAGIC_TOKEN_TTL_SECONDS: int = int(os.getenv("WA_MAGIC_TOKEN_TTL_SECONDS", "1800"))
+  # How long a magic login link is valid (seconds). Crew often open WhatsApp
+  # hours after the bot replies, so links stay valid for 24h by default.
+  WA_MAGIC_TOKEN_TTL_SECONDS: int = int(os.getenv("WA_MAGIC_TOKEN_TTL_SECONDS", "86400"))
   # WhatsApp "Recent Posts" matching window, based on when jobs entered the database.
   WA_MATCH_RECENT_DAYS: int = int(os.getenv("WA_MATCH_RECENT_DAYS", "7"))
+
+  # Proactive "new jobs match your profile" WhatsApp alerts. Requires a Meta-approved
+  # template (paid, business-initiated). Off until a template name is configured.
+  # The template must take two body params: {{1}} = first name, {{2}} = match count.
+  WHATSAPP_JOB_ALERT_TEMPLATE: str = os.getenv("WHATSAPP_JOB_ALERT_TEMPLATE", "").strip()
+  WHATSAPP_JOB_ALERT_LANGUAGE: str = os.getenv("WHATSAPP_JOB_ALERT_LANGUAGE", "en").strip()
+  # Minimum hours between alerts to the same user.
+  JOB_ALERT_MIN_INTERVAL_HOURS: int = int(os.getenv("JOB_ALERT_MIN_INTERVAL_HOURS", "72"))
+  # How often the alert loop scans for new matching jobs.
+  JOB_ALERT_CHECK_INTERVAL_HOURS: int = int(os.getenv("JOB_ALERT_CHECK_INTERVAL_HOURS", "24"))
 
   # Job retention — prunes the ever-growing `jobs` table (see services/job_retention.py).
   # Active jobs older than this are soft-expired (status -> "expired").
@@ -159,6 +170,9 @@ class Settings:
   JOB_DELETE_AFTER_DAYS: int = int(os.getenv("JOB_DELETE_AFTER_DAYS", "90"))
   # How often the retention background loop runs.
   JOB_RETENTION_INTERVAL_HOURS: int = int(os.getenv("JOB_RETENTION_INTERVAL_HOURS", "24"))
+  # /status/services flags the job pipeline unhealthy when no new job has been
+  # ingested for this many hours (scraper runs every 12h, so 48h = 3 missed cycles).
+  JOB_FRESHNESS_ALERT_HOURS: int = int(os.getenv("JOB_FRESHNESS_ALERT_HOURS", "48"))
 
   # Web job board scrapers
   DOCKWALK_ENABLED: bool = os.getenv("DOCKWALK_ENABLED", "true").lower() == "true"

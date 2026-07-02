@@ -24,6 +24,7 @@ from app.database import get_db, DB_PATH
 from app.error_codes import CRV_2004, CRV_5005, CRV_5006, CRV_5007, CRV_5008
 from app.logger import get_logger
 from app.models import (
+    AnalyticsEvent,
     CreditAccount,
     CrewProfile,
     Document,
@@ -35,6 +36,7 @@ from app.models import (
     User,
     WaitlistSignup,
     WhatsAppMagicToken,
+    WhatsAppMessage,
     WhatsAppSession,
 )
 from app.settings import settings
@@ -155,6 +157,56 @@ def get_agent_stats(request: Request, db: Session = Depends(get_db)):
             .scalar() or 0
         )
 
+        # ── Funnel (durable — survives deploys, unlike in-memory metrics) ──
+        # signup → profile complete → first match <24h → D7 return → purchase
+        wa_signups_30d = (
+            db.query(func.count(WhatsAppSession.phone_number))
+            .filter(WhatsAppSession.created_at >= now - timedelta(days=30))
+            .scalar() or 0
+        )
+        profiles_from_wa = (
+            db.query(func.count(CrewProfile.id))
+            .join(WhatsAppSession, WhatsAppSession.phone_number == CrewProfile.user_key)
+            .scalar() or 0
+        )
+        first_match_sq = (
+            db.query(
+                MatchSession.user_key.label("user_key"),
+                func.min(MatchSession.created_at).label("first_match_at"),
+            )
+            .group_by(MatchSession.user_key)
+            .subquery()
+        )
+        activated_24h = (
+            db.query(func.count(WhatsAppSession.phone_number))
+            .join(first_match_sq, first_match_sq.c.user_key == WhatsAppSession.phone_number)
+            .filter(first_match_sq.c.first_match_at <= func.datetime(WhatsAppSession.created_at, "+1 day"))
+            .scalar() or 0
+        )
+        matched_ever = (
+            db.query(func.count(func.distinct(MatchSession.user_key))).scalar() or 0
+        )
+        d7_return = (
+            db.query(func.count(WhatsAppSession.phone_number))
+            .filter(
+                db.query(WhatsAppMessage.id)
+                .filter(
+                    WhatsAppMessage.phone_number == WhatsAppSession.phone_number,
+                    WhatsAppMessage.direction == "inbound",
+                    WhatsAppMessage.created_at >= func.datetime(WhatsAppSession.created_at, "+7 days"),
+                )
+                .exists()
+            )
+            .scalar() or 0
+        )
+        server_event_rows = (
+            db.query(AnalyticsEvent.label, func.count(AnalyticsEvent.id))
+            .filter(AnalyticsEvent.event_type == "funnel_server")
+            .group_by(AnalyticsEvent.label)
+            .all()
+        )
+        server_events = {(r[0] or "unknown"): r[1] for r in server_event_rows}
+
     except Exception as exc:
         log.error("Agent stats DB query failed: %s", exc)
         raise HTTPException(
@@ -191,6 +243,21 @@ def get_agent_stats(request: Request, db: Session = Depends(get_db)):
             "sessions_total": match_sessions_total,
             "total_matched": match_total_matched,
             "avg_compatibility": round(avg_compat, 2) if avg_compat is not None else None,
+        },
+        "funnel": {
+            "wa_signups_total": wa_total,
+            "wa_signups_last_30d": wa_signups_30d,
+            "profiles_completed_from_wa": profiles_from_wa,
+            "activated_first_match_within_24h": activated_24h,
+            "activation_rate": round(activated_24h / wa_total, 3) if wa_total else None,
+            "users_ever_matched": matched_ever,
+            "d7_returned": d7_return,
+            "d7_return_rate": round(d7_return / wa_total, 3) if wa_total else None,
+            "unique_token_buyers": tokens_unique_buyers,
+            "purchase_conversion_of_matched": (
+                round(tokens_unique_buyers / matched_ever, 3) if matched_ever else None
+            ),
+            "server_events": server_events,
         },
         "good_to_know": {
             "waitlist_signups": waitlist_total,

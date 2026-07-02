@@ -116,6 +116,22 @@ def record_events(events: list[dict], db: Session | None = None) -> int:
     return added
 
 
+def record_server_event(user_key: str, name: str, value: str | None = None) -> None:
+    """Persist a server-side funnel event to analytics_events.
+
+    Durable counterpart to the in-memory `metrics` counters (which reset on
+    every deploy): funnel milestones like onboarding completion, magic-link
+    logins and match runs must survive restarts to be measurable at all.
+    Best-effort — never raises into the calling flow.
+    """
+    record_events([{
+        "type": "funnel_server",
+        "session_id": (user_key or "unknown")[:40],
+        "label": name,
+        "value": value,
+    }])
+
+
 def get_analytics(db: Session | None = None) -> dict:
     """Return aggregated analytics data for the dashboard."""
     with _lock:
