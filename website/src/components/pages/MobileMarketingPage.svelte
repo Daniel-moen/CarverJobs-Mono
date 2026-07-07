@@ -152,7 +152,7 @@
     <p class="m-lede">
       Carver runs the entire superyacht crew job hunt over WhatsApp.
       <strong class="text-ivory">Build your profile, match every live role, and apply</strong> —
-      no app, no signup.
+      no app, no signup, and your first 2 match runs are free.
     </p>
 
     <div class="m-ctas">

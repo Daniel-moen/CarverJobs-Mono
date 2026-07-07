@@ -196,7 +196,7 @@
                 <path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/>
               </svg>
               <span>Open WhatsApp</span>
-              <span class="hero-cta-meta">free · no signup</span>
+              <span class="hero-cta-meta">free · first 2 matches on us</span>
             </a>
             <span class="hero-cta-or" aria-hidden="true">or</span>
             <button

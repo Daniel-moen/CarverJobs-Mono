@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import crud, flags, metrics, models
+from app.analytics import record_server_event
 from app.error_codes import CRV_2002, CRV_2007, CRV_2008, CRV_2009
 from app.database import get_db
 from app.logger import get_logger
@@ -122,6 +123,7 @@ def signup(request: Request, payload: SignupRequest, response: Response, db: Ses
   token = issue_session_token({"sub": email, "role": "crew", "user_id": user.id})
   _set_session_cookie(response, token)
   metrics.increment("signups_success")
+  record_server_event(email, "web_signup", "password")
   log.info("Signup success | id=%d | email=%s", user.id, email)
   return {"ok": True, "user": {"id": user.id, "email": email, "role": "crew"}}
 
@@ -236,6 +238,7 @@ def login_google(request: Request, payload: GoogleLoginRequest, response: Respon
   if user is None:
     full_name = str(token_info.get("name") or token_info.get("given_name") or "").strip()
     user = crud.create_google_user(db, email=email, full_name=full_name)
+    record_server_event(email, "web_signup", "google")
     log.info("Google login created new user | id=%d | email=%s", user.id, email)
 
   token = issue_session_token({

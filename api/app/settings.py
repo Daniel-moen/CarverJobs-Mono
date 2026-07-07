@@ -145,6 +145,9 @@ class Settings:
   WHATSAPP_ACCESS_TOKEN: str = os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
   # Arbitrary string you set in the Meta webhook dashboard to verify ownership
   META_VERIFY_TOKEN: str = os.getenv("META_VERIFY_TOKEN", "carver-whatsapp-verify").strip()
+  # Public WhatsApp business number as E.164 digits (no +), e.g. "27821234567".
+  # Used to send buyers back to the chat (wa.me link) after a Yoco payment.
+  WHATSAPP_PUBLIC_NUMBER: str = "".join(c for c in os.getenv("WHATSAPP_PUBLIC_NUMBER", "") if c.isdigit())
   # Base URL of the frontend — used to build magic links sent via WhatsApp
   FRONTEND_BASE_URL: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").strip()
   # How long a magic login link is valid (seconds). Crew often open WhatsApp

@@ -38,8 +38,9 @@ from app.settings import settings
 from app.services.ai_client import AIClientError
 from app.services.mixpanel_server import track as mixpanel_track
 from app.routes.subscription import _is_first_purchase
+from app.services import payments
 from app.services.credits import add_credits, award_job_post_credit, get_credit_balance, is_subscribed, spend_credits
-from app.services.feedback_settings import feedback_is_eligible
+from app.services.feedback_settings import FEEDBACK_REWARD_TOKENS, feedback_is_eligible
 
 log = get_logger("carver.whatsapp")
 
@@ -369,6 +370,61 @@ async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, st
             to,
             "outbound",
             "interactive_button",
+            body,
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=phone_id,
+            payload=audit_payload,
+        )
+
+
+async def _send_whatsapp_list(
+    to: str,
+    *,
+    header: str,
+    body: str,
+    footer: str,
+    button: str,
+    rows: list[dict],
+    section_title: str,
+) -> None:
+    """Send an interactive list message (up to 10 rows of {id,title,description})."""
+    phone_id = _active_wa_phone_number_id()
+    url = f"{_GRAPH_URL}/{phone_id}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {"type": "text", "text": header[:60]},
+            "body": {"text": body},
+            "footer": {"text": footer[:60]},
+            "action": {
+                "button": button[:20],
+                "sections": [{"title": section_title[:24], "rows": rows[:10]}],
+            },
+        },
+    }
+    headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+    audit_payload: dict = {
+        "graph_phone_number_id": phone_id,
+        "rows": [{"id": r.get("id"), "title": r.get("title")} for r in rows[:10]],
+    }
+    meta_message_id = None
+    try:
+        resp = await _http.post(url, json=payload, headers=headers)
+        audit_payload["status_code"] = resp.status_code
+        meta_message_id = _meta_response_message_id(resp)
+        if resp.status_code >= 400:
+            log.error("Meta list send failed | to=%s | status=%d | body=%s", to, resp.status_code, resp.text[:300])
+    except httpx.HTTPError as exc:
+        audit_payload["error"] = exc.__class__.__name__
+        log.exception("WhatsApp list send error | to=%s | %s", to, exc)
+    finally:
+        _record_whatsapp_message(
+            to,
+            "outbound",
+            "interactive_list",
             body,
             meta_message_id=meta_message_id,
             graph_phone_number_id=phone_id,
@@ -810,13 +866,125 @@ def _feedback_already_submitted(db: Session, user_key: str) -> bool:
 
 async def _send_feedback_request(phone: str, db: Session) -> None:
     link = _make_magic_link(phone, db, redirect_to="/?feedback=1")
+    # Only promise a reward that will actually be granted (FEEDBACK_REWARD_TOKENS
+    # may be 0 — the form still works, it just isn't incentivised).
+    if FEEDBACK_REWARD_TOKENS > 0:
+        w = "token" if FEEDBACK_REWARD_TOKENS == 1 else "tokens"
+        reward_line = f"We'll add *{FEEDBACK_REWARD_TOKENS} {w}* to your account when you submit it.\n\n"
+        footer = "_Takes less than 2 minutes. Reward available once per user._"
+    else:
+        reward_line = "It helps us make CARVER better for you.\n\n"
+        footer = "_Takes less than 2 minutes._"
     await _send_whatsapp(
         phone,
-        "💬 *Quick feedback required*\n\n"
+        "💬 *Quick feedback*\n\n"
         "Please complete this short feedback form about your CARVER experience. "
-        "We'll add *2 tokens* to your account when you submit it.\n\n"
+        f"{reward_line}"
         f"Feedback form: {link}\n\n"
-        "_Takes less than 2 minutes. Reward available once per user._",
+        f"{footer}",
+    )
+
+
+# ── Token purchase (in-chat Yoco checkout) ────────────────────────────────────
+
+
+def _per_token_label(pkg: dict) -> str:
+    rate = float(pkg["price"]) / int(pkg["tokens"])
+    rate_str = f"{rate:.2f}".rstrip("0").rstrip(".")
+    return f"R{rate_str}/token"
+
+
+async def _send_token_pack_picker(phone: str, db: Session) -> None:
+    """Let the user pick a token pack right in the chat.
+
+    Selecting a pack replies with a direct Yoco payment link — no website
+    login needed. Falls back to the old magic-link flow when Yoco isn't
+    configured (e.g. local dev).
+    """
+    bal = get_credit_balance(db, phone)
+    w = "token" if bal == 1 else "tokens"
+
+    if not payments.yoco_configured():
+        link = _make_magic_link(phone, db, redirect_to="/subscription")
+        pack_lines = []
+        for p in settings.TOKEN_PACKAGES:
+            price = f"{float(p['price']):g}"
+            badge = f" — _{p['badge']}_" if p.get("badge") else ""
+            pack_lines.append(f"• *{int(p['tokens'])} tokens* — R{price}{badge}")
+        await _send_whatsapp(
+            phone,
+            f"🪙 *Buy Tokens*\n\n"
+            f"Your balance: *{bal} {w}*\n\n"
+            f"Token packs available:\n" + "\n".join(pack_lines) + "\n\n"
+            f"👉 {link}\n\n"
+            f"{_link_expiry_note()}",
+        )
+        return
+
+    bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
+    bonus_line = ""
+    if bonus > 0 and _is_first_purchase(db, phone):
+        bonus_line = f"🎁 First purchase? You get *+{bonus} bonus tokens* on any pack.\n\n"
+
+    rows = []
+    for p in settings.TOKEN_PACKAGES:
+        price = f"{float(p['price']):g}"
+        desc = _per_token_label(p)
+        if p.get("badge"):
+            desc = f"{p['badge']} · {desc}"
+        rows.append({
+            "id": f"buy_{int(p['tokens'])}",
+            "title": f"{int(p['tokens'])} tokens — R{price}"[:24],
+            "description": desc[:72],
+        })
+
+    await _send_whatsapp_list(
+        phone,
+        header="Buy Tokens 🪙",
+        body=(
+            f"Your balance: *{bal} {w}*\n\n"
+            f"{bonus_line}"
+            "1 token = 1 *Find Matches* run. Pick a pack and I'll send you a "
+            "secure payment link — tokens are added the moment you pay."
+        ),
+        footer="Secure payment via Yoco · No recurring charges",
+        button="Choose a pack",
+        rows=rows,
+        section_title="Token packs",
+    )
+
+
+async def _start_whatsapp_checkout(phone: str, tokens: int, db: Session) -> None:
+    """Create a Yoco checkout for this user and drop the payment link in chat."""
+    pkg = payments.find_package(tokens)
+    if pkg is None:
+        await _send_token_pack_picker(phone, db)
+        return
+
+    bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
+    first = bonus > 0 and _is_first_purchase(db, phone)
+
+    try:
+        pay_url = await payments.create_checkout(db, phone, tokens, channel="whatsapp")
+    except payments.CheckoutError:
+        link = _make_magic_link(phone, db, redirect_to="/subscription")
+        await _send_whatsapp(
+            phone,
+            "⚠️ I couldn't start the payment just now. You can buy on the website instead:\n\n"
+            f"👉 {link}\n\n"
+            f"{_link_expiry_note()}",
+        )
+        return
+
+    price = f"{float(pkg['price']):g}"
+    bonus_line = f"🎁 Includes *+{bonus} bonus tokens* — first-purchase gift.\n" if first else ""
+    await _send_whatsapp(
+        phone,
+        f"🪙 *{pkg['label']} Pack — {tokens} tokens for R{price}*\n"
+        f"{bonus_line}\n"
+        f"Tap to pay securely with Yoco (card, Apple Pay or Google Pay):\n"
+        f"👉 {pay_url}\n\n"
+        "Tokens are added automatically — I'll confirm here the moment your payment lands. ⚡",
     )
 
 
@@ -1262,6 +1430,7 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     credits_remaining = spend_credits(db, phone_number, amount=1)
     if credits_remaining is None:
         current_credits = get_credit_balance(db, phone_number)
+        record_server_event(phone_number, "paywall_hit", "whatsapp")
         await _send_whatsapp(
             phone_number,
             "⚠️ You need *1 token* to run matching.\n\n"
@@ -1271,7 +1440,7 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         await _send_whatsapp_buttons(
             phone_number,
             "What would you like to do?",
-            [("btn_submit_job", "Submit Job"), ("cmd_subscribe", "Buy Tokens"), ("btn_menu", "Menu")],
+            [("cmd_subscribe", "Buy Tokens"), ("btn_submit_job", "Submit Job"), ("btn_menu", "Menu")],
         )
         return
 
@@ -1431,6 +1600,10 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     lines.append(f"\nView all matches & draft applications:\n👉 {link}")
     lines.append(_link_expiry_note())
     lines.append(f"\nTokens remaining: *{credits_remaining}*")
+    if credits_remaining <= 1:
+        # Peak-engagement nudge: they just saw real matches and are about to
+        # run out of runs. The picker makes topping up a two-tap flow.
+        lines.append("_Running low — type *buy tokens* to top up in seconds._")
 
     await _send_whatsapp(phone_number, "\n".join(lines))
 
@@ -1743,27 +1916,13 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         return None
 
     if cmd in ("subscribe", "pro", "upgrade", "paid", "subscription", "buy tokens", "buy", "top up", "topup"):
-        link = _make_magic_link(phone, db, redirect_to="/subscription")
-        bal = get_credit_balance(db, phone)
-        w = "token" if bal == 1 else "tokens"
-        pack_lines = []
-        for p in settings.TOKEN_PACKAGES:
-            price = f"{float(p['price']):g}"
-            badge = f" — _{p['badge']}_" if p.get("badge") else ""
-            pack_lines.append(f"• *{int(p['tokens'])} tokens* — R{price}{badge}")
-        bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
-        bonus_line = ""
-        if bonus > 0 and _is_first_purchase(db, phone):
-            bonus_line = f"🎁 First purchase? You get *+{bonus} bonus tokens* on any pack.\n\n"
-        await _send_whatsapp(
-            phone,
-            f"🪙 *Buy Tokens*\n\n"
-            f"Your balance: *{bal} {w}*\n\n"
-            f"Token packs available:\n" + "\n".join(pack_lines) + "\n\n"
-            f"{bonus_line}"
-            f"👉 {link}\n\n"
-            f"{_link_expiry_note()}",
-        )
+        await _send_token_pack_picker(phone, db)
+        return None
+
+    if cmd.startswith("buy pack "):
+        raw = cmd.removeprefix("buy pack ").strip()
+        tokens = int(raw) if raw.isdigit() else 0
+        await _start_whatsapp_checkout(phone, tokens, db)
         return None
 
     if cmd in ("cancel subscription", "cancel pro", "cancel", "unsubscribe"):
@@ -2151,7 +2310,12 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
                         reason=f"unsupported_interactive:{itype or 'unknown'}",
                     )
                     continue
-                user_text = _INTERACTIVE_CMD_MAP.get(bid, "help")
+                if bid.startswith("buy_") and bid[4:].isdigit():
+                    # Token-pack picks are config-driven (settings.TOKEN_PACKAGES),
+                    # so they can't live in the static command map.
+                    user_text = f"buy pack {bid[4:]}"
+                else:
+                    user_text = _INTERACTIVE_CMD_MAP.get(bid, "help")
             elif msg_type == "image":
                 media_id = (msg.get("image") or {}).get("id", "")
                 if media_id:

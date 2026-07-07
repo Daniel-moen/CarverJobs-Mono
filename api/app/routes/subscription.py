@@ -3,10 +3,7 @@ import hashlib
 import hmac
 import json
 import time
-import uuid
-from typing import Any
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -16,6 +13,7 @@ from app.analytics import record_server_event
 from app.database import get_db
 from app.logger import get_logger
 from app.security import require_session
+from app.services import payments
 from app.services.credits import add_credits, get_credit_balance
 from app.settings import settings
 
@@ -23,50 +21,13 @@ log = get_logger("carver.subscription")
 
 router = APIRouter(prefix="/subscription", tags=["subscription"])
 
-YOCO_CHECKOUTS_URL = "https://payments.yoco.com/api/checkouts"
-
-
-def _amount_str_to_cents(amount_str: str) -> int:
-    return int(round(float(amount_str.strip()) * 100))
-
-
-def _yoco_configured() -> bool:
-    return bool(settings.YOCO_SECRET_KEY)
-
-
-def _find_package(tokens: int) -> dict | None:
-    """Return the configured pack matching this token count, if any."""
-    for pkg in settings.TOKEN_PACKAGES:
-        if int(pkg["tokens"]) == tokens:
-            return pkg
-    return None
-
-
-def _package_amount(tokens: int) -> int:
-    """Return the total price in cents for a token package."""
-    pkg = _find_package(tokens)
-    if pkg is None:
-        raise ValueError(f"Unknown token package: {tokens}")
-    return _amount_str_to_cents(pkg["price"])
-
-
-def _package_for_amount(cents: int) -> dict | None:
-    """Reverse-lookup a pack from a charged amount (webhook fallback)."""
-    for pkg in settings.TOKEN_PACKAGES:
-        if _amount_str_to_cents(pkg["price"]) == cents:
-            return pkg
-    return None
-
-
-def _is_first_purchase(db: Session, user_key: str, exclude_payment_id: str | None = None) -> bool:
-    """True if the user has no completed purchase other than the one being processed."""
-    q = db.query(models.Subscription).filter(
-        models.Subscription.user_key == user_key,
-        models.Subscription.status == "completed",
-    )
-    if exclude_payment_id:
-        q = q.filter(models.Subscription.m_payment_id != exclude_payment_id)
-    return q.first() is None
+# Back-compat aliases — other modules (and tests) import these from here.
+_amount_str_to_cents = payments.amount_str_to_cents
+_yoco_configured = payments.yoco_configured
+_find_package = payments.find_package
+_package_amount = payments.package_amount
+_package_for_amount = payments.package_for_amount
+_is_first_purchase = payments.is_first_purchase
 
 
 def _verify_yoco_webhook_signature(
@@ -109,123 +70,57 @@ class CheckoutRequest(BaseModel):
 
 
 @router.post("/checkout")
-def create_checkout(body: CheckoutRequest, session: dict = Depends(require_session), db: Session = Depends(get_db)):
-    if not _yoco_configured():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Payment provider is not configured yet.",
-        )
-
-    pkg = _find_package(body.tokens)
-    if pkg is None:
-        valid = [p["tokens"] for p in settings.TOKEN_PACKAGES]
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid package. Choose one of: {valid}",
-        )
-
+async def create_checkout(body: CheckoutRequest, session: dict = Depends(require_session), db: Session = Depends(get_db)):
     user_key = session.get("sub", "")
-    payment_id = uuid.uuid4().hex
-    cents = _package_amount(body.tokens)
-    amount_str = f"{cents / 100:.2f}"
-
-    existing = (
-        db.query(models.Subscription)
-        .filter(models.Subscription.user_key == user_key, models.Subscription.status == "pending")
-        .first()
-    )
-    if existing:
-        db.delete(existing)
-        db.flush()
-
-    sub = models.Subscription(
-        user_key=user_key,
-        m_payment_id=payment_id,
-        status="pending",
-        amount=amount_str,
-        frequency=0,
-    )
-    db.add(sub)
-    db.commit()
-
-    frontend_base = settings.FRONTEND_BASE_URL.rstrip("/")
-
-    payload: dict[str, Any] = {
-        "amount": cents,
-        "currency": "ZAR",
-        "successUrl": f"{frontend_base}/subscription?status=success",
-        "cancelUrl": f"{frontend_base}/subscription?status=cancelled",
-        "failureUrl": f"{frontend_base}/subscription?status=failed",
-        "clientReferenceId": payment_id,
-        "metadata": {"m_payment_id": payment_id, "user_key": user_key, "tokens": body.tokens},
-        "lineItems": [
-            {
-                "displayName": f"CARVER {pkg['label']} Pack",
-                "description": f"{body.tokens} tokens for R{pkg['price']}",
-                "quantity": 1,
-                "pricingDetails": {"price": cents},
-            }
-        ],
-    }
-
     try:
-        resp = httpx.post(
-            YOCO_CHECKOUTS_URL,
-            headers={
-                "Authorization": f"Bearer {settings.YOCO_SECRET_KEY}",
-                "Content-Type": "application/json",
-                "Idempotency-Key": payment_id,
-            },
-            json=payload,
-            timeout=30.0,
-        )
-    except httpx.HTTPError as exc:
-        log.exception("Yoco checkout request failed | user=%s", user_key)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Payment provider unreachable. Please try again.",
-        ) from exc
-
-    if resp.status_code != 200:
-        yoco_body = resp.text[:500]
-        try:
-            yoco_err = resp.json()
-            yoco_detail = yoco_err.get("detail") or yoco_err.get("message") or yoco_body
-        except Exception:
-            yoco_detail = yoco_body
-        log.warning(
-            "Yoco checkout rejected | status=%s | detail=%s",
-            resp.status_code,
-            yoco_detail,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not start checkout. Please try again.",
-        )
-
-    try:
-        data = resp.json()
-    except json.JSONDecodeError as exc:
-        log.warning("Yoco checkout invalid JSON | %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Invalid response from payment provider.",
-        ) from exc
-
-    redirect_url = data.get("redirectUrl")
-    if not redirect_url:
-        log.warning("Yoco checkout missing redirectUrl | keys=%s", list(data.keys()))
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Invalid response from payment provider.",
-        )
-
-    if data.get("id"):
-        sub.checkout_id = str(data["id"])
-        db.commit()
-
-    log.info("Checkout created | user=%s | payment_id=%s | tokens=%d | checkout_id=%s", user_key, payment_id, body.tokens, data.get("id"))
+        redirect_url = await payments.create_checkout(db, user_key, body.tokens, channel="web")
+    except payments.CheckoutError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return {"ok": True, "redirect_url": redirect_url}
+
+
+def _is_whatsapp_user(db: Session, user_key: str) -> bool:
+    return (
+        db.query(models.WhatsAppSession.phone_number)
+        .filter(models.WhatsAppSession.phone_number == user_key)
+        .first()
+    ) is not None
+
+
+async def _notify_whatsapp_purchase(user_key: str, tokens_added: int, bonus: int, balance: int) -> None:
+    """Confirm a completed purchase in the buyer's WhatsApp chat. Best-effort."""
+    try:
+        from app.routes.whatsapp import _send_whatsapp, _send_whatsapp_buttons
+
+        bonus_line = f"🎁 Includes your *+{bonus}* first-purchase bonus.\n" if bonus > 0 else ""
+        await _send_whatsapp(
+            user_key,
+            f"✅ *Payment received — {tokens_added} tokens added!*\n"
+            f"{bonus_line}"
+            f"💳 New balance: *{balance}* token{'s' if balance != 1 else ''}.\n\n"
+            "Ready when you are — run *Find Matches* to put them to work. 🛥️",
+        )
+        await _send_whatsapp_buttons(
+            user_key,
+            "What's next?",
+            [("btn_find_matches", "Find Matches"), ("btn_menu", "Menu")],
+        )
+    except Exception:
+        log.exception("WhatsApp purchase confirmation failed | user=%s", user_key)
+
+
+async def _notify_whatsapp_payment_failed(user_key: str) -> None:
+    """Tell a WhatsApp buyer their payment failed so they can retry. Best-effort."""
+    try:
+        from app.routes.whatsapp import _send_whatsapp_buttons
+
+        await _send_whatsapp_buttons(
+            user_key,
+            "⚠️ Your payment didn't go through — you were *not* charged.\n\nWant to try again?",
+            [("cmd_subscribe", "Buy Tokens"), ("btn_menu", "Menu")],
+        )
+    except Exception:
+        log.exception("WhatsApp payment-failed notice failed | user=%s", user_key)
 
 
 @router.post("/webhook")
@@ -262,6 +157,8 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
         log.warning("Yoco webhook unknown m_payment_id=%s", m_payment_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
 
+    from_whatsapp = meta.get("channel") == "whatsapp" or _is_whatsapp_user(db, sub.user_key)
+
     if event_type == "payment.succeeded":
         if sub.status == "completed":
             # Yoco delivers webhooks at-least-once, so the same payment.succeeded
@@ -286,29 +183,44 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
             sub.payment_token = str(payload["id"])
         db.commit()
 
+        tokens_credited = 0
         tokens_to_add = meta.get("tokens")
         if tokens_to_add and int(tokens_to_add) > 0:
-            add_credits(db, sub.user_key, int(tokens_to_add))
-            log.info("Tokens credited | user=%s | tokens=%d", sub.user_key, int(tokens_to_add))
+            tokens_credited = int(tokens_to_add)
+            add_credits(db, sub.user_key, tokens_credited)
+            log.info("Tokens credited | user=%s | tokens=%d", sub.user_key, tokens_credited)
         else:
             fallback_pkg = _package_for_amount(_amount_str_to_cents(sub.amount))
             if fallback_pkg is not None:
-                add_credits(db, sub.user_key, int(fallback_pkg["tokens"]))
-                log.info("Tokens credited (from amount) | user=%s | tokens=%d", sub.user_key, int(fallback_pkg["tokens"]))
+                tokens_credited = int(fallback_pkg["tokens"])
+                add_credits(db, sub.user_key, tokens_credited)
+                log.info("Tokens credited (from amount) | user=%s | tokens=%d", sub.user_key, tokens_credited)
             else:
                 log.warning("Could not resolve token count for completed payment | user=%s | amount=%s", sub.user_key, sub.amount)
 
+        bonus_credited = 0
         bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
         if first_purchase and bonus > 0:
+            bonus_credited = bonus
             add_credits(db, sub.user_key, bonus)
             log.info("First-purchase bonus credited | user=%s | bonus=%d", sub.user_key, bonus)
 
         log.info("Token purchase completed | user=%s", sub.user_key)
         record_server_event(sub.user_key, "purchase_completed", str(sub.amount))
+
+        if from_whatsapp and tokens_credited > 0:
+            await _notify_whatsapp_purchase(
+                sub.user_key,
+                tokens_credited + bonus_credited,
+                bonus_credited,
+                get_credit_balance(db, sub.user_key),
+            )
     elif event_type == "payment.failed":
         sub.status = "failed"
         log.warning("Token purchase payment failed | user=%s", sub.user_key)
         db.commit()
+        if from_whatsapp:
+            await _notify_whatsapp_payment_failed(sub.user_key)
     else:
         log.info("Yoco webhook ignored event type | type=%s", event_type)
 

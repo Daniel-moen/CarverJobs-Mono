@@ -656,13 +656,13 @@
         <h1 class="text-xl font-bold text-white">{matches.length} Match{matches.length !== 1 ? 'es' : ''} Found</h1>
         <p class="text-xs text-slate-500">Scanned {totalScanned} positions</p>
         <p class="mt-1 text-xs text-cyan-200">{creditsBalance} token{creditsBalance === 1 ? '' : 's'} remaining</p>
-        {#if creditsBalance <= 1}
+        {#if creditsBalance <= 2}
           <button
             type="button"
             onclick={() => { trackClick('match_done_topup'); onNavigate('subscription') }}
             class="mt-2 rounded-lg border border-amber-300/30 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:border-amber-300/50 hover:bg-amber-300/20 hover:text-white active:scale-95"
           >
-            Running low — top up tokens
+            {creditsBalance === 0 ? 'Out of tokens — top up from R65' : 'Running low — top up from R65'}
           </button>
         {/if}
       </div>

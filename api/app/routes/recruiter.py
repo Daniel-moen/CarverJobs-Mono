@@ -13,6 +13,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.analytics import record_server_event
 from app.database import get_db
 from app.logger import get_logger
 from app.models import ContactUnlock, CrewProfile, Document, User
@@ -213,6 +214,7 @@ def unlock_candidate(
     cost = settings.RECRUITER_UNLOCK_COST_TOKENS
     remaining = spend_credits(db, agency_key, amount=cost)
     if remaining is None:
+        record_server_event(agency_key, "paywall_hit", "recruiter")
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=f"You need {cost} tokens to unlock this candidate. Top up to continue.",

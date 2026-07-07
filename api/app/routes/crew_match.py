@@ -11,6 +11,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app import metrics
+from app.analytics import record_server_event
 from app.database import get_db
 from app.logger import get_logger
 from app.models import CrewProfile, Document, Job, JobDraftEvent, JobHistoryEntry, MatchSession, MatchSessionResult
@@ -284,6 +285,7 @@ async def find_match(
 
     credits_remaining = spend_credits(db, user_key, amount=1)
     if credits_remaining is None:
+        record_server_event(user_key, "paywall_hit", "web")
         raise HTTPException(
             status_code=402,
             detail="You're out of tokens. Top up to keep matching, or submit a job to earn a free token.",
@@ -424,6 +426,7 @@ async def find_match(
             ))
 
         metrics.increment("crew_matches")
+        record_server_event(user_key, "match_completed", "web")
         log.info("Match session %d complete | user=%s | scanned=%d | matched=%d",
                  session_id, user_key, total_job_count, len(matched_results))
 
