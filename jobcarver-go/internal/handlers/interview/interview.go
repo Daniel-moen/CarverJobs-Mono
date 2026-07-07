@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -338,13 +339,11 @@ func anyToString(v any) string {
 		}
 		return "false"
 	case float64:
-		return strings.TrimRight(strings.TrimRight(jsonNumber(t), "0"), ".")
+		// Shortest exact decimal (no exponent, no spurious trailing zeros).
+		// The old TrimRight(x, "0") stripped zeros that are part of the integer,
+		// turning 5000 into "5" and 2020 into "202".
+		return strconv.FormatFloat(t, 'f', -1, 64)
 	default:
 		return ""
 	}
-}
-
-func jsonNumber(f float64) string {
-	b, _ := json.Marshal(f)
-	return string(b)
 }
