@@ -40,26 +40,70 @@
 
   /** @type {SVGPathElement|null} */
   let pathEl = null
+  /** @type {SVGPathElement|null} */
+  let drawEl = null
+  /** @type {HTMLElement|null} */
+  let sectionEl = null
   /** Marker positions in SVG units, set after mount. */
   let positions = $state(/** @type {{ x: number; y: number }[]} */ ([]))
+  /** 0→1 scroll progress of the section through the viewport; drives the
+   *  course drawing itself in and each marker igniting as the line reaches it. */
+  let progress = $state(0)
+
+  // Evenly spaced stop fractions with small padding from the ends.
+  const fractions = stops.map((_, i) => {
+    const inset = 0.04
+    if (stops.length === 1) return 0.5
+    return inset + (i * (1 - inset * 2)) / (stops.length - 1)
+  })
 
   onMount(() => {
     if (!pathEl) return
     const total = pathEl.getTotalLength()
-    // Place each stop at evenly spaced fractions, with small padding from the ends.
-    const fractions = stops.map((_, i) => {
-      const inset = 0.04
-      if (stops.length === 1) return 0.5
-      return inset + (i * (1 - inset * 2)) / (stops.length - 1)
-    })
     positions = fractions.map((f) => {
       const p = pathEl.getPointAtLength(total * f)
       return { x: p.x, y: p.y }
     })
+
+    // The overlay course draws with scroll: dashoffset runs total → 0 as the
+    // section moves up through the viewport. Scroll-linked, not just triggered.
+    if (drawEl) {
+      drawEl.style.strokeDasharray = String(total)
+      drawEl.style.strokeDashoffset = String(total)
+    }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      progress = 1
+      if (drawEl) drawEl.style.strokeDashoffset = '0'
+      return
+    }
+
+    let ticking = false
+    function update() {
+      ticking = false
+      if (!sectionEl) return
+      const r = sectionEl.getBoundingClientRect()
+      const vh = window.innerHeight || 1
+      // 0 when the section top enters the viewport, 1 a bit before it leaves.
+      const p = Math.min(1, Math.max(0, (vh - r.top) / (vh * 0.5 + r.height * 0.55)))
+      progress = p
+      if (drawEl) drawEl.style.strokeDashoffset = String(total * (1 - p))
+    }
+    function onScroll() {
+      if (ticking) return
+      ticking = true
+      requestAnimationFrame(update)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll, { passive: true })
+    update()
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
   })
 </script>
 
-<section class="route-section" aria-labelledby="route-title">
+<section class="route-section" aria-labelledby="route-title" bind:this={sectionEl}>
   <header class="route-head">
     <p class="engraved text-radium">Route</p>
     <h2 id="route-title" class="font-display text-4xl font-light leading-[1.05] text-white sm:text-5xl">
@@ -92,7 +136,7 @@
         <line x1="0" y1="160" x2="1200" y2="160" />
       </g>
 
-      <!-- the course itself — a gentle wave, like a nautical chart -->
+      <!-- the course itself — a faint dashed guide, like a nautical chart -->
       <path
         bind:this={pathEl}
         d="M 40 160 C 220 40, 420 220, 600 120 S 980 40, 1160 140"
@@ -100,11 +144,27 @@
         stroke="url(#route-line)"
         stroke-width="1.4"
         stroke-dasharray="4 6"
+        opacity="0.35"
       />
 
-      <!-- glowing markers, positioned after mount -->
+      <!-- the voyage so far — a solid brass line that draws itself with scroll -->
+      <path
+        bind:this={drawEl}
+        d="M 40 160 C 220 40, 420 220, 600 120 S 980 40, 1160 140"
+        fill="none"
+        stroke="var(--brass-bright)"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        class="course-draw"
+      />
+
+      <!-- glowing markers — each ignites as the drawn line reaches it -->
       {#each positions as pos, i}
-        <g class="marker" transform={`translate(${pos.x} ${pos.y})`} style="animation-delay: {i * 200}ms">
+        <g
+          class="marker"
+          class:marker-on={progress >= fractions[i]}
+          transform={`translate(${pos.x} ${pos.y})`}
+        >
           <circle r="14" fill="rgba(201, 169, 110, 0.08)" />
           <circle r="6"  fill="var(--brass-bright)" />
           <circle r="3"  fill="#0a0d12" />
@@ -116,7 +176,7 @@
   <!-- Stops grid — sits underneath the chart on desktop, stacks on mobile -->
   <ol class="route-stops">
     {#each stops as stop, i}
-      <li class="stop">
+      <li class="stop" style="--i:{i}">
         <div class="stop-marker" aria-hidden="true">
           <span class="stop-dot"></span>
           <span class="stop-num">{String(i + 1).padStart(2, '0')}</span>
@@ -179,13 +239,20 @@
   }
   @media (max-width: 720px) { .route-canvas { display: none; } }
 
+  .course-draw {
+    filter: drop-shadow(0 0 4px rgba(230, 201, 140, 0.5));
+  }
+
   .marker {
     opacity: 0;
-    animation: marker-in 0.6s ease-out forwards;
+    transform-box: fill-box;
+    transform-origin: center;
+    scale: 0.4;
+    transition: opacity 0.45s ease, scale 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
-  @keyframes marker-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+  .marker-on {
+    opacity: 1;
+    scale: 1;
   }
 
   /* ── Stops grid ── */
@@ -211,6 +278,14 @@
     grid-template-columns: auto 1fr;
     gap: 1rem;
     align-items: start;
+  }
+  /* Stops cascade in when the section's reveal wrapper flips visible. */
+  :global([data-visible='true']) .stop {
+    animation: stop-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 130ms + 250ms);
+  }
+  @keyframes stop-in {
+    from { opacity: 0; transform: translateY(18px); }
   }
   @media (min-width: 720px) {
     .stop {

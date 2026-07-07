@@ -1,36 +1,39 @@
 <script>
   /**
-   * MobileMarketingPage — the small-screen reimagining.
+   * MobileMarketingPage — the small-screen conversion ladder.
    *
-   * Same Bridge concept as the desktop LandingPage, but every section is
-   * stacked vertically and the chat moves *above* the headline so the
-   * first thing on screen is the live demo doing its thing.
+   * Same beats as the desktop LandingPage (offer → demo → how → compare →
+   * pricing → agencies → FAQ → finale) but stacked, with the live chat
+   * right under the CTA and a sticky bottom bar that keeps "Start free"
+   * one thumb-tap away for the whole scroll.
    *
-   * The same TypingChat / BridgeConsole / RouteMap / AgencySection
-   * components are reused; no logic is forked between the two
-   * marketing surfaces.
+   * The section components (TypingChat / BridgeConsole / RouteMap /
+   * CompareSection / TokenPacksSection / AgencySection / FaqSection)
+   * are shared with the desktop page; no logic is forked.
    */
   import { onMount } from 'svelte'
   import { trackEvent } from '../../config/analytics'
   import { whatsapp } from '../../config/site'
   import TypingChat from '../sections/TypingChat.svelte'
+  import RoleTicker from '../sections/RoleTicker.svelte'
+  import ScrollProgress from '../sections/ScrollProgress.svelte'
   import BridgeConsole from '../sections/BridgeConsole.svelte'
   import RouteMap from '../sections/RouteMap.svelte'
+  import CompareSection from '../sections/CompareSection.svelte'
+  import TokenPacksSection from '../sections/TokenPacksSection.svelte'
   import AgencySection from '../sections/AgencySection.svelte'
-  import WhatsAppFab from '../sections/WhatsAppFab.svelte'
+  import FaqSection from '../sections/FaqSection.svelte'
+  import StickyCtaBar from '../sections/StickyCtaBar.svelte'
 
   // `onStartMatch` accepted for router compatibility; unused on this page.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let { onSignIn = () => {}, onAgencySignup = () => {}, onStartMatch = () => {} } = $props()
 
+  const startMessage = "Hi Carver — I'd like to start matching to yacht roles."
+
   let chatPaused = $state(false)
   /** @type {HTMLElement|null} */
   let chatHost = $state(null)
-
-  let nowText = $state(currentTime())
-  function currentTime() {
-    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-  }
 
   onMount(() => {
     const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -72,7 +75,6 @@
     )
     if (chatHost) visibility.observe(chatHost)
 
-    const clockTimer = setInterval(() => { nowText = currentTime() }, 30_000)
     const depths = new Set()
     function onScroll() {
       const denom = document.body.scrollHeight || 1
@@ -90,13 +92,14 @@
     return () => {
       reveal.disconnect()
       visibility.disconnect()
-      clearInterval(clockTimer)
       window.removeEventListener('scroll', onScroll)
     }
   })
 </script>
 
 <div class="m-landing">
+  <ScrollProgress />
+
   <!-- ── Mobile nav ─────────────────────────────────────────── -->
   <nav class="m-nav">
     <a href="/" class="m-brand">
@@ -105,20 +108,16 @@
       <span class="font-display italic text-[12px] text-brass">v3</span>
     </a>
     <div class="m-nav-right">
+      <button type="button" onclick={() => onSignIn('mobile_nav')} class="m-nav-signin">Sign in</button>
       <a
-        href="/articles"
-        onclick={() => trackEvent('mobile_nav_articles')}
-        class="m-nav-articles"
-      >Articles</a>
-      <a
-        href={whatsapp.link('help')}
+        href={whatsapp.link(startMessage)}
         target="_blank"
         rel="noopener noreferrer"
         onclick={() => trackEvent('mobile_nav_whatsapp')}
-        class="m-nav-wa"
+        class="cta-wa m-nav-start"
       >
         <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
-        Open chat
+        Start free
       </a>
     </div>
   </nav>
@@ -130,55 +129,50 @@
       <div class="m-hero-glow"></div>
     </div>
 
-    <div class="m-status">
-      <span class="m-status-cell">
-        <span class="m-status-dot"></span>
-        <span class="engraved">UTC · {nowText}</span>
-      </span>
-      <span class="m-status-cell">
-        <span class="engraved text-brass">private beta</span>
-      </span>
-    </div>
-
-    <h1 class="m-title">
-      <span class="m-title-line">Text</span>
-      <span class="m-title-mark">“match”</span>
-      <span class="m-title-line">
-        <span class="font-hand text-brass m-title-hand">— and</span>
-        get the yacht.
-      </span>
-    </h1>
-
-    <p class="m-lede">
-      Carver runs the entire superyacht crew job hunt over WhatsApp.
-      <strong class="text-ivory">Build your profile, match every live role, and apply</strong> —
-      no app, no signup, and your first 2 match runs are free.
+    <p class="m-offer m-enter" style="--e:0">
+      <span class="m-offer-dot" aria-hidden="true"></span>
+      Free to start · 2 match runs on us
     </p>
 
-    <div class="m-ctas">
+    <h1 class="m-title">
+      <span class="m-title-line"><span class="m-line-inner" style="--l:0">Every live</span></span>
+      <span class="m-title-line"><span class="m-line-inner" style="--l:1">yacht job.</span></span>
+      <span class="m-title-line"><span class="m-line-inner" style="--l:2">
+        <span class="font-hand text-brass m-title-hand">One text:</span>
+        <span class="m-title-mark">“match”</span>
+      </span></span>
+    </h1>
+
+    <p class="m-lede m-enter" style="--e:1">
+      Carver runs your whole superyacht job hunt inside WhatsApp.
+      <strong class="text-ivory">Profile built in chat, every live role scanned on demand,
+      application emails drafted for you</strong> — in about 25 seconds.
+      No app, no forms, no card.
+    </p>
+
+    <div class="m-ctas m-enter" style="--e:2">
       <a
-        href={whatsapp.link("Hi Carver — I'd like to start matching to yacht roles.")}
+        href={whatsapp.link(startMessage)}
         target="_blank"
         rel="noopener noreferrer"
         onclick={() => trackEvent('mobile_hero_whatsapp')}
-        class="cta-wa m-cta-primary"
+        class="cta-wa cta-shine cta-beacon m-cta-primary"
       >
         <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
           <path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/>
         </svg>
-        Open WhatsApp
+        Start free on WhatsApp
       </a>
-      <span class="m-cta-or" aria-hidden="true">or</span>
-      <button
-        type="button"
-        onclick={() => onSignIn('mobile_hero')}
-        class="cta-ivory m-cta-secondary"
+      <a
+        href="/signup"
+        onclick={() => trackEvent('mobile_hero_web_signup')}
+        class="m-cta-secondary"
       >
-        Use the website
-      </button>
+        Prefer the website? Create a free account →
+      </a>
     </div>
 
-    <!-- Live chat is below the fold on mobile so the headline lands first -->
+    <!-- Live chat directly under the CTA — proof before scrolling -->
     <div class="m-chat" bind:this={chatHost}>
       <p class="m-chat-tag">
         <span class="m-chat-tag-dot"></span>
@@ -193,24 +187,27 @@
     <ul class="m-trust">
       <li>
         <span class="trust-seal">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        </span>
-        <span>Encrypted · TLS + at-rest</span>
-      </li>
-      <li>
-        <span class="trust-seal">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M2 12h20"/></svg>
-        </span>
-        <span>EU-hosted · GDPR by design</span>
-      </li>
-      <li>
-        <span class="trust-seal">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
         </span>
-        <span>Real captains, verified agencies</span>
+        <span><strong>Applications written for you</strong> — review, send, done</span>
+      </li>
+      <li>
+        <span class="trust-seal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        </span>
+        <span><strong>From R9 per match run</strong> — no subscription, ever</span>
+      </li>
+      <li>
+        <span class="trust-seal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </span>
+        <span>Encrypted · EU-hosted · real captains &amp; verified agencies</span>
       </li>
     </ul>
   </section>
+
+  <!-- Ticker — roles & ports marquee -->
+  <RoleTicker />
 
   <!-- Bridge -->
   <div data-animate>
@@ -222,9 +219,24 @@
     <RouteMap />
   </div>
 
+  <!-- Compare -->
+  <div data-animate>
+    <CompareSection />
+  </div>
+
+  <!-- Pricing -->
+  <div data-animate>
+    <TokenPacksSection source="landing-mobile" />
+  </div>
+
   <!-- Agencies -->
   <div data-animate>
     <AgencySection {onAgencySignup} />
+  </div>
+
+  <!-- FAQ -->
+  <div data-animate>
+    <FaqSection />
   </div>
 
   <!-- Final CTA -->
@@ -235,31 +247,37 @@
       <span class="font-hand text-brass">message</span>
       away.
     </h2>
+    <p class="m-finale-sub">
+      Two free match runs. Bonus tokens with your first pack. Never a subscription.
+      <strong class="m-finale-urgency">Somewhere right now a captain is reading applications —
+      yours should be in the pile.</strong>
+    </p>
     <a
-      href={whatsapp.link("Hi Carver — I'd like to start matching to yacht roles.")}
+      href={whatsapp.link(startMessage)}
       target="_blank"
       rel="noopener noreferrer"
       onclick={() => trackEvent('mobile_finale_whatsapp')}
-      class="cta-wa m-finale-cta"
+      class="cta-wa cta-shine cta-beacon m-finale-cta"
     >
       <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
         <path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/>
       </svg>
-      Open WhatsApp
+      Start free on WhatsApp
     </a>
-    <button
-      type="button"
-      onclick={() => onSignIn('mobile_finale')}
+    <a
+      href="/signup"
+      onclick={() => trackEvent('mobile_finale_web_signup')}
       class="m-finale-secondary"
     >
-      Or use the website →
-    </button>
+      Or create a free web account →
+    </a>
   </section>
 
   <!-- Footer -->
   <footer class="m-foot">
     <span class="font-hand text-brass text-base">For the crew, by the crew.</span>
     <div class="m-foot-links">
+      <a href="/pricing">Pricing</a>
       <a href="/privacy">Privacy</a>
       <a href="/terms">Terms</a>
       <a href="/data-deletion">Delete data</a>
@@ -267,7 +285,7 @@
     <p class="m-foot-meta">© {new Date().getFullYear()} Carver · made on the dock</p>
   </footer>
 
-  <WhatsAppFab />
+  <StickyCtaBar source="landing-mobile" />
 </div>
 
 <style>
@@ -276,6 +294,8 @@
     color: var(--text-primary);
     overflow-x: hidden;
     min-height: 100vh;
+    /* leave room for the sticky CTA bar */
+    padding-bottom: 4.5rem;
   }
 
   /* ── Nav ───────────────────────────────────────────────── */
@@ -305,35 +325,32 @@
     box-shadow: 0 0 6px rgba(201, 169, 110, 0.55);
     align-self: center;
   }
-  .m-nav-wa {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.45rem 0.8rem;
-    border-radius: 9999px;
-    background: rgba(37, 211, 102, 0.12);
-    border: 1px solid rgba(37, 211, 102, 0.4);
-    color: #6ee7a8;
-    font-size: 11.5px;
-    font-weight: 500;
-    text-decoration: none;
-  }
-  .m-nav-wa svg { width: 12px; height: 12px; }
   .m-nav-right {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
   }
-  .m-nav-articles {
-    padding: 0.4rem 0.7rem;
+  .m-nav-signin {
+    padding: 0.45rem 0.8rem;
     border-radius: 9999px;
-    border: 1px solid rgba(201, 169, 110, 0.28);
-    background: rgba(201, 169, 110, 0.06);
+    border: 1px solid rgba(243, 234, 216, 0.22);
+    background: rgba(243, 234, 216, 0.04);
     color: var(--ivory);
     font-size: 11.5px;
     font-weight: 500;
+    cursor: pointer;
+  }
+  .m-nav-start {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.85rem;
+    border-radius: 9999px;
+    font-size: 11.5px;
+    font-weight: 600;
     text-decoration: none;
   }
+  .m-nav-start svg { width: 12px; height: 12px; }
 
   /* ── Hero ──────────────────────────────────────────────── */
   .m-hero {
@@ -363,18 +380,23 @@
     filter: blur(28px);
   }
 
-  .m-status {
+  .m-offer {
     position: relative;
-    display: flex;
-    justify-content: space-between;
+    margin: 0;
+    display: inline-flex;
     align-items: center;
-    padding-bottom: 0.65rem;
-    border-bottom: 1px dashed rgba(201, 169, 110, 0.18);
-    gap: 0.6rem;
-    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.4rem 0.85rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(141, 240, 196, 0.35);
+    background: rgba(141, 240, 196, 0.07);
+    color: var(--radium);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
   }
-  .m-status-cell { display: inline-flex; align-items: center; gap: 0.35rem; }
-  .m-status-dot {
+  .m-offer-dot {
     width: 5px; height: 5px;
     border-radius: 9999px;
     background: var(--radium);
@@ -388,7 +410,7 @@
 
   .m-title {
     position: relative;
-    margin: 1.6rem 0 0;
+    margin: 1.4rem 0 0;
     font-family: var(--font-serif);
     font-optical-sizing: auto;
     font-variation-settings: "SOFT" 100, "opsz" 144;
@@ -398,7 +420,31 @@
     line-height: 1;
     letter-spacing: -0.025em;
   }
-  .m-title-line { display: block; }
+  /* ── Hero entrance choreography (runs once on load) ────────────── */
+  .m-enter {
+    animation: m-enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--e, 0) * 160ms + 550ms);
+  }
+  @keyframes m-enter {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .m-title-line {
+    display: block;
+    overflow: hidden;
+    padding: 0.06em 0.1em 0.16em;
+    margin: -0.06em -0.1em -0.16em;
+  }
+  .m-line-inner {
+    display: block;
+    animation: m-line-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--l, 0) * 140ms + 120ms);
+  }
+  @keyframes m-line-up {
+    from { transform: translateY(108%); opacity: 0.4; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
   .m-title-mark {
     display: inline-block;
     margin-top: 0.18rem;
@@ -411,10 +457,24 @@
     text-shadow: 0 0 24px rgba(201, 169, 110, 0.35);
   }
   .m-title-hand {
-    font-size: 0.7em;
+    font-size: 0.65em;
     font-weight: 600;
     margin-right: 0.25em;
     vertical-align: 0.15em;
+  }
+  /* The pill stamps in after its line lands, then glows softly forever. */
+  .m-title-mark {
+    animation:
+      m-mark-stamp 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 700ms both,
+      m-mark-glow 3.6s ease-in-out 1.4s infinite;
+  }
+  @keyframes m-mark-stamp {
+    from { transform: scale(1.45) rotate(-4deg); opacity: 0; }
+    to   { transform: scale(1) rotate(0deg);     opacity: 1; }
+  }
+  @keyframes m-mark-glow {
+    0%, 100% { text-shadow: 0 0 24px rgba(201, 169, 110, 0.35); border-color: rgba(201, 169, 110, 0.32); }
+    50%      { text-shadow: 0 0 34px rgba(230, 201, 140, 0.6);  border-color: rgba(230, 201, 140, 0.55); }
   }
 
   .m-lede {
@@ -432,38 +492,29 @@
     margin-top: 1.75rem;
     display: flex;
     flex-direction: column;
-    gap: 0.7rem;
+    gap: 0.85rem;
   }
   .m-cta-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.55rem;
-    padding: 0.95rem 1.25rem;
+    padding: 1rem 1.25rem;
     border-radius: 12px;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
     text-decoration: none;
   }
-  .m-cta-primary svg { width: 16px; height: 16px; }
-  .m-cta-or {
-    align-self: center;
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    padding: 0.1rem 0;
-  }
+  .m-cta-primary svg { width: 17px; height: 17px; }
   .m-cta-secondary {
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    padding: 0.85rem 1.25rem;
-    border-radius: 12px;
-    font-size: 13.5px;
-    font-weight: 600;
+    align-self: center;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(243, 234, 216, 0.3);
+    padding-bottom: 1px;
   }
+  .m-cta-secondary:hover { color: var(--ivory); }
 
   .m-chat {
     margin-top: 2.25rem;
@@ -512,6 +563,7 @@
     color: var(--text-secondary);
     font-size: 12.5px;
   }
+  .m-trust li strong { color: var(--ivory); font-weight: 500; }
   .m-trust svg { width: 11px; height: 11px; }
 
   /* ── Final CTA ────────────────────────────────────────── */
@@ -522,13 +574,26 @@
   }
   .m-finale .engraved { display: inline-block; }
   .m-finale-title {
-    margin: 1rem 0 1.75rem;
+    margin: 1rem 0 0;
     font-family: var(--font-serif);
     font-weight: 300;
     color: var(--ivory);
     font-size: clamp(2rem, 8vw, 3rem);
     line-height: 1.05;
     letter-spacing: -0.02em;
+  }
+  .m-finale-sub {
+    margin: 1rem auto 1.75rem;
+    max-width: 24rem;
+    color: var(--text-secondary);
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+  .m-finale-urgency {
+    display: block;
+    margin-top: 0.5rem;
+    color: var(--ivory);
+    font-weight: 500;
   }
   .m-finale-cta {
     display: inline-flex;
@@ -538,21 +603,18 @@
     padding: 1rem 1.5rem;
     border-radius: 9999px;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     text-decoration: none;
   }
   .m-finale-cta svg { width: 16px; height: 16px; }
   .m-finale-secondary {
     margin-top: 1rem;
-    display: inline-block;
+    display: block;
     color: var(--text-secondary);
-    background: none;
-    border: none;
     font-size: 13px;
     text-decoration: underline;
     text-decoration-color: rgba(243, 234, 216, 0.25);
     text-underline-offset: 4px;
-    cursor: pointer;
   }
   .m-finale-secondary:hover { color: var(--ivory); }
 
@@ -566,6 +628,8 @@
   .m-foot-links {
     margin-top: 0.85rem;
     display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 1rem;
     font-size: 12px;
     color: var(--text-muted);

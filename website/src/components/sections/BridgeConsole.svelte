@@ -47,14 +47,14 @@
     </header>
 
     <div class="instruments">
-      <article class="instrument flow">
+      <article class="instrument flow" style="--c:0">
         <div class="instrument-head">
           <span class="engraved">How matching works</span>
         </div>
 
         <ol class="flow-list">
           {#each matchSteps as step, i}
-            <li class="flow-step">
+            <li class="flow-step" style="--i:{i}">
               <span class="flow-num">{String(i + 1).padStart(2, '0')}</span>
               <div>
                 <p class="flow-title">{step.title}</p>
@@ -71,14 +71,14 @@
         </p>
       </article>
 
-      <article class="instrument sources">
+      <article class="instrument sources" style="--c:1">
         <div class="instrument-head">
           <span class="engraved">Where listings come from</span>
         </div>
 
         <ul class="src-list">
-          {#each sources as name}
-            <li class="src-row">
+          {#each sources as name, i}
+            <li class="src-row" style="--i:{i}">
               <span class="src-marker" aria-hidden="true"></span>
               <span class="src-name">{name}</span>
             </li>
@@ -158,6 +158,23 @@
     justify-content: space-between;
     border-bottom: 1px dashed rgba(201, 169, 110, 0.18);
     padding-bottom: 0.75rem;
+  }
+
+  /* Cards, steps and source rows cascade in behind the reveal wrapper. */
+  :global([data-visible='true']) .instrument {
+    animation: card-in 0.65s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--c, 0) * 160ms + 120ms);
+  }
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(24px); }
+  }
+  :global([data-visible='true']) .flow-step,
+  :global([data-visible='true']) .src-row {
+    animation: row-slide 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 110ms + var(--c, 0) * 160ms + 420ms);
+  }
+  @keyframes row-slide {
+    from { opacity: 0; transform: translateX(-12px); }
   }
 
   .flow-list {

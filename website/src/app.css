@@ -418,6 +418,59 @@ body {
   transform: translateY(-1px);
 }
 
+/* Shine sweep — a sheen that periodically sweeps across a primary CTA.
+   Pair with .cta-wa / .cta-brass on the highest-intent buttons only. */
+.cta-shine {
+  position: relative;
+  overflow: hidden;
+}
+.cta-shine::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 34%;
+  left: -50%;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.38) 50%,
+    transparent 100%
+  );
+  transform: skewX(-20deg);
+  animation: cta-shine 4.6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes cta-shine {
+  0%, 58%  { left: -50%; }
+  78%, 100% { left: 140%; }
+}
+
+/* Beacon pulse — soft expanding ring behind the single most important CTA. */
+.cta-beacon {
+  position: relative;
+  isolation: isolate;
+}
+.cta-beacon::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: inherit;
+  background: rgba(37, 211, 102, 0.32);
+  z-index: -1;
+  animation: cta-beacon 2.8s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes cta-beacon {
+  0%        { transform: scale(0.94); opacity: 0.55; }
+  70%, 100% { transform: scale(1.16); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta-shine::after,
+  .cta-beacon::before { display: none; }
+}
+
 /* WhatsApp green CTA — used on the conversation entry points. */
 .cta-wa {
   color: #06170d;

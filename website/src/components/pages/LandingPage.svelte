@@ -1,47 +1,64 @@
 <script>
   /**
-   * LandingPage — "The Bridge" rebuild.
+   * LandingPage — "The Bridge", rebuilt as a conversion ladder.
    *
-   * Direction: a maritime command-bridge experience. Every section is a
-   * deliberate beat in the journey from "first text" to "next berth":
+   * Every section is one rung from "stranger" to "buyer":
    *
-   *   1. Hero          — a WhatsApp conversation with the real bot script
-   *                      alongside an editorial headline.
-   *   2. Fleet ticker  — AIS-style scrolling vessel marquee under the hero
-   *                      (transitions hero → bridge with maritime weight).
-   *   3. Bridge        — three brass instrument cards: compass, how
-   *                      matching works, and where listings come from.
-   *   4. Route         — "From signal to berth" — a four-stop charter
-   *                      route on a curved nautical course.
-   *   5. Agencies      — proper section for captains/agencies to post a
-   *                      role, with three plain value props and one CTA.
-   *   6. Final CTA     — a single, calm closing line.
+   *   1. Hero          — offer chip + outcome headline + one dominant
+   *                      WhatsApp CTA, live bot demo alongside.
+   *   2. Bridge        — how matching works & where listings come from.
+   *   3. Route         — "from signal to berth" journey.
+   *   4. Compare       — the old dock-walk hunt vs one text (pain → relief).
+   *   5. Pricing       — token packs with anchors, savings and the
+   *                      first-purchase bonus. The buy-tokens pitch.
+   *   6. Agencies      — captains/agencies post a role.
+   *   7. FAQ           — objection handling + FAQPage JSON-LD.
+   *   8. Final CTA     — offer restated, both paths.
    *
-   * Animation budget is tight — heavy effects (chat typing, compass
-   * needle, sweeping radar) only run while the section is on screen,
-   * driven by an IntersectionObserver that flips a `paused` prop.
+   * Rule carried over from the original build: no invented telemetry, no
+   * fake user counts, no fabricated testimonials. Every claim is a real
+   * product behaviour (2 free runs, +5 first-purchase bonus, job-post
+   * rewards, 14-day refund).
+   *
+   * Animation budget stays tight — heavy effects only run while the
+   * section is on screen, driven by an IntersectionObserver.
    */
   import { onMount } from 'svelte'
   import { trackEvent } from '../../config/analytics'
   import { whatsapp } from '../../config/site'
+  import { DEFAULT_FIRST_PURCHASE_BONUS } from '../../config/subscriptionCheckout'
   import TypingChat from '../sections/TypingChat.svelte'
+  import RoleTicker from '../sections/RoleTicker.svelte'
+  import ScrollProgress from '../sections/ScrollProgress.svelte'
   import BridgeConsole from '../sections/BridgeConsole.svelte'
   import RouteMap from '../sections/RouteMap.svelte'
+  import CompareSection from '../sections/CompareSection.svelte'
+  import TokenPacksSection from '../sections/TokenPacksSection.svelte'
   import AgencySection from '../sections/AgencySection.svelte'
+  import FaqSection from '../sections/FaqSection.svelte'
   import WhatsAppFab from '../sections/WhatsAppFab.svelte'
 
   // `onStartMatch` is accepted for API compatibility with the router but
-  // intentionally ignored: the new design routes everyone through WhatsApp
+  // intentionally ignored: the design routes everyone through WhatsApp
   // or sign-in instead of jumping straight to the matching engine.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let { onSignIn = () => {}, onAgencySignup = () => {}, onStartMatch = () => {} } = $props()
+
+  const startMessage = "Hi Carver — I'd like to start matching to yacht roles."
 
   // Pause the typing chat when it scrolls out of view.
   let chatPaused = $state(false)
   /** @type {HTMLElement|null} */
   let chatHost = $state(null)
 
-  // Live clock for the chat status bar — locale-aware, 24h.
+  // Parallax layers in the hero + the "see how it works" cue.
+  /** @type {HTMLElement|null} */
+  let glowEl = $state(null)
+  /** @type {HTMLElement|null} */
+  let gridBgEl = $state(null)
+  let cueHidden = $state(false)
+
+  // Live clock for the status bar — locale-aware, 24h.
   let nowText = $state(currentTime())
   function currentTime() {
     return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -92,17 +109,30 @@
     )
     if (chatHost) visibilityObs.observe(chatHost)
 
-    // Live clock + scroll depth analytics
+    // Live clock + scroll depth analytics + hero parallax
     const clockTimer = setInterval(() => { nowText = currentTime() }, 30_000)
     const depths = new Set()
+    const parallaxOn = !prefersReduced && window.matchMedia('(pointer: fine)').matches
+    let parallaxTick = false
     function onScroll() {
+      const y = window.scrollY
+      cueHidden = y > 140
       const denom = document.body.scrollHeight || 1
-      const pct = Math.round(((window.scrollY + window.innerHeight) / denom) * 100)
+      const pct = Math.round(((y + window.innerHeight) / denom) * 100)
       for (const t of [25, 50, 75, 100]) {
         if (pct >= t && !depths.has(t)) {
           depths.add(t)
           trackEvent('scroll_depth', { page: 'landing', value: String(t) })
         }
+      }
+      // Depth: the glow drifts up faster than the grid as the hero scrolls away.
+      if (parallaxOn && !parallaxTick && y < window.innerHeight * 1.5) {
+        parallaxTick = true
+        requestAnimationFrame(() => {
+          parallaxTick = false
+          if (glowEl)   glowEl.style.transform   = `translateY(${y * 0.22}px)`
+          if (gridBgEl) gridBgEl.style.transform = `translateY(${y * 0.08}px)`
+        })
       }
     }
     window.addEventListener('scroll', onScroll, { passive: true })
@@ -117,7 +147,9 @@
 </script>
 
 <div class="landing">
-  <!-- ── NAV — stays minimal so the chat does the work ───────────────── -->
+  <ScrollProgress />
+
+  <!-- ── NAV ─────────────────────────────────────────────────────────── -->
   <nav class="nav">
     <div class="nav-inner">
       <a href="/" class="nav-brand">
@@ -127,19 +159,20 @@
       </a>
       <div class="nav-links">
         <a href="#route" class="nav-link">How it works</a>
+        <a href="#pricing" class="nav-link" onclick={() => trackEvent('nav_pricing')}>Pricing</a>
         <a href="#agencies" class="nav-link">For agencies</a>
         <a href="/articles" class="nav-link" onclick={() => trackEvent('nav_articles')}>Articles</a>
+        <button onclick={() => onSignIn('nav')} class="nav-signin">Sign in</button>
         <a
-          href={whatsapp.link('help')}
+          href={whatsapp.link(startMessage)}
           target="_blank"
           rel="noopener noreferrer"
           onclick={() => trackEvent('nav_whatsapp_cta')}
-          class="nav-wa"
+          class="cta-wa nav-start"
         >
           <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
-          Open chat
+          Start free
         </a>
-        <button onclick={() => onSignIn('nav')} class="nav-signin">Sign in</button>
       </div>
     </div>
   </nav>
@@ -148,85 +181,89 @@
   <section class="hero" role="banner">
     <!-- Decorative background — quiet, no neon -->
     <div class="hero-bg" aria-hidden="true">
-      <div class="hero-grid"></div>
-      <div class="hero-glow"></div>
+      <div class="hero-grid" bind:this={gridBgEl}></div>
+      <div class="hero-glow" bind:this={glowEl}></div>
     </div>
 
     <div class="hero-inner">
-      <!-- Slim status line — just live clock + private beta pip -->
+      <!-- Slim status line — live clock + beta pip -->
       <div class="hero-status">
         <span class="hero-status-cell">
           <span class="status-dot" aria-hidden="true"></span>
           <span class="engraved">UTC · {nowText}</span>
         </span>
         <span class="hero-status-cell ml-auto">
-          <span class="engraved text-brass">private beta · superyacht crew</span>
+          <span class="engraved text-brass">superyacht crew · deck to galley</span>
         </span>
       </div>
 
       <!-- Two-column hero: editorial copy left, live chat right -->
       <div class="hero-grid-cols">
         <div class="hero-copy" data-animate data-stagger>
+          <p class="hero-offer">
+            <span class="hero-offer-dot" aria-hidden="true"></span>
+            Free to start — your first 2 match runs are on us
+          </p>
+
           <h1 class="hero-title">
-            <span class="hero-title-line">Text</span>
-            <span class="hero-title-line">
+            <span class="hero-title-line"><span class="line-inner" style="--l:0">Every live</span></span>
+            <span class="hero-title-line"><span class="line-inner" style="--l:1">yacht job.</span></span>
+            <span class="hero-title-line"><span class="line-inner" style="--l:2">
+              <span class="font-hand text-brass hero-title-hand">One text:</span>
               <span class="hero-title-mark">“match”</span>
-            </span>
-            <span class="hero-title-line">
-              <span class="font-hand text-brass hero-title-hand">— and</span>
-              get the yacht.
-            </span>
+            </span></span>
           </h1>
 
           <p class="hero-lede">
-            Carver runs the entire superyacht crew job hunt over WhatsApp.
-            <strong class="text-ivory">Build your profile, match against every live role, and apply</strong> —
-            no app to install, no website to log into, no inbox to sort.
+            Carver runs your whole superyacht job hunt inside WhatsApp.
+            <strong class="text-ivory">It builds your profile in chat, scans every live role the moment you ask,
+            and drafts the application email for each match</strong> — in about 25 seconds.
+            No app to install, no forms, no inbox to sort.
           </p>
 
           <div class="hero-ctas">
             <a
-              href={whatsapp.link("Hi Carver — I'd like to start matching to yacht roles.")}
+              href={whatsapp.link(startMessage)}
               target="_blank"
               rel="noopener noreferrer"
               onclick={() => trackEvent('hero_whatsapp_cta')}
-              class="cta-wa hero-cta-primary"
+              class="cta-wa cta-shine cta-beacon hero-cta-primary"
             >
               <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
                 <path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/>
               </svg>
-              <span>Open WhatsApp</span>
-              <span class="hero-cta-meta">free · first 2 matches on us</span>
+              <span>Start free on WhatsApp</span>
+              <span class="hero-cta-meta">no card · no signup</span>
             </a>
-            <span class="hero-cta-or" aria-hidden="true">or</span>
-            <button
-              type="button"
-              onclick={() => onSignIn('hero')}
-              class="cta-ivory hero-cta-secondary"
-            >
-              Use the website
-            </button>
           </div>
+          <p class="hero-alt">
+            Prefer a bigger screen?
+            <a
+              href="/signup"
+              class="hero-alt-link"
+              onclick={() => trackEvent('hero_web_signup')}
+            >Create a free web account →</a>
+          </p>
 
-          <!-- Three trust pips: small, paper-coloured, no neon -->
+          <!-- Value pips — real product facts, no invented numbers -->
           <ul class="hero-trust">
-            <li>
-              <span class="trust-seal">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              </span>
-              <p>End-to-end encrypted · TLS + at-rest</p>
-            </li>
-            <li>
-              <span class="trust-seal">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M2 12h20M12 2a14 14 0 0 1 0 20M12 2a14 14 0 0 0 0 20"/></svg>
-              </span>
-              <p>EU-hosted, GDPR by design</p>
-            </li>
             <li>
               <span class="trust-seal">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
               </span>
-              <p>Real listings · captains & verified agencies</p>
+              <p><strong>Applications written for you</strong> — a tailored intro email per match</p>
+            </li>
+            <li>
+              <span class="trust-seal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+              </span>
+              <p><strong>From R9 per match run</strong> — no subscription, tokens never expire</p>
+            </li>
+            <li>
+              <span class="trust-seal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+              <p>Encrypted &amp; EU-hosted · real listings from captains and verified agencies</p>
             </li>
           </ul>
         </div>
@@ -244,11 +281,20 @@
           </p>
         </aside>
       </div>
+
+      <!-- Scroll cue — fades once the visitor commits to scrolling -->
+      <a href="#route" class="hero-cue" class:hero-cue-hidden={cueHidden}>
+        <span>See how it works</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </a>
     </div>
 
   </section>
 
-  <!-- ── BRIDGE — two instrument cards ──────────────────────────────── -->
+  <!-- ── TICKER — roles & ports marquee ──────────────────────────────── -->
+  <RoleTicker />
+
+  <!-- ── BRIDGE — how it works ──────────────────────────────────────── -->
   <div data-animate>
     <BridgeConsole />
   </div>
@@ -258,12 +304,27 @@
     <RouteMap />
   </div>
 
+  <!-- ── COMPARE — the old hunt vs one text ──────────────────────────── -->
+  <div data-animate>
+    <CompareSection />
+  </div>
+
+  <!-- ── PRICING — token packs ───────────────────────────────────────── -->
+  <div data-animate>
+    <TokenPacksSection source="landing" />
+  </div>
+
   <!-- ── AGENCIES — post a role ──────────────────────────────────────── -->
   <div data-animate>
     <AgencySection {onAgencySignup} />
   </div>
 
-  <!-- ── FINAL CTA — calm, single line ───────────────────────────────── -->
+  <!-- ── FAQ — objection handling ────────────────────────────────────── -->
+  <div data-animate>
+    <FaqSection />
+  </div>
+
+  <!-- ── FINAL CTA ───────────────────────────────────────────────────── -->
   <section class="finale" data-animate>
     <div class="finale-inner">
       <p class="engraved text-radium">All hands</p>
@@ -272,30 +333,36 @@
         <span class="font-hand text-brass">message</span>
         away.
       </h2>
+      <p class="finale-sub">
+        Two free match runs, an extra {DEFAULT_FIRST_PURCHASE_BONUS} bonus tokens with your first pack,
+        and never a subscription.
+        <strong class="finale-urgency">Somewhere right now a captain is reading applications —
+        yours should be in the pile.</strong>
+      </p>
       <div class="finale-ctas">
         <a
-          href={whatsapp.link("Hi Carver — I'd like to start matching to yacht roles.")}
+          href={whatsapp.link(startMessage)}
           target="_blank"
           rel="noopener noreferrer"
           onclick={() => trackEvent('finale_whatsapp_cta')}
-          class="cta-wa finale-primary"
+          class="cta-wa cta-shine cta-beacon finale-primary"
         >
           <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
             <path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/>
           </svg>
-          Open WhatsApp
+          Start free on WhatsApp
         </a>
         <span class="finale-or" aria-hidden="true">or</span>
-        <button
-          type="button"
-          onclick={() => onSignIn('finale')}
+        <a
+          href="/signup"
+          onclick={() => trackEvent('finale_web_signup')}
           class="cta-ivory finale-secondary"
         >
-          Use the website
-        </button>
+          Create a web account
+        </a>
       </div>
       <p class="finale-foot">
-        First 100 crew get founders rate · cancel anytime · {whatsapp.configured ? whatsapp.display : 'WhatsApp number live in production'}
+        no card required · cancel nothing, there's nothing recurring · {whatsapp.configured ? whatsapp.display : 'WhatsApp number live in production'}
       </p>
     </div>
   </section>
@@ -310,8 +377,10 @@
       </div>
       <p class="foot-tag font-hand text-brass text-lg">For the crew, by the crew.</p>
       <div class="foot-links">
+        <a href="/pricing">Pricing</a>
         <a href="/privacy">Privacy</a>
         <a href="/terms">Terms</a>
+        <a href="/refund-policy">Refunds</a>
         <a href="/data-deletion">Delete data</a>
       </div>
       <p class="foot-meta">
@@ -385,24 +454,20 @@
   .nav-link:hover { color: var(--ivory); }
   @media (min-width: 768px) { .nav-link { display: inline-flex; } }
 
-  .nav-wa {
+  .nav-start {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.5rem 0.85rem;
+    gap: 0.45rem;
+    padding: 0.55rem 1.05rem;
     border-radius: 9999px;
-    background: rgba(37, 211, 102, 0.1);
-    border: 1px solid rgba(37, 211, 102, 0.35);
-    color: #6ee7a8;
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 12.5px;
+    font-weight: 600;
     text-decoration: none;
-    transition: background 0.2s ease, color 0.2s ease;
   }
-  .nav-wa:hover { background: rgba(37, 211, 102, 0.18); color: #a7f3c4; }
-  .nav-wa svg { width: 13px; height: 13px; }
+  .nav-start svg { width: 14px; height: 14px; }
 
   .nav-signin {
+    display: none;
     padding: 0.5rem 1rem;
     border-radius: 9999px;
     border: 1px solid rgba(243, 234, 216, 0.22);
@@ -413,6 +478,7 @@
     transition: background 0.2s ease, border-color 0.2s ease;
     cursor: pointer;
   }
+  @media (min-width: 640px) { .nav-signin { display: inline-flex; } }
   .nav-signin:hover {
     background: rgba(243, 234, 216, 0.1);
     border-color: rgba(243, 234, 216, 0.35);
@@ -506,6 +572,31 @@
     }
   }
 
+  /* Offer chip — first thing read, states the free offer */
+  .hero-offer {
+    margin: 0 0 1.6rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.45rem 1rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(141, 240, 196, 0.35);
+    background: rgba(141, 240, 196, 0.07);
+    color: var(--radium);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .hero-offer-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--radium);
+    box-shadow: 0 0 0 3px rgba(141, 240, 196, 0.18);
+    animation: pip 2s ease-in-out infinite;
+  }
+
   /* Title — calm, editorial, no excess gradient */
   .hero-title {
     font-family: var(--font-serif);
@@ -513,12 +604,30 @@
     font-variation-settings: "SOFT" 100, "opsz" 144;
     font-weight: 300;
     color: var(--ivory);
-    font-size: clamp(2.6rem, 7.2vw, 5.5rem);
+    font-size: clamp(2.6rem, 7vw, 5.2rem);
     line-height: 0.98;
     letter-spacing: -0.028em;
     margin: 0;
   }
-  .hero-title-line { display: block; }
+  /* Each headline line slides up out of its own clip window. Padding /
+     negative margin keep descenders (y, j) and the pill's glow unclipped. */
+  .hero-title-line {
+    display: block;
+    overflow: hidden;
+    padding: 0.06em 0.1em 0.16em;
+    margin: -0.06em -0.1em -0.16em;
+  }
+  .line-inner {
+    display: block;
+  }
+  :global(.hero-title[data-visible='true']) .line-inner {
+    animation: line-up 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--l, 0) * 150ms + 80ms);
+  }
+  @keyframes line-up {
+    from { transform: translateY(108%); opacity: 0.4; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
   .hero-title-mark {
     display: inline-block;
     padding: 0 0.18em 0.05em;
@@ -529,8 +638,22 @@
     color: var(--brass-bright);
     text-shadow: 0 0 24px rgba(201, 169, 110, 0.35);
   }
+  /* The pill stamps in after its line lands, then glows softly forever. */
+  :global(.hero-title[data-visible='true']) .hero-title-mark {
+    animation:
+      mark-stamp 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 700ms both,
+      mark-glow 3.6s ease-in-out 1.4s infinite;
+  }
+  @keyframes mark-stamp {
+    from { transform: scale(1.45) rotate(-4deg); opacity: 0; }
+    to   { transform: scale(1) rotate(0deg);     opacity: 1; }
+  }
+  @keyframes mark-glow {
+    0%, 100% { text-shadow: 0 0 24px rgba(201, 169, 110, 0.35); border-color: rgba(201, 169, 110, 0.32); }
+    50%      { text-shadow: 0 0 34px rgba(230, 201, 140, 0.6);  border-color: rgba(230, 201, 140, 0.55); }
+  }
   .hero-title-hand {
-    font-size: 0.7em;
+    font-size: 0.65em;
     font-weight: 600;
     margin-right: 0.25em;
     vertical-align: 0.15em;
@@ -559,13 +682,13 @@
     display: inline-flex;
     align-items: center;
     gap: 0.65rem;
-    padding: 0.95rem 1.35rem;
+    padding: 1.05rem 1.5rem;
     border-radius: 9999px;
-    font-size: 13.5px;
+    font-size: 14.5px;
     font-weight: 600;
     text-decoration: none;
   }
-  .hero-cta-primary svg { width: 16px; height: 16px; }
+  .hero-cta-primary svg { width: 17px; height: 17px; }
   .hero-cta-meta {
     font-family: var(--font-mono);
     font-size: 10px;
@@ -576,28 +699,20 @@
     padding-left: 0.65rem;
     border-left: 1px solid rgba(0, 0, 0, 0.18);
   }
-  .hero-cta-or,
-  .finale-or {
-    display: inline-flex;
-    align-items: center;
+  .hero-alt {
+    margin: 1rem 0 0;
+    font-size: 13px;
     color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    padding: 0 0.25rem;
-    align-self: center;
   }
-  .hero-cta-secondary {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.95rem 1.35rem;
-    border-radius: 9999px;
-    font-size: 13.5px;
-    font-weight: 600;
+  .hero-alt-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(243, 234, 216, 0.35);
+    transition: color 0.18s ease, border-color 0.18s ease;
   }
+  .hero-alt-link:hover { color: var(--ivory); border-bottom-color: rgba(243, 234, 216, 0.7); }
 
-  /* Trust pips */
+  /* Value pips */
   .hero-trust {
     list-style: none;
     margin: 2.5rem 0 0;
@@ -605,10 +720,7 @@
     display: grid;
     grid-template-columns: 1fr;
     gap: 0.9rem;
-    max-width: 30rem;
-  }
-  @media (min-width: 540px) {
-    .hero-trust { grid-template-columns: 1fr; gap: 0.8rem; }
+    max-width: 32rem;
   }
   .hero-trust li {
     display: flex;
@@ -620,6 +732,7 @@
     color: var(--text-secondary);
     font-size: 0.85rem;
   }
+  .hero-trust p strong { color: var(--ivory); font-weight: 500; }
   .hero-trust svg {
     width: 12px;
     height: 12px;
@@ -665,6 +778,35 @@
   }
   .hero-chat-link:hover { color: #b9f5d6; border-bottom-color: rgba(141, 240, 196, 0.7); }
 
+  /* Scroll cue */
+  .hero-cue {
+    margin: 3.5rem auto 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    width: max-content;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    text-decoration: none;
+    opacity: 1;
+    transition: opacity 0.4s ease, color 0.2s ease;
+  }
+  .hero-cue:hover { color: var(--brass); }
+  .hero-cue svg {
+    width: 15px;
+    height: 15px;
+    animation: cue-bob 1.8s ease-in-out infinite;
+  }
+  @keyframes cue-bob {
+    0%, 100% { transform: translateY(0);   opacity: 0.5; }
+    50%      { transform: translateY(5px); opacity: 1; }
+  }
+  .hero-cue-hidden { opacity: 0; pointer-events: none; }
+
   /* ── Final CTA ────────────────────────────────────────────────── */
   .finale {
     position: relative;
@@ -699,12 +841,36 @@
     line-height: 1.05;
     letter-spacing: -0.025em;
   }
+  .finale-sub {
+    margin: 1.4rem auto 0;
+    max-width: 34rem;
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  .finale-urgency {
+    display: block;
+    margin-top: 0.6rem;
+    color: var(--ivory);
+    font-weight: 500;
+  }
   .finale-ctas {
     margin-top: 2.5rem;
     display: inline-flex;
     flex-wrap: wrap;
     justify-content: center;
     gap: 0.85rem;
+  }
+  .finale-or {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    padding: 0 0.25rem;
+    align-self: center;
   }
   .finale-primary,
   .finale-secondary {
@@ -761,6 +927,7 @@
   }
   .foot-links {
     display: inline-flex;
+    flex-wrap: wrap;
     gap: 1.25rem;
     font-size: 12px;
     color: var(--text-muted);
