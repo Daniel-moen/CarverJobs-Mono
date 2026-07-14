@@ -200,7 +200,8 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
 
         bonus_credited = 0
         bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
-        if first_purchase and bonus > 0:
+        bonus_eligible = tokens_credited >= settings.FIRST_PURCHASE_BONUS_MIN_TOKENS
+        if first_purchase and bonus > 0 and bonus_eligible:
             bonus_credited = bonus
             add_credits(db, sub.user_key, bonus)
             log.info("First-purchase bonus credited | user=%s | bonus=%d", sub.user_key, bonus)
@@ -242,6 +243,7 @@ def subscription_status(session: dict = Depends(require_session), db: Session = 
             "price_per_token": f"{(float(p['price']) / int(p['tokens'])):.2f}",
         }
         for p in settings.TOKEN_PACKAGES
+        if not p.get("wa_only")
     ]
     bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
     return {

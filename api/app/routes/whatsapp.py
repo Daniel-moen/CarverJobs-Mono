@@ -32,7 +32,7 @@ from app import flags, metrics
 from app.analytics import record_server_event
 from app.database import SessionLocal, get_db
 from app.logger import get_logger
-from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
+from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchInteraction, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
 from app.security import issue_session_token
 from app.settings import settings
 from app.services.ai_client import AIClientError
@@ -514,6 +514,7 @@ async def _send_help_menu(to: str, db: Session) -> None:
                                 "description": "Choose recent posts or all database jobs",
                             },
                             {"id": "cmd_jobs", "title": "Browse Job Board", "description": "View open yacht positions"},
+                            {"id": "cmd_saved", "title": "My Jobs", "description": "Jobs you saved from match runs"},
                             {
                                 "id": "cmd_submit_job",
                                 "title": "Submit a Job",
@@ -609,6 +610,51 @@ async def _download_whatsapp_media(media_id: str) -> tuple[bytes, str]:
 
 # ── Job submission via WhatsApp ───────────────────────────────────────────────
 
+async def _send_job_posted_confirmation(phone_number: str, job: Job, award: dict) -> None:
+    """Confirm a saved job submission, honest about whether a token was earned.
+
+    `award` is the dict returned by `award_job_post_credit` — when the monthly
+    free-token cap is hit, `granted` is False and promising "you earned a
+    token" would be a lie that erodes trust at the exact moment we could be
+    selling a pack instead.
+    """
+    title = job.title or "Yacht Crew Position"
+    role = job.role or "Crew"
+    location = job.location or "Unknown"
+    balance = award["balance"]
+    balance_w = "token" if balance == 1 else "tokens"
+    header = (
+        f"✅ *Job posted to the board!*\n\n"
+        f"⚓ *{title}*\n"
+        f"🧑‍✈️ Role: {role}\n"
+        f"📍 Location: {location}\n\n"
+    )
+    if award["granted"]:
+        await _send_whatsapp(
+            phone_number,
+            header
+            + f"You earned *1 token* for sharing this job.\n"
+            f"Current balance: *{balance}* {balance_w}.\n\n"
+            f"_The listing is now live for crew to see._",
+        )
+        return
+
+    cap = settings.FREE_JOB_POST_TOKENS_PER_MONTH
+    await _send_whatsapp(
+        phone_number,
+        header
+        + f"Thanks for sharing — the listing is now live for crew to see! 🙌\n\n"
+        f"You've already earned your *{cap} free tokens* from job posts this "
+        f"month, so no token this time — the counter resets every 30 days.\n"
+        f"Current balance: *{balance}* {balance_w}.",
+    )
+    await _send_whatsapp_buttons(
+        phone_number,
+        "Need more tokens before the reset?",
+        [("cmd_subscribe", "Buy Tokens"), ("btn_menu", "Menu")],
+    )
+
+
 async def _process_job_text_submission(phone_number: str, text: str, db: Session) -> None:
     """AI-review a text message as a potential job posting and save to the board."""
     import asyncio
@@ -650,22 +696,10 @@ async def _process_job_text_submission(phone_number: str, text: str, db: Session
     db.add(job)
     db.commit()
     db.refresh(job)
-    credits_balance = award_job_post_credit(db, phone_number)["balance"]
+    award = award_job_post_credit(db, phone_number)
 
     metrics.increment("whatsapp_job_submissions")
-    title = job.title or "Yacht Crew Position"
-    role = job.role or "Crew"
-    location = job.location or "Unknown"
-    await _send_whatsapp(
-        phone_number,
-        f"✅ *Job posted to the board!*\n\n"
-        f"⚓ *{title}*\n"
-        f"🧑‍✈️ Role: {role}\n"
-        f"📍 Location: {location}\n\n"
-        f"You earned *1 token* for sharing this job.\n"
-        f"Current balance: *{credits_balance}* token{'s' if credits_balance != 1 else ''}.\n\n"
-        f"_The listing is now live for crew to see._",
-    )
+    await _send_job_posted_confirmation(phone_number, job, award)
 
 
 async def _process_job_image_submission(phone_number: str, media_id: str, db: Session) -> None:
@@ -727,22 +761,10 @@ async def _process_job_image_submission(phone_number: str, media_id: str, db: Se
     db.add(job)
     db.commit()
     db.refresh(job)
-    credits_balance = award_job_post_credit(db, phone_number)["balance"]
+    award = award_job_post_credit(db, phone_number)
 
     metrics.increment("whatsapp_job_submissions")
-    title = job.title or "Yacht Crew Position"
-    role = job.role or "Crew"
-    location = job.location or "Unknown"
-    await _send_whatsapp(
-        phone_number,
-        f"✅ *Job posted to the board!*\n\n"
-        f"⚓ *{title}*\n"
-        f"🧑‍✈️ Role: {role}\n"
-        f"📍 Location: {location}\n\n"
-        f"You earned *1 token* for sharing this job.\n"
-        f"Current balance: *{credits_balance}* token{'s' if credits_balance != 1 else ''}.\n\n"
-        f"_The listing is now live for crew to see._",
-    )
+    await _send_job_posted_confirmation(phone_number, job, award)
 
 
 # Maps interactive button/list reply IDs to plain-text command strings
@@ -755,6 +777,7 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "cmd_match_recent": "match recent",
     "cmd_match_all": "match all",
     "cmd_jobs": "jobs",
+    "cmd_saved": "saved",
     "cmd_submit_job": "submit job",
     "cmd_credits": "credits",
     "cmd_subscribe": "subscribe",
@@ -770,6 +793,12 @@ _INTERACTIVE_CMD_MAP: dict[str, str] = {
     "btn_help": "help",
     "btn_menu": "help",
 }
+
+# Per-result buttons under each match detail ("save 3", "dismiss 3", "draft 3").
+# Draft reuses the existing text command; save/dismiss route to the new handlers.
+_INTERACTIVE_CMD_MAP.update({f"btn_save_{i}": f"save {i}" for i in range(1, 10)})
+_INTERACTIVE_CMD_MAP.update({f"btn_dismiss_{i}": f"dismiss {i}" for i in range(1, 10)})
+_INTERACTIVE_CMD_MAP.update({f"btn_draft_{i}": f"draft {i}" for i in range(1, 10)})
 
 
 _ALLOWED_REDIRECTS = frozenset({
@@ -840,6 +869,8 @@ def _get_or_create_session(phone_number: str, db: Session) -> WhatsAppSession:
         db.refresh(session)
         metrics.increment("onboard_started")
         record_server_event(phone_number, "wa_signup")
+        # Durable twin of the in-memory counter — funnel maths must survive deploys.
+        record_server_event(phone_number, "onboard_started", "whatsapp")
     return session
 
 
@@ -862,6 +893,20 @@ def _feedback_already_submitted(db: Session, user_key: str) -> bool:
         )
         .first()
     ) is not None
+
+
+# Minimum days between in-chat feedback invitations — the invite rides along
+# after a normal reply and must never turn into a nag.
+_FEEDBACK_PROMPT_COOLDOWN_DAYS = 7
+
+
+def _feedback_prompt_due(wa_session: WhatsAppSession) -> bool:
+    last = wa_session.feedback_prompted_at
+    if last is None:
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - last >= timedelta(days=_FEEDBACK_PROMPT_COOLDOWN_DAYS)
 
 
 async def _send_feedback_request(phone: str, db: Session) -> None:
@@ -903,6 +948,7 @@ async def _send_token_pack_picker(phone: str, db: Session) -> None:
     """
     bal = get_credit_balance(db, phone)
     w = "token" if bal == 1 else "tokens"
+    record_server_event(phone, "pack_picker_shown", "whatsapp")
 
     if not payments.yoco_configured():
         link = _make_magic_link(phone, db, redirect_to="/subscription")
@@ -922,9 +968,29 @@ async def _send_token_pack_picker(phone: str, db: Session) -> None:
         return
 
     bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
+    bonus_min = settings.FIRST_PURCHASE_BONUS_MIN_TOKENS
     bonus_line = ""
     if bonus > 0 and _is_first_purchase(db, phone):
-        bonus_line = f"🎁 First purchase? You get *+{bonus} bonus tokens* on any pack.\n\n"
+        bonus_line = (
+            f"🎁 First purchase? You get *+{bonus} bonus tokens* on any pack of "
+            f"{bonus_min}+ tokens.\n\n"
+        )
+
+    # Value anchor: point at the pack flagged most popular in settings so the
+    # mid-tier reads as the default choice (never hardcode prices here).
+    anchor_line = ""
+    popular = next(
+        (p for p in settings.TOKEN_PACKAGES if "popular" in str(p.get("badge", "")).lower()),
+        None,
+    )
+    if popular:
+        pop_price = f"{float(popular['price']):g}"
+        rate = float(popular["price"]) / int(popular["tokens"])
+        rate_str = f"{rate:.2f}".rstrip("0").rstrip(".")
+        anchor_line = (
+            f"💡 Most crew grab the *{int(popular['tokens'])}-token pack (R{pop_price})* — "
+            f"about R{rate_str} per match run.\n\n"
+        )
 
     rows = []
     for p in settings.TOKEN_PACKAGES:
@@ -944,6 +1010,7 @@ async def _send_token_pack_picker(phone: str, db: Session) -> None:
         body=(
             f"Your balance: *{bal} {w}*\n\n"
             f"{bonus_line}"
+            f"{anchor_line}"
             "1 token = 1 *Find Matches* run. Pick a pack and I'll send you a "
             "secure payment link — tokens are added the moment you pay."
         ),
@@ -962,7 +1029,11 @@ async def _start_whatsapp_checkout(phone: str, tokens: int, db: Session) -> None
         return
 
     bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
-    first = bonus > 0 and _is_first_purchase(db, phone)
+    first = (
+        bonus > 0
+        and tokens >= settings.FIRST_PURCHASE_BONUS_MIN_TOKENS
+        and _is_first_purchase(db, phone)
+    )
 
     try:
         pay_url = await payments.create_checkout(db, phone, tokens, channel="whatsapp")
@@ -991,16 +1062,19 @@ async def _start_whatsapp_checkout(phone: str, tokens: int, db: Session) -> None
 # ── AI helpers ────────────────────────────────────────────────────────────────
 
 # Kept deliberately short: every extra required question costs real signups
-# (a third of early users abandoned the old 13-field interrogation). Everything
-# else is captured when volunteered, or added later via *edit profile*.
+# (a third of early users abandoned the old 13-field interrogation, and the
+# 7-field version still leaked people). Four questions is the minimum the
+# matching engine needs to produce a credible first run; everything else is
+# captured when volunteered, nudged post-first-match (certifications), or
+# added later via *edit profile*.
 REQUIRED_ONBOARD_FIELDS = [
-    "firstName", "lastName", "desiredRole", "yearsExperience",
-    "nationality", "currentLocation", "certifications",
+    "firstName", "desiredRole", "currentLocation", "yearsExperience",
 ]
 
 # Nice-to-have fields — recorded when the user volunteers them, never asked
 # during onboarding. Sharpen matching once present.
 OPTIONAL_ONBOARD_FIELDS = [
+    "lastName", "nationality", "certifications",
     "sex", "preferredLocations", "contractType", "salaryMin", "salaryMax", "languages",
 ]
 
@@ -1060,17 +1134,17 @@ Profile so far ({filled}/{len(REQUIRED_ONBOARD_FIELDS)} fields):
 Still missing: {missing_text}
 
 Review the conversation history. NEVER re-ask something already answered.
-Ask ONLY about the required fields, in this order when missing:
-  1. firstName + lastName (ask together)
+This is a 4-question onboarding — fast on purpose. Ask ONLY about the required
+fields, in this order when missing:
+  1. firstName (their name — if they give a surname too, capture it in lastName)
   2. desiredRole (e.g. Chief Stew, Bosun, Engineer, Chef, Captain, Deckhand)
-  3. yearsExperience (years in yachting or maritime)
-  4. nationality
-  5. currentLocation (city / country)
-  6. certifications (STCW, ENG1, Yachtmaster, PYA, etc. — "none yet" is a fine answer)
+  3. currentLocation (city / country)
+  4. yearsExperience (years in yachting or maritime)
 
-If the user volunteers extra info (salary range, contract type, preferred cruising
-grounds, languages, gender), capture it in "updates" — but NEVER ask for it during
-onboarding. Those details can be added later via *edit profile*.
+If the user volunteers extra info (surname, nationality, certifications, salary
+range, contract type, preferred cruising grounds, languages, gender), capture it
+in "updates" — but NEVER ask for it during onboarding. Those details can be
+added later via *edit profile*.
 
 Style rules for WhatsApp:
 - Use *bold* for emphasis (WhatsApp markdown).
@@ -1372,6 +1446,102 @@ def _normalise_match_scope(match_scope: str | None) -> str:
     return _MATCH_SCOPE_RECENT if match_scope == _MATCH_SCOPE_RECENT else _MATCH_SCOPE_ALL
 
 
+# ── Save / dismiss interactions ──────────────────────────────────────────────
+
+def _dismissed_job_ids(db: Session, user_key: str) -> set[int]:
+    """Job ids this user has dismissed — excluded from future match runs."""
+    rows = (
+        db.query(MatchInteraction.job_id)
+        .filter(
+            MatchInteraction.user_key == user_key,
+            MatchInteraction.action == "dismissed",
+        )
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def _record_match_interaction(db: Session, user_key: str, job_id: int, action: str) -> None:
+    """Idempotent upsert of a saved/dismissed row — repeated taps are no-ops."""
+    existing = (
+        db.query(MatchInteraction.id)
+        .filter(
+            MatchInteraction.user_key == user_key,
+            MatchInteraction.job_id == job_id,
+            MatchInteraction.action == action,
+        )
+        .first()
+    )
+    if existing is not None:
+        return
+    try:
+        db.add(MatchInteraction(user_key=user_key, job_id=job_id, action=action))
+        db.commit()
+    except Exception:
+        # Unique constraint race (double-tap) — the row is there, which is all we need.
+        db.rollback()
+
+
+async def _send_paywall_teaser(phone_number: str, db: Session, profile, all_jobs: list) -> None:
+    """Zero-token paywall — sell at the moment of desire.
+
+    Instead of a flat refusal, show the user what's actually waiting for them:
+    a cheap role-substring count of open jobs fitting their desired role (no
+    LLM spend), with a couple of real positions named, locked behind the run.
+    Falls back to the plain message when nothing matches.
+    """
+    from app.services.job_alerts import _matching_jobs
+
+    current_credits = get_credit_balance(db, phone_number)
+    teasers = _matching_jobs(all_jobs, (profile.desired_role or "") if profile else "")
+    # Never tease a job the user already said "not for me" to (cheap belt-and-
+    # braces — the match query upstream excludes them too).
+    dismissed = _dismissed_job_ids(db, phone_number)
+    if dismissed:
+        teasers = [j for j in teasers if j.id not in dismissed]
+
+    cheapest = min(settings.TOKEN_PACKAGES, key=lambda p: float(p["price"]))
+    cheapest_price = f"{float(cheapest['price']):g}"
+
+    if teasers:
+        n = len(teasers)
+        lines = []
+        for job in teasers[:2]:
+            bits = [job.role or job.title]
+            if job.yacht_length_m:
+                bits.append(f"{job.yacht_length_m}m")
+            if job.location:
+                bits.append(job.location)
+            lines.append("  🔒 " + " · ".join(str(b) for b in bits if b))
+        more = n - len(lines)
+        more_line = f"  🔒 …and *{more} more*\n" if more > 0 else ""
+        await _send_whatsapp(
+            phone_number,
+            f"👀 *{n} open position{'s' if n != 1 else ''}* in the database right now "
+            f"look like a fit for your *{profile.desired_role}* profile:\n\n"
+            + "\n".join(lines) + ("\n" + more_line if more_line else "\n")
+            + "\nA full AI match run ranks every one against your profile and drafts "
+            "your application emails — it takes *1 token*, and you're at "
+            f"*{current_credits}*.\n\n"
+            f"Packs start at *R{cheapest_price}*. Or submit a job you've seen posted "
+            "to earn a free token.",
+        )
+        record_server_event(phone_number, "paywall_teaser_shown", str(n))
+    else:
+        await _send_whatsapp(
+            phone_number,
+            "⚠️ You need *1 token* to run matching.\n\n"
+            f"Packs start at *R{cheapest_price}* — type *buy tokens* to top up, "
+            "or submit a job to earn a free token.\n"
+            f"Current balance: *{current_credits}* token{'s' if current_credits != 1 else ''}.",
+        )
+    await _send_whatsapp_buttons(
+        phone_number,
+        "Unlock your matches?" if teasers else "What would you like to do?",
+        [("cmd_subscribe", "Buy Tokens"), ("btn_submit_job", "Submit Job"), ("btn_menu", "Menu")],
+    )
+
+
 async def _handle_match_command(phone_number: str, db: Session, match_scope: str = _MATCH_SCOPE_ALL) -> None:
     """Run the AI matching engine, save results, and send a website link.
 
@@ -1381,6 +1551,9 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     import math as _math
 
     from app.services.matching_engine import (
+        BATCH_SIZE,
+        MAX_WORKERS,
+        PREFILTER_TOP_N,
         CandidateProfile,
         JobSummary,
         match_candidate_to_jobs,
@@ -1408,6 +1581,10 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         db.query(Job)
         .filter(Job.status.in_(["open", "priority"]))
     )
+    # Dismissals shape future runs — never re-scan a job the user said no to.
+    dismissed_ids = _dismissed_job_ids(db, phone_number)
+    if dismissed_ids:
+        jobs_query = jobs_query.filter(Job.id.notin_(dismissed_ids))
     scope_label = "all database jobs"
     if match_scope == _MATCH_SCOPE_RECENT:
         recent_days = max(1, settings.WA_MATCH_RECENT_DAYS)
@@ -1429,32 +1606,22 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
 
     credits_remaining = spend_credits(db, phone_number, amount=1)
     if credits_remaining is None:
-        current_credits = get_credit_balance(db, phone_number)
         record_server_event(phone_number, "paywall_hit", "whatsapp")
-        await _send_whatsapp(
-            phone_number,
-            "⚠️ You need *1 token* to run matching.\n\n"
-            "Type *buy tokens* to top up, or submit a job to earn a free token.\n"
-            f"Current balance: *{current_credits}* token{'s' if current_credits != 1 else ''}.",
-        )
-        await _send_whatsapp_buttons(
-            phone_number,
-            "What would you like to do?",
-            [("cmd_subscribe", "Buy Tokens"), ("btn_submit_job", "Submit Job"), ("btn_menu", "Menu")],
-        )
+        await _send_paywall_teaser(phone_number, db, profile, all_jobs)
         return
 
-    _BATCH_SIZE = 10
     _AVG_SECS_PER_BATCH = 8
-    num_batches = _math.ceil(len(all_jobs) / _BATCH_SIZE)
-    est_secs = num_batches * _AVG_SECS_PER_BATCH
+    scored_jobs = min(len(all_jobs), PREFILTER_TOP_N)
+    num_batches = _math.ceil(scored_jobs / BATCH_SIZE)
+    batch_waves = _math.ceil(num_batches / MAX_WORKERS)
+    est_secs = max(batch_waves * _AVG_SECS_PER_BATCH, _AVG_SECS_PER_BATCH)
     est_str = f"~{est_secs}s" if est_secs < 60 else f"~{round(est_secs / 60)} min"
 
     tok_left = "token" if credits_remaining == 1 else "tokens"
     await _send_whatsapp(
         phone_number,
         f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
-        f"⏳ Scanning *{len(all_jobs)} positions* from *{scope_label}* ({est_str}) — hang tight!",
+        f"⏳ Scanning *{len(all_jobs)} positions* from *{scope_label}* and AI-matching your best fits ({est_str}) — hang tight!",
     )
 
     certs = [c.strip() for c in (profile.certifications or "").replace("\n", ",").split(",") if c.strip()]
@@ -1531,7 +1698,11 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     except Exception as exc:
         log.error("WhatsApp match engine error | %s", exc)
         credits_remaining = add_credits(db, phone_number, amount=1)
-        await _send_whatsapp(phone_number, "⚠️ Matching hit a snag — try again in a moment.")
+        await _send_whatsapp_buttons(
+            phone_number,
+            "⚠️ Matching hit a snag — your token was refunded. Try again in a moment?",
+            [("btn_find_matches", "Try Again"), ("btn_menu", "Menu")],
+        )
         return
 
     matched = [r for r in (results or []) if r.matched]
@@ -1577,6 +1748,7 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     wa_session = db.query(WhatsAppSession).filter(WhatsAppSession.phone_number == phone_number).first()
     if wa_session:
         wa_session.last_match_session_id = match_session.id
+        _clear_saved_list_context(wa_session)  # digit replies now target the fresh run
         db.commit()
 
     # Build brief summary for WhatsApp (top 3)
@@ -1626,6 +1798,36 @@ async def _run_match_command_background(
             _wa_graph_phone_id.reset(ctx_token)
 
 
+async def _send_post_match_enrichment(phone: str, db: Session | None = None) -> None:
+    """Post-first-match profile enrichment nudge — certifications only.
+
+    Sent once the auto first-match results have landed, and only when the
+    profile has no certifications yet (they were dropped from required
+    onboarding to keep signup at 4 questions). Chat mode has no NLU path for
+    free-text profile edits, so the nudge routes through the existing *edit
+    profile* magic-link flow rather than pretending to parse cert replies.
+    Best-effort — never raises into the caller.
+    """
+    own_db = db is None
+    if own_db:
+        db = SessionLocal()
+    try:
+        profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone).first()
+        if profile is None or (profile.certifications or "").strip():
+            return
+        await _send_whatsapp(
+            phone,
+            "🏅 Want sharper matches? Add your *certifications* (like STCW or ENG1) "
+            "to your profile — type *edit profile* and I'll send you a secure link. "
+            "Takes about 30 seconds.",
+        )
+    except Exception as exc:
+        log.warning("Post-match enrichment nudge failed | phone=%s | %s", phone[:6] + "****", exc)
+    finally:
+        if own_db:
+            db.close()
+
+
 
 # ── In-chat match details ─────────────────────────────────────────────────────
 # After a match run, the user can reply "1"/"2"/"3" for full job details or
@@ -1657,6 +1859,39 @@ def _job_apply_line(job: Job) -> str:
     if job.application_url:
         return f"🔗 *Apply here:* {job.application_url}"
     return "ℹ️ No direct contact on the listing — use the website link below to apply."
+
+
+_FACTOR_LABELS = {
+    "role": "Role", "location": "Location", "pay": "Pay", "contract": "Contract",
+    "skills": "Skills", "certifications": "Certs", "experience": "Experience",
+}
+
+
+def _match_drivers_line(factor_scores_json: str | None) -> str:
+    """Compact 'why this match' line from the top 3 factor scores, or ''.
+
+    The engine also stores diagnostic ``det_*`` keys — those are internal and
+    never shown to the user.
+    """
+    try:
+        scores = json.loads(factor_scores_json or "{}")
+    except ValueError:
+        return ""
+    if not isinstance(scores, dict):
+        return ""
+    ranked = sorted(
+        (
+            (k, v) for k, v in scores.items()
+            if isinstance(v, (int, float)) and not str(k).startswith("det_")
+        ),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )[:3]
+    if not ranked:
+        return ""
+    return "📊 *Match drivers:* " + " · ".join(
+        f"{_FACTOR_LABELS.get(k, str(k).title())} {int(v)}" for k, v in ranked
+    )
 
 
 async def _send_match_detail(phone: str, db: Session, wa_session: WhatsAppSession, n: int) -> None:
@@ -1700,6 +1935,10 @@ async def _send_match_detail(phone: str, db: Session, wa_session: WhatsAppSessio
     if gaps:
         lines.append("⚠️ *Mind the gap:* " + "; ".join(str(g) for g in gaps[:2]))
 
+    drivers = _match_drivers_line(result.factor_scores)
+    if drivers:
+        lines.append(drivers)
+
     if job.description:
         lines.append(f"\n{job.description[:350]}{'…' if len(job.description) > 350 else ''}")
 
@@ -1710,6 +1949,15 @@ async def _send_match_detail(phone: str, db: Session, wa_session: WhatsAppSessio
 
     await _send_whatsapp(phone, "\n".join(lines))
     record_server_event(phone, "match_detail_viewed", str(job.id))
+    await _send_whatsapp_buttons(
+        phone,
+        "Keep this one on your radar?",
+        [
+            (f"btn_save_{n}", "💾 Save"),
+            (f"btn_dismiss_{n}", "🚫 Not for me"),
+            (f"btn_draft_{n}", "✍️ Draft apply"),
+        ],
+    )
 
 
 async def _send_application_draft(phone: str, db: Session, wa_session: WhatsAppSession, n: int) -> None:
@@ -1779,12 +2027,173 @@ async def _send_application_draft(phone: str, db: Session, wa_session: WhatsAppS
         db.rollback()
 
 
+async def _handle_save_match(phone: str, db: Session, wa_session: WhatsAppSession, n: int) -> None:
+    """💾 Save — keep match N from the last run on the user's saved list."""
+    result, job, total = _nth_match_result(db, wa_session, n)
+    if total == 0:
+        await _send_whatsapp(phone, "No match run on record yet — type *match* to find jobs first.")
+        return
+    if result is None or job is None:
+        await _send_whatsapp(phone, f"Your last run had *{total}* match{'es' if total != 1 else ''} — reply *save 1* to *save {total}*.")
+        return
+    _record_match_interaction(db, phone, job.id, "saved")
+    record_server_event(phone, "match_saved", str(job.id))
+    await _send_whatsapp(phone, f"💾 Saved *{job.title}* — type *saved* anytime to see your list.")
+
+
+async def _handle_dismiss_match(phone: str, db: Session, wa_session: WhatsAppSession, n: int) -> None:
+    """🚫 Not for me — record the dismissal and roll straight to the next match."""
+    result, job, total = _nth_match_result(db, wa_session, n)
+    if total == 0:
+        await _send_whatsapp(phone, "No match run on record yet — type *match* to find jobs first.")
+        return
+    if result is None or job is None:
+        await _send_whatsapp(phone, f"Your last run had *{total}* match{'es' if total != 1 else ''} — reply *dismiss 1* to *dismiss {total}*.")
+        return
+    _record_match_interaction(db, phone, job.id, "dismissed")
+    record_server_event(phone, "match_dismissed", str(job.id))
+    if n < total:
+        await _send_whatsapp(
+            phone,
+            f"🚫 Noted — I'll leave *{job.title}* out of future runs. Here's your next match:",
+        )
+        await _send_match_detail(phone, db, wa_session, n + 1)
+    else:
+        await _send_whatsapp(
+            phone,
+            f"🚫 Noted — I'll leave *{job.title}* out of future runs. "
+            "That was the last match from this run — type *match* to scan for more.",
+        )
+
+
+# ── Saved jobs list ───────────────────────────────────────────────────────────
+# The *saved* command lists saved jobs and stashes their ids in the session's
+# partial_profile (same trick as the _retry* onboarding keys) so a bare digit
+# reply drills into the saved list instead of the last match run. A fresh match
+# run clears the stash, pointing digits back at the new results.
+
+_SAVED_LIST_KEY = "_savedJobIds"
+
+
+def _saved_list_context(wa_session: WhatsAppSession) -> list[int]:
+    try:
+        partial = json.loads(wa_session.partial_profile or "{}")
+    except ValueError:
+        return []
+    ids = partial.get(_SAVED_LIST_KEY)
+    return [int(i) for i in ids] if isinstance(ids, list) else []
+
+
+def _set_saved_list_context(wa_session: WhatsAppSession, db: Session, job_ids: list[int]) -> None:
+    try:
+        partial = json.loads(wa_session.partial_profile or "{}")
+    except ValueError:
+        partial = {}
+    partial[_SAVED_LIST_KEY] = job_ids
+    wa_session.partial_profile = json.dumps(partial)
+    db.commit()
+
+
+def _clear_saved_list_context(wa_session: WhatsAppSession) -> None:
+    """Drop the saved-list digit context (caller commits)."""
+    try:
+        partial = json.loads(wa_session.partial_profile or "{}")
+    except ValueError:
+        return
+    if partial.pop(_SAVED_LIST_KEY, None) is not None:
+        wa_session.partial_profile = json.dumps(partial)
+
+
+async def _send_saved_jobs(phone: str, db: Session, wa_session: WhatsAppSession) -> None:
+    """List up to 10 saved jobs, newest first, numbered for digit drill-down."""
+    rows = (
+        db.query(MatchInteraction)
+        .filter(MatchInteraction.user_key == phone, MatchInteraction.action == "saved")
+        .order_by(MatchInteraction.created_at.desc(), MatchInteraction.id.desc())
+        .limit(10)
+        .all()
+    )
+    if not rows:
+        _clear_saved_list_context(wa_session)
+        db.commit()
+        await _send_whatsapp(
+            phone,
+            "💾 *My Jobs*\n\nNothing saved yet — after a *match* run, tap *Save* on any match to keep it here.",
+        )
+        return
+
+    job_ids = [r.job_id for r in rows]
+    jobs_by_id = {
+        j.id: j for j in db.query(Job).filter(Job.id.in_(job_ids)).all()
+    }
+    lines = ["💾 *My Jobs*\n"]
+    listed_ids: list[int] = []
+    for jid in job_ids:
+        job = jobs_by_id.get(jid)
+        if not job:
+            continue  # job pruned from the board since it was saved
+        listed_ids.append(jid)
+        lines.append(f"{len(listed_ids)}. *{job.title}* — {job.location}")
+    if not listed_ids:
+        _clear_saved_list_context(wa_session)
+        db.commit()
+        await _send_whatsapp(
+            phone,
+            "💾 *My Jobs*\n\nYour saved jobs are no longer on the board — type *match* to find fresh ones.",
+        )
+        return
+
+    _set_saved_list_context(wa_session, db, listed_ids)
+    lines.append(f"\n💬 Reply *1*–*{len(listed_ids)}* for full details & how to apply.")
+    await _send_whatsapp(phone, "\n".join(lines))
+
+
+async def _send_saved_job_detail(phone: str, db: Session, wa_session: WhatsAppSession, saved_ids: list[int], n: int) -> None:
+    """Full details for the nth job on the saved list, straight from the Job row."""
+    if n > len(saved_ids):
+        await _send_whatsapp(
+            phone,
+            f"Your saved list has *{len(saved_ids)}* job{'s' if len(saved_ids) != 1 else ''} — reply a number from 1 to {len(saved_ids)}.",
+        )
+        return
+    job = db.query(Job).filter(Job.id == saved_ids[n - 1]).first()
+    if job is None:
+        await _send_whatsapp(phone, "That job is no longer on the board — type *saved* to refresh your list.")
+        return
+
+    lines = [f"⚓ *{job.title}*"]
+    facts = []
+    if job.yacht and job.yacht.lower() not in ("unknown", "n/a"):
+        facts.append(f"🛥️ {job.yacht}" + (f" ({job.yacht_length_m}m)" if job.yacht_length_m else ""))
+    if job.location:
+        facts.append(f"📍 {job.location}")
+    if job.salary_min or job.salary_max:
+        cur = job.salary_currency or "EUR"
+        if job.salary_min and job.salary_max:
+            facts.append(f"💰 {cur} {job.salary_min:g}–{job.salary_max:g}/mo")
+        else:
+            facts.append(f"💰 {cur} {(job.salary_min or job.salary_max):g}/mo")
+    if job.contract_type:
+        facts.append(f"📋 {job.contract_type}")
+    if job.start_date:
+        facts.append(f"🗓️ Starts {job.start_date}")
+    lines.append("\n".join(facts))
+
+    if job.description:
+        lines.append(f"\n{job.description[:350]}{'…' if len(job.description) > 350 else ''}")
+
+    lines.append(f"\n{_job_apply_line(job)}")
+    lines.append("\n_Type *saved* for your list, or *match* to scan for fresh roles._")
+    await _send_whatsapp(phone, "\n".join(lines))
+    record_server_event(phone, "saved_job_viewed", str(job.id))
+
+
 # ── Onboarding flow ───────────────────────────────────────────────────────────
 
 _FALLBACK_GREETING = (
     "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
-    "I'm going to build your crew profile in a quick chat — 6 quick questions, "
-    "about a minute — then I'll run your *first job match on the house*.\n\n"
+    "I'm going to build your crew profile in a quick chat — just 4 quick questions, "
+    "under a minute — then I'll run your *first job match on the house*.\n\n"
     "💳 *Tokens:* Each *Find Matches* uses *1 token*. Type *buy tokens* to top up, or submit a valid job to earn a free token.\n\n"
     "Let's start with the basics — what's your *full name*? 🪪"
 )
@@ -1823,6 +2232,10 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
         log.warning("LLM failed — fallback extraction | updates=%s", clean_updates)
 
     partial = _apply_updates(partial, clean_updates)
+    if clean_updates:
+        # Progress made — clear the consecutive-retry tracker for the stuck field.
+        partial.pop("_retryField", None)
+        partial.pop("_retryCount", None)
 
     if not message:
         missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(partial.get(f, "")).strip()]
@@ -1837,7 +2250,22 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
                 else:
                     message = f"{ack} {question}"
             else:
-                message = f"Hmm, didn't quite catch that — no worries! {question}"
+                # Track consecutive extraction failures on the same field so the
+                # user never loops on "didn't quite catch that" forever. After
+                # two misses, drop the chit-chat and ask the field question
+                # dead-straight with an example of what to reply.
+                if partial.get("_retryField") == missing[0]:
+                    partial["_retryCount"] = int(partial.get("_retryCount", 0)) + 1
+                else:
+                    partial["_retryField"] = missing[0]
+                    partial["_retryCount"] = 1
+                if int(partial["_retryCount"]) >= 2:
+                    message = (
+                        f"Let's keep it simple 👍 {question}\n\n"
+                        "_Just reply with the answer on its own — nothing else needed._"
+                    )
+                else:
+                    message = f"Hmm, didn't quite catch that — no worries! {question}"
         else:
             message = "That's a wrap — your crew profile is *complete*! 🎉"
             done = True
@@ -1858,6 +2286,7 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
         balance = get_credit_balance(db, wa_session.phone_number)
         first_match_started = balance > 0 and _try_start_match_run(wa_session.phone_number)
         if first_match_started:
+            record_server_event(wa_session.phone_number, "first_match_auto_run", "whatsapp")
             graph_phone_number_id = _wa_graph_phone_id.get() or ""
             phone = wa_session.phone_number
 
@@ -1865,6 +2294,10 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
                 # Small delay so the welcome message lands before match updates.
                 await asyncio.sleep(3)
                 await _run_match_command_background(phone, graph_phone_number_id, _MATCH_SCOPE_ALL)
+                # Results are on screen — best moment to ask for the one optional
+                # field that sharpens matching most (certs left out of the
+                # 4-question onboarding on purpose).
+                await _send_post_match_enrichment(phone)
 
             asyncio.create_task(_first_match_run())
 
@@ -2001,16 +2434,35 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
     if cmd in ("jobs", "open jobs", "positions", "vacancies"):
         return await _handle_jobs_command(phone, db)
 
-    # Bare digit → drill into that result from the last match run, in chat.
+    # Bare digit → drill into the saved list when it was shown last, otherwise
+    # into that result from the last match run, in chat.
     digit_match = re.fullmatch(r"[1-9]", cmd)
     if digit_match:
-        await _send_match_detail(phone, db, wa_session, int(cmd))
+        saved_ids = _saved_list_context(wa_session)
+        if saved_ids:
+            await _send_saved_job_detail(phone, db, wa_session, saved_ids, int(cmd))
+        else:
+            await _send_match_detail(phone, db, wa_session, int(cmd))
         return None
 
     # "draft N" → ghost-write the application email for match N, in chat.
     draft_match = re.fullmatch(r"draft\s*([1-9])", cmd)
     if draft_match:
         await _send_application_draft(phone, db, wa_session, int(draft_match.group(1)))
+        return None
+
+    # "save N" / "dismiss N" → record engagement on match N from the last run.
+    save_match = re.fullmatch(r"save\s*([1-9])", cmd)
+    if save_match:
+        await _handle_save_match(phone, db, wa_session, int(save_match.group(1)))
+        return None
+    dismiss_match = re.fullmatch(r"dismiss\s*([1-9])", cmd)
+    if dismiss_match:
+        await _handle_dismiss_match(phone, db, wa_session, int(dismiss_match.group(1)))
+        return None
+
+    if cmd in ("saved", "saved jobs", "my jobs", "my saved jobs"):
+        await _send_saved_jobs(phone, db, wa_session)
         return None
 
     if cmd in ("match", "find jobs", "find matches", "matching", "find me jobs", "job match"):
@@ -2099,17 +2551,27 @@ async def _process_whatsapp_message(
             graph_phone_number_id=graph_phone_number_id,
         )
         wa_session = _get_or_create_session(phone_number, db)
+        # Groundwork for win-back sweeps: stamp every inbound touch.
+        wa_session.last_active_at = datetime.now(timezone.utc)
+        db.commit()
         _cmd = user_text.strip().lower()
 
+        # Feedback invitation rides along AFTER the user's command is answered
+        # (never instead of it), at most once per cooldown window.
         feedback_eligible, _feedback_setting = feedback_is_eligible(db, user_key=phone_number, source="whatsapp_message")
-        if (
+        invite_feedback = (
             feedback_eligible
             and not _feedback_already_submitted(db, phone_number)
             and _cmd not in ("feedback", "give feedback", "review", "survey")
-        ):
-            await _send_feedback_request(phone_number, db)
+            and _feedback_prompt_due(wa_session)
+        )
+
+        async def _finish() -> None:
+            if invite_feedback:
+                await _send_feedback_request(phone_number, db)
+                wa_session.feedback_prompted_at = datetime.now(timezone.utc)
+                db.commit()
             metrics.increment("whatsapp_messages")
-            return
 
         # Global commands bypass onboarding / job-submit modes so the user
         # can always buy tokens, check balance, or open the help menu.
@@ -2117,7 +2579,7 @@ async def _process_whatsapp_message(
             reply = await _run_chat(wa_session, user_text, db)
             if reply is not None:
                 await _send_whatsapp(phone_number, reply)
-            metrics.increment("whatsapp_messages")
+            await _finish()
             return
 
         if wa_session.mode == "job_submit":
@@ -2137,7 +2599,7 @@ async def _process_whatsapp_message(
             finally:
                 wa_session.mode = "chat"
                 db.commit()
-            metrics.increment("whatsapp_messages")
+            await _finish()
             return
 
         if wa_session.mode == "onboarding":
@@ -2146,7 +2608,7 @@ async def _process_whatsapp_message(
             reply = await _run_chat(wa_session, user_text, db)
         if reply is not None:
             await _send_whatsapp(phone_number, reply)
-        metrics.increment("whatsapp_messages")
+        await _finish()
     except Exception as exc:
         log.exception("WhatsApp message processing error | phone=%s | %s", phone_number[:6] + "****", exc)
     finally:

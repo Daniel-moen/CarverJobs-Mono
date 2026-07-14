@@ -90,10 +90,16 @@ def _job_to_summary(j: Job) -> JobSummary:
         salary_max=j.salary_max,
         salary_currency=j.salary_currency or "EUR",
         experience_required_years=j.experience_required_years,
+        minimum_license=j.minimum_license or "",
+        rank_level=j.rank_level or "",
         certifications_required=j.certifications_required or "",
         languages_required=j.languages_required or "",
         description=j.description or "",
+        requirements=j.requirements or "",
+        responsibilities=j.responsibilities or "",
+        urgent_hire=bool(j.urgent_hire),
         status=j.status or "open",
+        created_at=j.created_at,
     )
 
 
@@ -184,6 +190,7 @@ async def run_match(request: Request, payload: schemas.MatchingRequest, db: Sess
                 strengths=r.strengths,
                 gaps=r.gaps,
                 factor_scores=r.factor_scores,
+                tier=r.tier,
             )
             for r in results
         ],

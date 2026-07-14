@@ -205,7 +205,14 @@ class Settings:
   #   label    = pack name
   #   badge    = optional marketing tag shown on the card
   #   highlight= visually emphasise this card as the recommended pack
+  #   wa_only  = offered only in the WhatsApp pack picker (kept off the website
+  #              grid so the 4-card decoy layout stays intact)
   TOKEN_PACKAGES: list[dict] = [
+      # Impulse-priced entry pack: the first payment is the hard part for
+      # junior crew, so make saying yes cost less than a beer. No first-purchase
+      # bonus on this one (see FIRST_PURCHASE_BONUS_MIN_TOKENS) so Starter —
+      # 10 tokens for R65 with the bonus — stays the obviously better deal.
+      {"tokens": 2, "price": "25.00", "label": "Kickstart", "wa_only": True},
       {"tokens": 5, "price": "65.00", "label": "Starter"},
       {"tokens": 20, "price": "220.00", "label": "Standard", "badge": "Most Popular"},
       {"tokens": 50, "price": "600.00", "label": "Plus"},
@@ -215,6 +222,9 @@ class Settings:
   # Bonus tokens credited on a user's very first completed purchase (any pack).
   # Bonus framing converts better than discounting and keeps pack prices intact.
   FIRST_PURCHASE_BONUS_TOKENS: int = int(os.getenv("FIRST_PURCHASE_BONUS_TOKENS", "5"))
+  # Smallest pack (in tokens) that qualifies for the first-purchase bonus —
+  # keeps the bonus off the impulse Kickstart pack so it upsells to Starter+.
+  FIRST_PURCHASE_BONUS_MIN_TOKENS: int = int(os.getenv("FIRST_PURCHASE_BONUS_MIN_TOKENS", "5"))
 
   # Free tier — tokens granted to every user each month (reset every 30 days)
   FREE_MONTHLY_TOKENS: int = int(os.getenv("FREE_MONTHLY_TOKENS", "25"))

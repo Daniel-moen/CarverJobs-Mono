@@ -129,6 +129,7 @@ async def create_checkout(db: Session, user_key: str, tokens: int, *, channel: s
         status="pending",
         amount=amount_str,
         frequency=0,
+        channel=channel,
     )
     db.add(sub)
     db.commit()
@@ -191,7 +192,9 @@ async def create_checkout(db: Session, user_key: str, tokens: int, *, channel: s
 
     if data.get("id"):
         sub.checkout_id = str(data["id"])
-        db.commit()
+    # Keep the payment URL so the abandoned-checkout reminder can resume it.
+    sub.checkout_url = str(redirect_url)[:500]
+    db.commit()
 
     record_server_event(user_key, "checkout_started", f"{channel}:{tokens}")
     log.info(

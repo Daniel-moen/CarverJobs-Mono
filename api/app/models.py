@@ -183,6 +183,11 @@ class WhatsAppSession(Base):
   last_match_session_id = Column(Integer, nullable=True)
   # When the proactive job-alert loop last messaged this user (template message)
   last_job_alert_at = Column(DateTime(timezone=True), nullable=True)
+  # When the in-chat feedback invitation was last sent (cooldown stamp — the
+  # invite rides along after a normal reply, never instead of it)
+  feedback_prompted_at = Column(DateTime(timezone=True), nullable=True)
+  # Last inbound message from this user — groundwork for win-back sweeps
+  last_active_at = Column(DateTime(timezone=True), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),
@@ -272,6 +277,14 @@ class Subscription(Base):
   amount = Column(String(20), nullable=False)
   frequency = Column(Integer, nullable=False, default=3)
   next_billing_date = Column(String(40), nullable=True)
+  # Where the checkout was started ("web" | "whatsapp") — lets the abandoned-
+  # checkout recovery sweep nudge WhatsApp buyers without guessing from user_key.
+  channel = Column(String(20), nullable=True)
+  # Yoco redirectUrl returned at checkout creation — reused in the recovery
+  # nudge so the buyer can resume payment without restarting the flow.
+  checkout_url = Column(String(500), nullable=True)
+  # When the one-and-only abandoned-checkout reminder was sent (NULL = never).
+  reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),
@@ -381,6 +394,27 @@ class MatchSessionResult(Base):
   strengths = Column(Text, nullable=True)
   gaps = Column(Text, nullable=True)
   factor_scores = Column(Text, nullable=True)
+
+
+class MatchInteraction(Base):
+  """Crew engagement signal on a matched job — saved or dismissed.
+
+  One row per (user_key, job_id, action); repeated taps are no-ops. Dismissed
+  jobs are excluded from future WhatsApp match runs, saved jobs power the
+  *saved* command.
+  """
+
+  __tablename__ = "match_interactions"
+
+  id = Column(Integer, primary_key=True, index=True)
+  user_key = Column(String(160), nullable=False, index=True)
+  job_id = Column(Integer, nullable=False, index=True)
+  action = Column(String(10), nullable=False)  # saved | dismissed
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+  __table_args__ = (
+    UniqueConstraint("user_key", "job_id", "action", name="uq_match_interactions_user_job_action"),
+  )
 
 
 class Article(Base):

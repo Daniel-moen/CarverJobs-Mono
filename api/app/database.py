@@ -202,6 +202,8 @@ def run_migrations() -> None:
     was_cols = _existing("whatsapp_sessions")
     _add("whatsapp_sessions", "last_match_session_id", "INTEGER", was_cols)
     _add("whatsapp_sessions", "last_job_alert_at", "DATETIME", was_cols)
+    _add("whatsapp_sessions", "feedback_prompted_at", "DATETIME", was_cols)
+    _add("whatsapp_sessions", "last_active_at", "DATETIME", was_cols)
 
     cp_cols = _existing("crew_profiles")
     _add("crew_profiles", "sex", "VARCHAR(20)", cp_cols)
@@ -267,6 +269,9 @@ def run_migrations() -> None:
     if "payfast_token" in sub_cols and "payment_token" not in sub_cols:
         conn.execute("ALTER TABLE subscriptions RENAME COLUMN payfast_token TO payment_token")
     _add("subscriptions", "checkout_id", "VARCHAR(120)", sub_cols)
+    _add("subscriptions", "channel", "VARCHAR(20)", sub_cols)
+    _add("subscriptions", "checkout_url", "VARCHAR(500)", sub_cols)
+    _add("subscriptions", "reminder_sent_at", "DATETIME", sub_cols)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS credit_accounts (
@@ -339,6 +344,27 @@ def run_migrations() -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS ix_job_drafts_job_id ON job_drafts (job_id)"
+    )
+
+    # match_interactions — saved/dismissed engagement signals on matched jobs.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS match_interactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_key VARCHAR(160) NOT NULL,
+            job_id INTEGER NOT NULL,
+            action VARCHAR(10) NOT NULL,
+            created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_match_interactions_user_job_action "
+        "ON match_interactions (user_key, job_id, action)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_match_interactions_user_key ON match_interactions (user_key)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_match_interactions_job_id ON match_interactions (job_id)"
     )
 
     # articles — SEO content pushed in by the authoring agent.

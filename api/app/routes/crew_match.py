@@ -32,6 +32,7 @@ from app.services.matching_engine import (
     CandidateProfile,
     JobSummary,
     match_candidate_to_jobs,
+    tier_for,
 )
 from app.settings import settings
 
@@ -110,10 +111,16 @@ def _job_to_summary(j: Job) -> JobSummary:
         salary_max=j.salary_max,
         salary_currency=j.salary_currency or "EUR",
         experience_required_years=j.experience_required_years,
+        minimum_license=j.minimum_license or "",
+        rank_level=j.rank_level or "",
         certifications_required=j.certifications_required or "",
         languages_required=j.languages_required or "",
         description=j.description or "",
+        requirements=j.requirements or "",
+        responsibilities=j.responsibilities or "",
+        urgent_hire=bool(j.urgent_hire),
         status=j.status or "open",
+        created_at=j.created_at,
     )
 
 
@@ -375,7 +382,9 @@ async def find_match(
                     "data": {"detail": "A newer match run was started."},
                 })
                 return
-            for r in matched_results:
+            # Persist every scored result (not just matches) so near-misses
+            # are recoverable later; `matched` keeps the flag accurate.
+            for r in results:
                 result_db.add(MatchSessionResult(
                     session_id=session_id,
                     job_id=r.job_id,
@@ -423,6 +432,7 @@ async def find_match(
                 strengths=r.strengths,
                 gaps=r.gaps,
                 factor_scores=r.factor_scores,
+                tier=r.tier,
             ))
 
         metrics.increment("crew_matches")
@@ -595,6 +605,8 @@ async def get_session(
             strengths=strengths,
             gaps=gaps,
             factor_scores=factor_scores,
+            # Tier is derived from compatibility at read time — no DB column.
+            tier=tier_for(r.compatibility),
         ))
 
     result_items.sort(key=lambda x: x.compatibility, reverse=True)

@@ -12,11 +12,12 @@ template (paid per message), so this whole feature is OFF until
 WHATSAPP_JOB_ALERT_TEMPLATE is configured with the approved template name.
 The template must take two body params: {{1}} = first name, {{2}} = job count.
 
-Role matching here is deliberately cheap (substring on role/title) — the alert
-only claims jobs *might* fit; the real AI matching runs when the user replies
-*match*. No LLM spend on alerts.
+Role matching here is deliberately cheap (deterministic role taxonomy, no AI)
+— the alert only claims jobs *might* fit; the real AI matching runs when the
+user replies *match*. No LLM spend on alerts.
 """
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -25,6 +26,12 @@ from app import flags
 from app.analytics import record_server_event
 from app.logger import get_logger
 from app.models import CrewProfile, Job, WhatsAppSession
+from app.services.role_taxonomy import (
+    RELATED_ADJACENT,
+    normalize_role,
+    normalize_roles,
+    roles_related,
+)
 from app.settings import settings
 
 log = get_logger("carver.job_alerts")
@@ -45,20 +52,51 @@ def _configured() -> bool:
     )
 
 
+# A job counts as a match when it is the same role or an adjacent one in the
+# same department (deckhand <-> bosun, stew <-> chief stew).
+_ALERT_RELATEDNESS_MIN = RELATED_ADJACENT
+
+
 def _role_tokens(desired_role: str) -> list[str]:
-    """Split "Deckhand, Engineer / ETO" into lowercase match tokens."""
+    """Normalise "Deckhand, Engineer / ETO" into canonical role tokens.
+
+    Uses the curated role taxonomy so abbreviations resolve sensibly ("stew" ->
+    stewardess, "eng" -> engineer). Parts the taxonomy doesn't know fall back
+    to plain lowercase tokens (min 4 chars, so short fragments can't
+    substring-match half the job board).
+    """
+    tokens: list[str] = []
     raw = desired_role.replace("/", ",").replace("&", ",")
-    return [t.strip().lower() for t in raw.split(",") if len(t.strip()) >= 3]
+    for part in raw.split(","):
+        part = part.strip().lower()
+        if not part:
+            continue
+        token = normalize_role(part) or (part if len(part) >= 4 else "")
+        if token and token not in tokens:
+            tokens.append(token)
+    return tokens
 
 
 def _matching_jobs(jobs: list[Job], desired_role: str) -> list[Job]:
-    tokens = _role_tokens(desired_role or "")
-    if not tokens:
+    desired = (desired_role or "").strip()
+    if not desired:
         return []
+    known_roles = normalize_roles(desired)
+    fallback_tokens = [t for t in _role_tokens(desired) if t not in known_roles]
+    if not known_roles and not fallback_tokens:
+        return []
+    fallback_patterns = [
+        re.compile(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])")
+        for t in fallback_tokens
+    ]
     out = []
     for job in jobs:
-        haystack = f"{job.role or ''} {job.title or ''}".lower()
-        if any(t in haystack for t in tokens):
+        haystack = f"{job.role or ''} {job.title or ''}"
+        if known_roles and roles_related(desired, haystack) >= _ALERT_RELATEDNESS_MIN:
+            out.append(job)
+            continue
+        hs = haystack.lower()
+        if any(p.search(hs) for p in fallback_patterns):
             out.append(job)
     return out
 

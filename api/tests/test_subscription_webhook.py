@@ -107,3 +107,45 @@ def test_first_purchase_bonus_applied_once(client, _signed, monkeypatch):
     second = _post(client, "ref-b2", tokens=5, amount_cents=6500)
     assert second.status_code == 200
     assert _balance("admin") == start + 20 + 5 + 5  # +5 pack tokens, no bonus
+
+
+def test_small_pack_first_purchase_gets_no_bonus(client, _signed, monkeypatch):
+    """The impulse Kickstart pack (below FIRST_PURCHASE_BONUS_MIN_TOKENS) never
+    triggers the first-purchase bonus — that stays reserved for Starter+."""
+    monkeypatch.setattr(settings, "FIRST_PURCHASE_BONUS_TOKENS", 5)
+    monkeypatch.setattr(settings, "FIRST_PURCHASE_BONUS_MIN_TOKENS", 5)
+    _seed_pending("kickstart-user", "ref-k1", "25.00")
+    start = _balance("kickstart-user")
+
+    resp = _post_for(client, "kickstart-user", "ref-k1", tokens=2, amount_cents=2500)
+    assert resp.status_code == 200
+    assert _balance("kickstart-user") == start + 2  # pack only, no bonus
+
+    # Any completed purchase (including Kickstart) uses up the first-purchase
+    # slot, so a later qualifying pack gets no bonus either — and the picker
+    # stops advertising the bonus once _is_first_purchase() is False.
+    _seed_pending("kickstart-user", "ref-k2", "65.00")
+    resp2 = _post_for(client, "kickstart-user", "ref-k2", tokens=5, amount_cents=6500)
+    assert resp2.status_code == 200
+    assert _balance("kickstart-user") == start + 2 + 5  # still no bonus
+
+
+def _post_for(client, user_key: str, ref: str, tokens: int, amount_cents: int):
+    event = {
+        "type": "payment.succeeded",
+        "payload": {
+            "id": f"pay_{ref}",
+            "amount": amount_cents,
+            "metadata": {"m_payment_id": ref, "user_key": user_key, "tokens": tokens},
+        },
+    }
+    return client.post(
+        "/subscription/webhook",
+        content=json.dumps(event),
+        headers={
+            "webhook-id": "wh_1",
+            "webhook-timestamp": "1",
+            "webhook-signature": "v1,sig",
+            "content-type": "application/json",
+        },
+    )

@@ -499,6 +499,8 @@ class MatchResultItem(APIModel):
     strengths:     Annotated[list[str], Field(default_factory=list)]
     gaps:          Annotated[list[str], Field(default_factory=list)]
     factor_scores: Annotated[dict[str, float], Field(default_factory=dict)]
+    # "strong" / "good" / "stretch" — "" below the match threshold.
+    tier:          str = ""
 
 
 class MatchingEnqueueResponse(APIModel):
@@ -651,6 +653,8 @@ class MatchSessionResultItem(APIModel):
     strengths: Annotated[list[str], Field(default_factory=list)]
     gaps: Annotated[list[str], Field(default_factory=list)]
     factor_scores: Annotated[dict[str, float], Field(default_factory=dict)]
+    # "strong" / "good" / "stretch" — "" below the match threshold.
+    tier: str = ""
 
 
 class MatchSessionSummary(APIModel):
