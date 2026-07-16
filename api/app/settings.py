@@ -130,6 +130,8 @@ class Settings:
   # Max posts to fetch per actor run. Default 20 to avoid re-fetching seen posts.
   # Set to 0 for unlimited (not recommended in production — wastes Apify credits).
   APIFY_MAX_ITEMS: int = int(os.getenv("APIFY_MAX_ITEMS", "20"))
+  # Per-group post cap sent to the actor as resultsLimit (actor default is 20).
+  APIFY_RESULTS_LIMIT: int = int(os.getenv("APIFY_RESULTS_LIMIT", "40"))
   # Run Apify on API startup? Default False — saves cost, first run happens after
   # the first scheduled interval instead.
   APIFY_SCRAPE_ON_STARTUP: bool = os.getenv("APIFY_SCRAPE_ON_STARTUP", "false").lower() == "true"

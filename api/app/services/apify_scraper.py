@@ -74,6 +74,7 @@ class ApifyScraper:
         actor_ids: list[str],
         start_urls: list[str] | None = None,
         max_items: int = 0,
+        results_limit: int = 0,
         since: str | None = None,
         poll_interval: int = _DEFAULT_POLL_INTERVAL,
         run_timeout: int = _DEFAULT_RUN_TIMEOUT,
@@ -81,8 +82,9 @@ class ApifyScraper:
         self._api_key = api_key
         self._actor_ids = [a.strip() for a in actor_ids if a.strip()]
         self._start_urls = [u.strip() for u in (start_urls or []) if u.strip()]
-        self._max_items = max_items   # 0 means unlimited
-        self._since = since           # ISO datetime — only fetch posts newer than this
+        self._max_items = max_items         # 0 means unlimited
+        self._results_limit = results_limit # per-group post cap (0 = actor default of 20)
+        self._since = since                 # ISO datetime — only fetch posts newer than this
         self._poll_interval = poll_interval
         self._run_timeout = run_timeout
 
@@ -123,12 +125,14 @@ class ApifyScraper:
         url_id = actor_id.replace("/", "~")
         # Pass startUrls as actor input if configured
         body: dict | None = None
-        if self._start_urls or self._max_items or self._since:
+        if self._start_urls or self._max_items or self._results_limit or self._since:
             body = {}
             if self._start_urls:
                 body["startUrls"] = [{"url": u} for u in self._start_urls]
             if self._max_items > 0:
                 body["maxItems"] = self._max_items
+            if self._results_limit > 0:
+                body["resultsLimit"] = self._results_limit
             if self._since:
                 body["onlyPostsNewerThan"] = self._since
         resp = self._request("POST", f"/acts/{url_id}/runs", body=body)

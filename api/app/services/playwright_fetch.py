@@ -35,6 +35,7 @@ def fetch_rendered(
     wait_for: str | None = None,
     timeout: int = _DEFAULT_TIMEOUT,
     return_cookies: bool = False,
+    wait_until: str = "networkidle",
 ) -> str | tuple[str, dict[str, str]]:
     """
     Fetch a URL with a headless Chromium browser and return the rendered HTML.
@@ -45,6 +46,12 @@ def fetch_rendered(
                         If it doesn't appear within 5 s, HTML is returned as-is.
         timeout:        Navigation timeout in milliseconds (default 30 s).
         return_cookies: When True, returns (html, cookies_dict) instead of just html.
+        wait_until:     Playwright navigation wait state — one of "load",
+                        "domcontentloaded", "networkidle", "commit".
+                        Defaults to "networkidle". Some sites (e.g. Yotspot) load
+                        ad/analytics traffic that never lets the network go idle,
+                        causing a 30 s timeout; those callers should pass
+                        "domcontentloaded" instead.
 
     Returns:
         HTML string, or (html, cookies) tuple when return_cookies=True.
@@ -60,7 +67,7 @@ def fetch_rendered(
         browser = pw.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
         try:
             page = browser.new_page(user_agent=_USER_AGENT)
-            page.goto(url, timeout=timeout, wait_until="networkidle")
+            page.goto(url, timeout=timeout, wait_until=wait_until)
             if wait_for:
                 try:
                     page.wait_for_selector(wait_for, timeout=5_000)
@@ -103,6 +110,9 @@ def fetch_many(
         List of (url, html) tuples in the same order as urls.
         Failed pages return (url, "") instead of raising.
     """
+    import random
+    import time
+
     from playwright.sync_api import TimeoutError as PWTimeout
     from playwright.sync_api import sync_playwright
 
@@ -116,10 +126,19 @@ def fetch_many(
 
             if first_url:
                 log.info("Playwright session: warming up | url=%s", first_url)
-                page.goto(first_url, timeout=timeout, wait_until="networkidle")
+                # Warm-up only needs to establish session cookies, so wait for the
+                # DOM rather than full network idle — sites like Yotspot never reach
+                # "networkidle" (persistent ad/analytics traffic) and would time out.
+                page.goto(first_url, timeout=timeout, wait_until="domcontentloaded")
                 log.info("Playwright session: warm-up OK | bytes=%d", len(page.content()))
 
-            for url in urls:
+            for i, url in enumerate(urls):
+                # Rate-limit sequential requests: hammering profile pages back-to-back
+                # in one session trips Cloudflare's "just a moment" challenge (observed
+                # ~4/6 profiles blocked on Yotspot). A short randomised pause between
+                # pages (not before the first) keeps the request cadence human-like.
+                if i > 0:
+                    time.sleep(random.uniform(2.0, 4.0))
                 try:
                     log.debug("Playwright session: fetching | url=%s", url)
                     page.goto(url, timeout=page_timeout, wait_until="load")

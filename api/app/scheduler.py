@@ -135,6 +135,7 @@ async def run_scrape_once(
                 actor_ids=actor_ids,
                 start_urls=settings.APIFY_START_URLS,
                 max_items=settings.APIFY_MAX_ITEMS,
+                results_limit=settings.APIFY_RESULTS_LIMIT,
             )
 
             try:

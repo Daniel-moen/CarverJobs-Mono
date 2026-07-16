@@ -69,6 +69,21 @@ class Job(Base):
   )
 
 
+class RejectedPost(Base):
+  """Content hashes of scraped posts the AI classified as non-jobs.
+
+  Caches AI rejections so the same post is not re-sent to OpenAI on every 12h
+  scrape cycle. Only the SHA-256 of the normalised post text is stored — never
+  the raw post content.
+  """
+  __tablename__ = "rejected_posts"
+
+  id = Column(Integer, primary_key=True, index=True)
+  content_hash = Column(String(64), unique=True, nullable=False, index=True)
+  reason = Column(String(60), nullable=True)
+  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class User(Base):
   __tablename__ = "users"
 

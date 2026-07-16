@@ -139,9 +139,14 @@ class WorkOnAYachtScraper:
         """
         try:
             log.info("Yotspot: fetching listing page via Playwright | url=%s", self._url)
+            # Yotspot loads ad/analytics traffic that never lets the network go
+            # idle, so the default "networkidle" wait times out (30 s) and the
+            # listing comes back empty. "domcontentloaded" fires as soon as the
+            # DOM (which already contains the job-profile links) is parsed.
             listing_html = fetch_rendered(
                 self._url,
                 wait_for=".job-search-result, [class*='job']",
+                wait_until="domcontentloaded",
             )
 
             job_ids = _extract_job_ids(listing_html)
