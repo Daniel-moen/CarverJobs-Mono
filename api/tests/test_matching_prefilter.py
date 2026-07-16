@@ -1,11 +1,14 @@
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.services.matching_engine import (
     CandidateProfile,
     JobSummary,
     MATCH_THRESHOLD,
     PREFILTER_TOP_N,
+    ROLE_MISMATCH_CAP,
     _availability_score,
     _build_prompt,
     _deterministic_composite,
@@ -173,8 +176,8 @@ def test_deterministic_composite_renormalises_missing_factors():
     job = _job(1, salary_max=4000.0, location="Palma")
     factors = _deterministic_factors(c, job)
     assert set(factors) == {"salary", "location"}
-    # (0.3*100 + 0.2*40) / 0.5 = 76
-    assert _deterministic_composite(factors) == 76.0
+    # (0.2*100 + 0.1*40) / 0.3 = 80
+    assert _deterministic_composite(factors) == pytest.approx(80.0)
     assert _deterministic_composite({}) is None
 
 
@@ -214,10 +217,12 @@ def test_blend_skipped_when_no_deterministic_data(monkeypatch):
     fake, _ = _echo_llm(compatibility=88)
     monkeypatch.setattr("app.services.matching_engine._call_openai", fake)
 
-    candidate = CandidateProfile(user_key="u1", desired_role="Deckhand")
+    # Roles unknown to the taxonomy: no role factor, no other structured data,
+    # so the LLM score passes through untouched.
+    candidate = CandidateProfile(user_key="u1", desired_role="Zookeeper")
     results = match_candidate_to_jobs(
         api_key="k", model="m", candidate=candidate,
-        jobs=[JobSummary(job_id=1, title="Deckhand", role="Deckhand")],
+        jobs=[JobSummary(job_id=1, title="Nanny", role="Nanny")],
     )
 
     assert results[0].compatibility == 88.0
@@ -228,11 +233,13 @@ def test_priority_boost_applied_in_code_not_prompt(monkeypatch):
     fake, calls = _echo_llm(compatibility=60)
     monkeypatch.setattr("app.services.matching_engine._call_openai", fake)
 
-    candidate = CandidateProfile(user_key="u1", desired_role="Deckhand")
+    # Taxonomy-unknown roles keep the deterministic blend out of the way so
+    # only the boost arithmetic is under test.
+    candidate = CandidateProfile(user_key="u1", desired_role="Zookeeper")
     jobs = [
-        JobSummary(job_id=1, title="Deckhand", role="Deckhand"),
-        JobSummary(job_id=2, title="Deckhand", role="Deckhand", status="priority"),
-        JobSummary(job_id=3, title="Deckhand", role="Deckhand", urgent_hire=True),
+        JobSummary(job_id=1, title="Nanny", role="Nanny"),
+        JobSummary(job_id=2, title="Nanny", role="Nanny", status="priority"),
+        JobSummary(job_id=3, title="Nanny", role="Nanny", urgent_hire=True),
     ]
     results = {r.job_id: r for r in match_candidate_to_jobs(
         api_key="k", model="m", candidate=candidate, jobs=jobs,
@@ -255,6 +262,75 @@ def test_priority_boost_clamped_at_100(monkeypatch):
         jobs=[JobSummary(job_id=1, title="Deckhand", role="Deckhand", status="priority")],
     )
     assert results[0].compatibility == 100.0
+
+
+def test_role_factor_values():
+    deckhand = CandidateProfile(user_key="u", desired_role="Deckhand")
+    assert _deterministic_factors(deckhand, _job(1, "Deckhand"))["role"] == pytest.approx(100.0)
+    assert _deterministic_factors(deckhand, _job(2, "Bosun"))["role"] == pytest.approx(70.0)
+    assert _deterministic_factors(deckhand, _job(3, "Captain"))["role"] == pytest.approx(40.0)
+    assert _deterministic_factors(deckhand, _job(4, "Chef"))["role"] == 0.0
+    # Either side unknown to the taxonomy: factor absent, weights renormalise.
+    unknown = CandidateProfile(user_key="u", desired_role="Zookeeper")
+    assert "role" not in _deterministic_factors(unknown, _job(5, "Deckhand"))
+    assert "role" not in _deterministic_factors(deckhand, _job(6, "Nanny"))
+
+
+def test_cross_department_capped_despite_blend_and_boost(monkeypatch):
+    # A misbehaving LLM score, perfect pay/availability/location AND the
+    # urgent-hire boost together must not lift a chef job over the threshold
+    # for a deckhand.
+    fake, _ = _echo_llm(compatibility=60)
+    monkeypatch.setattr("app.services.matching_engine._call_openai", fake)
+
+    chef = _job(
+        1, "Chef", location="Antibes", salary_max=9000.0,
+        experience_required_years=1, start_date="2026-08-01", urgent_hire=True,
+    )
+    results = match_candidate_to_jobs(
+        api_key="k", model="m", candidate=_full_data_candidate(), jobs=[chef],
+    )
+
+    assert results[0].compatibility <= ROLE_MISMATCH_CAP
+    assert results[0].matched is False
+    assert results[0].tier == ""
+
+
+def test_cross_department_fallback_capped_when_llm_never_scores(monkeypatch):
+    def _fake(api_key, model, prompt, *, job_count):
+        return json.dumps({"matched_jobs": []})
+
+    monkeypatch.setattr("app.services.matching_engine._call_openai", _fake)
+
+    chef = _job(
+        1, "Chef", location="Antibes", salary_max=9000.0,
+        experience_required_years=1, start_date="2026-08-01",
+    )
+    results = match_candidate_to_jobs(
+        api_key="k", model="m", candidate=_full_data_candidate(), jobs=[chef],
+    )
+
+    assert results[0].compatibility <= ROLE_MISMATCH_CAP
+    assert results[0].matched is False
+
+
+def test_same_department_adjacent_role_still_matches(monkeypatch):
+    fake, _ = _echo_llm(compatibility=55)
+    monkeypatch.setattr("app.services.matching_engine._call_openai", fake)
+
+    bosun = _job(
+        1, "Bosun", location="Antibes", salary_max=4000.0,
+        experience_required_years=3, start_date="2026-08-01",
+    )
+    results = match_candidate_to_jobs(
+        api_key="k", model="m", candidate=_full_data_candidate(), jobs=[bosun],
+    )
+
+    # composite = 0.4*70 + 0.2*100 + 0.2*100 + 0.1*100 + 0.1*100 = 88;
+    # round(0.65*55 + 0.35*88) = 67 — lifted, never capped.
+    assert results[0].compatibility == 67.0
+    assert results[0].matched is True
+    assert results[0].factor_scores["det_role"] == 70.0
 
 
 def test_tier_assignment():
@@ -304,10 +380,11 @@ def test_missing_job_ids_are_retried_once(monkeypatch):
 
     monkeypatch.setattr("app.services.matching_engine._call_openai", _fake)
 
-    candidate = CandidateProfile(user_key="u1", desired_role="Deckhand")
+    # Taxonomy-unknown roles: no blend, so the retried LLM score is verbatim.
+    candidate = CandidateProfile(user_key="u1", desired_role="Zookeeper")
     jobs = [
-        JobSummary(job_id=1, title="Deckhand", role="Deckhand"),
-        JobSummary(job_id=2, title="Deckhand", role="Deckhand"),
+        JobSummary(job_id=1, title="Nanny", role="Nanny"),
+        JobSummary(job_id=2, title="Nanny", role="Nanny"),
     ]
     results = {r.job_id: r for r in match_candidate_to_jobs(
         api_key="k", model="m", candidate=candidate, jobs=jobs,

@@ -15,7 +15,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Callable
 
 from app.services.ai_client import AIClientError, call_openai
-from app.services.role_taxonomy import roles_related
+from app.services.role_taxonomy import normalize_roles, roles_related
 
 log = logging.getLogger("carver.matching_engine")
 
@@ -33,6 +33,10 @@ LLM_BLEND_WEIGHT = 0.65
 DETERMINISTIC_BLEND_WEIGHT = 0.35
 # Applied in code (not by the LLM) to priority/urgent-hire jobs.
 PRIORITY_BOOST = 10.0
+# Ceiling for jobs the taxonomy confirms are in a different department than the
+# candidate's desired role — no blend, boost or fallback may lift these into a
+# recommendation. Same-department roles (deckhand -> bosun) are unaffected.
+ROLE_MISMATCH_CAP = 15.0
 # Result tiers by final compatibility.
 TIER_STRONG_MIN = 75
 TIER_GOOD_MIN = 50
@@ -193,12 +197,14 @@ _DATE_FORMATS = (
 )
 _ANYWHERE_TERMS = {"worldwide", "anywhere", "global", "flexible"}
 # Relative weights for the deterministic composite; renormalised over
-# whichever factors actually have data.
+# whichever factors actually have data. Role is the heaviest factor — it is
+# the primary filter, everything else is a tiebreaker.
 _DETERMINISTIC_WEIGHTS = {
-    "salary": 0.3,
-    "experience": 0.3,
-    "availability": 0.2,
-    "location": 0.2,
+    "role": 0.4,
+    "salary": 0.2,
+    "experience": 0.2,
+    "availability": 0.1,
+    "location": 0.1,
 }
 
 
@@ -284,9 +290,21 @@ def _availability_score(candidate: CandidateProfile, job: JobSummary) -> float |
     return max(0.0, 100.0 - gap_days * 2.0)
 
 
+def _role_score(candidate: CandidateProfile, job: JobSummary) -> float | None:
+    """100 same role, 70 adjacent seniority, 40 same department, 0 cross-department.
+
+    None when either side is unknown to the taxonomy — an unrecognised role must
+    not be punished, only a confirmed cross-department mismatch.
+    """
+    if not normalize_roles(candidate.desired_role) or not normalize_roles(_job_role_text(job)):
+        return None
+    return 100.0 * roles_related(candidate.desired_role, _job_role_text(job))
+
+
 def _deterministic_factors(candidate: CandidateProfile, job: JobSummary) -> dict[str, float]:
     """Sub-scores (0-100) computed from structured fields; missing data = absent key."""
     scores = {
+        "role": _role_score(candidate, job),
         "salary": _salary_score(candidate, job),
         "experience": _experience_score(candidate, job),
         "availability": _availability_score(candidate, job),
@@ -394,6 +412,9 @@ def _finalize_result(result: MatchResult, job: JobSummary, candidate: CandidateP
     final = 0.65 * llm + 0.35 * deterministic composite (when structured data
     exists — factors with missing data are skipped and weights renormalised).
     The priority/urgent-hire +10 boost is applied here, in code, not by the LLM.
+    Taxonomy-confirmed cross-department jobs are capped at ROLE_MISMATCH_CAP
+    after the blend and boost, so pay/availability can never lift a chef job
+    over the match threshold for a deckhand.
     """
     factors = _deterministic_factors(candidate, job)
     composite = _deterministic_composite(factors)
@@ -406,6 +427,8 @@ def _finalize_result(result: MatchResult, job: JobSummary, candidate: CandidateP
             result.factor_scores.setdefault(f"det_{name}", round(value, 1))
     if _is_priority_job(job):
         result.compatibility += PRIORITY_BOOST
+    if factors.get("role") == 0.0:
+        result.compatibility = min(result.compatibility, ROLE_MISMATCH_CAP)
     result.compatibility = max(0.0, min(100.0, result.compatibility))
     result.matched = result.compatibility >= MATCH_THRESHOLD
     result.tier = tier_for(result.compatibility)
@@ -425,6 +448,8 @@ def _deterministic_fallback_result(candidate: CandidateProfile, job: JobSummary)
     )
     if _is_priority_job(job):
         result.compatibility = min(100.0, result.compatibility + PRIORITY_BOOST)
+    if factors.get("role") == 0.0:
+        result.compatibility = min(result.compatibility, ROLE_MISMATCH_CAP)
     result.matched = result.compatibility >= MATCH_THRESHOLD
     result.tier = tier_for(result.compatibility)
     return result

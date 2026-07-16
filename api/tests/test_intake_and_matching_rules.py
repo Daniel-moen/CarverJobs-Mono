@@ -173,7 +173,7 @@ def test_matching_engine_applies_threshold_even_when_llm_marks_not_matched(monke
                 "matched": False,
                 "compatibility": 72,
                 "reason": "Good fit.",
-                "strengths": ["Relevant deck experience"],
+                "strengths": ["Relevant experience"],
                 "gaps": [],
                 "factor_scores": {"role": 72},
             }]
@@ -181,8 +181,10 @@ def test_matching_engine_applies_threshold_even_when_llm_marks_not_matched(monke
 
     monkeypatch.setattr("app.services.matching_engine._call_openai", _fake_call_openai)
 
-    candidate = CandidateProfile(user_key="u3", first_name="Sam", desired_role="Deckhand")
-    jobs = [JobSummary(job_id=1, title="Deckhand", role="Deckhand")]
+    # Taxonomy-unknown roles keep the deterministic blend inert so the
+    # threshold-vs-LLM-matched-flag behaviour is isolated.
+    candidate = CandidateProfile(user_key="u3", first_name="Sam", desired_role="Zookeeper")
+    jobs = [JobSummary(job_id=1, title="Nanny", role="Nanny")]
 
     results = match_candidate_to_jobs(
         api_key="test-key",
