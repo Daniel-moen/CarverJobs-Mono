@@ -344,13 +344,13 @@ def test_feedback_gate_no_longer_drops_the_command(monkeypatch):
     asyncio.run(whatsapp._process_whatsapp_message(PHONE, "balance"))
 
     labels = [c[0] for c in calls]
-    # The command ran and answered…
-    assert "send" in labels
-    balance_reply = next(text for label, text in calls if label == "send")
+    # The command ran and answered (balance now replies with quick-reply buttons)…
+    assert "buttons" in labels
+    balance_reply = next(text for label, text in calls if label == "buttons")
     assert "balance" in balance_reply.lower()
     # …and the invite came AFTER the command's response, not instead of it.
     assert "feedback_invite" in labels
-    assert labels.index("feedback_invite") > labels.index("send")
+    assert labels.index("feedback_invite") > labels.index("buttons")
 
     db = _TestingSession()
     try:
@@ -410,7 +410,7 @@ def test_no_feedback_invite_when_already_submitted(monkeypatch):
 
     asyncio.run(whatsapp._process_whatsapp_message(PHONE, "balance"))
     labels = [c[0] for c in calls]
-    assert "send" in labels and "feedback_invite" not in labels
+    assert "buttons" in labels and "feedback_invite" not in labels
 
 
 def test_last_active_at_stamped_on_every_inbound(monkeypatch):

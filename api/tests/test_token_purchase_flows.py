@@ -34,9 +34,14 @@ def _patch_chat(monkeypatch, sent, lists):
     async def fake_list(to, **kwargs):
         lists.append(kwargs)
 
+    async def fake_cta(to, **kwargs):
+        # Body and URL land in `sent` so link/copy assertions cover CTA messages too.
+        sent.append(f"{kwargs.get('body', '')} {kwargs.get('url_link', '')}".strip())
+
     monkeypatch.setattr(whatsapp, "_send_whatsapp", fake_send)
     monkeypatch.setattr(whatsapp, "_send_whatsapp_buttons", fake_buttons)
     monkeypatch.setattr(whatsapp, "_send_whatsapp_list", fake_list)
+    monkeypatch.setattr(whatsapp, "_send_whatsapp_cta_url", fake_cta)
     monkeypatch.setattr(whatsapp, "get_credit_balance", lambda db, key: 3)
     monkeypatch.setattr(whatsapp, "_is_first_purchase", lambda db, key: True)
     monkeypatch.setattr(whatsapp, "_record_whatsapp_message", lambda *a, **k: None)

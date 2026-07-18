@@ -145,7 +145,7 @@ def _finish_match_run(phone_number: str) -> None:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-_GRAPH_URL = "https://graph.facebook.com/v19.0"
+_GRAPH_URL = "https://graph.facebook.com/v23.0"
 
 # Inbound webhook sets this so outbound /messages calls use the same Graph phone id.
 _wa_graph_phone_id: ContextVar[str | None] = ContextVar("wa_graph_phone_id", default=None)
@@ -331,6 +331,30 @@ async def _send_whatsapp(to: str, text: str) -> None:
         )
 
 
+async def _send_typing_indicator(message_id: str) -> None:
+    """Mark an inbound message as read and show the typing indicator in the chat.
+
+    The indicator stays visible for up to 25 seconds or until our next message
+    lands, whichever comes first. Best-effort: a failure here must never block
+    the actual reply, and re-sending for an already-read message is harmless.
+    """
+    if not message_id:
+        return
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": message_id,
+        "typing_indicator": {"type": "text"},
+    }
+    headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+    try:
+        resp = await _http.post(_messages_url(), json=payload, headers=headers)
+        if resp.status_code >= 400:
+            log.warning("Meta typing indicator failed | status=%d | body=%s", resp.status_code, resp.text[:200])
+    except httpx.HTTPError as exc:
+        log.warning("WhatsApp typing indicator error | %s", exc)
+
+
 async def _send_whatsapp_buttons(to: str, body: str, buttons: list[tuple[str, str]]) -> None:
     """Send an interactive quick-reply button message (up to 3 buttons)."""
     phone_id = _active_wa_phone_number_id()
@@ -432,6 +456,67 @@ async def _send_whatsapp_list(
         )
 
 
+async def _send_whatsapp_cta_url(
+    to: str,
+    *,
+    body: str,
+    button_text: str,
+    url_link: str,
+    header: str | None = None,
+    footer: str | None = None,
+) -> None:
+    """Send an interactive CTA-URL message — a tappable button that opens a link.
+
+    Replaces pasting raw magic-link/payment URLs into the message body: the
+    button hides the long token URL and reads as a native action.
+    """
+    phone_id = _active_wa_phone_number_id()
+    url = f"{_GRAPH_URL}/{phone_id}/messages"
+    interactive: dict = {
+        "type": "cta_url",
+        "body": {"text": body},
+        "action": {
+            "name": "cta_url",
+            "parameters": {"display_text": button_text[:20], "url": url_link},
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header[:60]}
+    if footer:
+        interactive["footer"] = {"text": footer[:60]}
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "interactive",
+        "interactive": interactive,
+    }
+    headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+    audit_payload: dict = {
+        "graph_phone_number_id": phone_id,
+        "cta": {"display_text": button_text[:20], "url": url_link},
+    }
+    meta_message_id = None
+    try:
+        resp = await _http.post(url, json=payload, headers=headers)
+        audit_payload["status_code"] = resp.status_code
+        meta_message_id = _meta_response_message_id(resp)
+        if resp.status_code >= 400:
+            log.error("Meta CTA send failed | to=%s | status=%d | body=%s", to, resp.status_code, resp.text[:300])
+    except httpx.HTTPError as exc:
+        audit_payload["error"] = exc.__class__.__name__
+        log.exception("WhatsApp CTA send error | to=%s | %s", to, exc)
+    finally:
+        _record_whatsapp_message(
+            to,
+            "outbound",
+            "interactive_cta_url",
+            body,
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=phone_id,
+            payload=audit_payload,
+        )
+
+
 # Instant acks sent the moment a job submission lands, before the slow
 # download/AI-extraction work, so the user isn't left staring at silence.
 _JOB_REVIEW_WAIT_ACKS = {
@@ -471,11 +556,7 @@ def _credits_summary_for_menu(balance: int, subscribed: bool = False) -> str:
 
 def _credits_standalone_message(balance: int, subscribed: bool = False) -> str:
     """Full explainer for *balance* / *tokens* text commands."""
-    return (
-        _credits_summary_for_menu(balance, subscribed)
-        + "\n\n"
-        + "_Type *help* for the full menu._"
-    )
+    return _credits_summary_for_menu(balance, subscribed)
 
 
 async def _send_help_menu(to: str, db: Session) -> None:
@@ -915,18 +996,21 @@ async def _send_feedback_request(phone: str, db: Session) -> None:
     # may be 0 — the form still works, it just isn't incentivised).
     if FEEDBACK_REWARD_TOKENS > 0:
         w = "token" if FEEDBACK_REWARD_TOKENS == 1 else "tokens"
-        reward_line = f"We'll add *{FEEDBACK_REWARD_TOKENS} {w}* to your account when you submit it.\n\n"
-        footer = "_Takes less than 2 minutes. Reward available once per user._"
+        reward_line = f"We'll add *{FEEDBACK_REWARD_TOKENS} {w}* to your account when you submit it."
+        footer = "Under 2 min · Reward once per user"
     else:
-        reward_line = "It helps us make CARVER better for you.\n\n"
-        footer = "_Takes less than 2 minutes._"
-    await _send_whatsapp(
+        reward_line = "It helps us make CARVER better for you."
+        footer = "Takes less than 2 minutes"
+    await _send_whatsapp_cta_url(
         phone,
-        "💬 *Quick feedback*\n\n"
-        "Please complete this short feedback form about your CARVER experience. "
-        f"{reward_line}"
-        f"Feedback form: {link}\n\n"
-        f"{footer}",
+        header="Quick feedback 💬",
+        body=(
+            "Please complete this short feedback form about your CARVER experience. "
+            f"{reward_line}"
+        ),
+        button_text="Open form",
+        url_link=link,
+        footer=footer,
     )
 
 
@@ -957,13 +1041,16 @@ async def _send_token_pack_picker(phone: str, db: Session) -> None:
             price = f"{float(p['price']):g}"
             badge = f" — _{p['badge']}_" if p.get("badge") else ""
             pack_lines.append(f"• *{int(p['tokens'])} tokens* — R{price}{badge}")
-        await _send_whatsapp(
+        await _send_whatsapp_cta_url(
             phone,
-            f"🪙 *Buy Tokens*\n\n"
-            f"Your balance: *{bal} {w}*\n\n"
-            f"Token packs available:\n" + "\n".join(pack_lines) + "\n\n"
-            f"👉 {link}\n\n"
-            f"{_link_expiry_note()}",
+            header="Buy Tokens 🪙",
+            body=(
+                f"Your balance: *{bal} {w}*\n\n"
+                f"Token packs available:\n" + "\n".join(pack_lines)
+            ),
+            button_text="Buy on website",
+            url_link=link,
+            footer=_link_expiry_note().strip("_"),
         )
         return
 
@@ -1039,23 +1126,28 @@ async def _start_whatsapp_checkout(phone: str, tokens: int, db: Session) -> None
         pay_url = await payments.create_checkout(db, phone, tokens, channel="whatsapp")
     except payments.CheckoutError:
         link = _make_magic_link(phone, db, redirect_to="/subscription")
-        await _send_whatsapp(
+        await _send_whatsapp_cta_url(
             phone,
-            "⚠️ I couldn't start the payment just now. You can buy on the website instead:\n\n"
-            f"👉 {link}\n\n"
-            f"{_link_expiry_note()}",
+            body="⚠️ I couldn't start the payment just now. You can buy on the website instead:",
+            button_text="Buy on website",
+            url_link=link,
+            footer=_link_expiry_note().strip("_"),
         )
         return
 
     price = f"{float(pkg['price']):g}"
     bonus_line = f"🎁 Includes *+{bonus} bonus tokens* — first-purchase gift.\n" if first else ""
-    await _send_whatsapp(
+    await _send_whatsapp_cta_url(
         phone,
-        f"🪙 *{pkg['label']} Pack — {tokens} tokens for R{price}*\n"
-        f"{bonus_line}\n"
-        f"Tap to pay securely with Yoco (card, Apple Pay or Google Pay):\n"
-        f"👉 {pay_url}\n\n"
-        "Tokens are added automatically — I'll confirm here the moment your payment lands. ⚡",
+        body=(
+            f"🪙 *{pkg['label']} Pack — {tokens} tokens for R{price}*\n"
+            f"{bonus_line}\n"
+            "Pay securely with Yoco (card, Apple Pay or Google Pay). "
+            "Tokens are added automatically — I'll confirm here the moment your payment lands. ⚡"
+        ),
+        button_text="Pay now 💳",
+        url_link=pay_url,
+        footer="Secure payment via Yoco",
     )
 
 
@@ -1432,13 +1524,15 @@ async def _handle_docs_command(phone_number: str, db: Session) -> str:
     return "\n".join(lines)
 
 
-async def _handle_jobs_command(phone_number: str, db: Session) -> str:
+async def _handle_jobs_command(phone_number: str, db: Session) -> None:
     link = _make_magic_link(phone_number, db, redirect_to="/jobs")
-    return (
-        "🔎 *Browse Open Yacht Positions*\n\n"
-        "View all live superyacht crew roles — deck, interior, engineering & more:\n\n"
-        f"👉 {link}\n\n"
-        f"{_link_expiry_note()}"
+    await _send_whatsapp_cta_url(
+        phone_number,
+        header="Browse Open Yacht Positions 🔎",
+        body="View all live superyacht crew roles — deck, interior, engineering & more.",
+        button_text="Browse jobs",
+        url_link=link,
+        footer=_link_expiry_note().strip("_"),
     )
 
 
@@ -1767,10 +1861,6 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     digits = " or ".join(f"*{i}*" for i in range(1, min(len(top), 3) + 1))
     lines.append(f"\n💬 Reply {digits} for full details & how to apply — right here in chat.")
 
-    # Magic link to the match session page
-    link = _make_magic_link(phone_number, db, redirect_to=f"/matches/{match_session.id}")
-    lines.append(f"\nView all matches & draft applications:\n👉 {link}")
-    lines.append(_link_expiry_note())
     lines.append(f"\nTokens remaining: *{credits_remaining}*")
     if credits_remaining <= 1:
         # Peak-engagement nudge: they just saw real matches and are about to
@@ -1778,6 +1868,16 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         lines.append("_Running low — type *buy tokens* to top up in seconds._")
 
     await _send_whatsapp(phone_number, "\n".join(lines))
+
+    # Magic link to the match session page — as a tappable button, not a raw URL.
+    link = _make_magic_link(phone_number, db, redirect_to=f"/matches/{match_session.id}")
+    await _send_whatsapp_cta_url(
+        phone_number,
+        body="View all matches & draft applications on the web:",
+        button_text="View all matches",
+        url_link=link,
+        footer=_link_expiry_note().strip("_"),
+    )
 
 async def _run_match_command_background(
     phone_number: str,
@@ -1944,8 +2044,6 @@ async def _send_match_detail(phone: str, db: Session, wa_session: WhatsAppSessio
 
     lines.append(f"\n{_job_apply_line(job)}")
     lines.append(f"\n✍️ Reply *draft {n}* and I'll write your application email right here.")
-    link = _make_magic_link(phone, db, redirect_to=f"/matches/{wa_session.last_match_session_id}")
-    lines.append(f"\nAll matches on the web:\n👉 {link}\n{_link_expiry_note()}")
 
     await _send_whatsapp(phone, "\n".join(lines))
     record_server_event(phone, "match_detail_viewed", str(job.id))
@@ -2199,7 +2297,7 @@ _FALLBACK_GREETING = (
 )
 
 
-async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Session) -> str:
+async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Session) -> str | None:
     history = json.loads(wa_session.history)
     partial = json.loads(wa_session.partial_profile)
 
@@ -2310,15 +2408,21 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
                 "your top matches will land right here in a minute or two.\n\n"
             )
         message += (
-            f"To really stand out, upload your docs — CV, passport, STCW & certs:\n\n"
-            f"👉 {link}\n\n"
             f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
-            f"type *buy tokens* to top up, or submit a valid job to earn a free token.\n\n"
-            f"{_link_expiry_note()} _Type *help* anytime to see what I can do for you._ ⚡"
+            f"type *buy tokens* to top up, or submit a valid job to earn a free token. "
+            f"_Type *help* anytime to see what I can do for you._ ⚡"
         )
-    else:
-        _save_session(wa_session, db, history, partial)
+        await _send_whatsapp(wa_session.phone_number, message)
+        await _send_whatsapp_cta_url(
+            wa_session.phone_number,
+            body="To really stand out, upload your docs — CV, passport, STCW & certs:",
+            button_text="Upload docs",
+            url_link=link,
+            footer=_link_expiry_note().strip("_"),
+        )
+        return None
 
+    _save_session(wa_session, db, history, partial)
     return message
 
 
@@ -2335,14 +2439,19 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
 
     if cmd in ("credits", "balance", "my credits", "tokens", "my tokens"):
         bal = get_credit_balance(db, phone)
-        await _send_whatsapp(phone, _credits_standalone_message(bal))
+        await _send_whatsapp_buttons(
+            phone,
+            _credits_standalone_message(bal),
+            [("cmd_subscribe", "Buy Tokens"), ("btn_submit_job", "Submit Job"), ("btn_menu", "Menu")],
+        )
         return None
     if cmd in ("feedback", "give feedback", "review", "survey"):
         eligible, _setting = feedback_is_eligible(db, user_key=phone, source="whatsapp_message")
         if not eligible:
-            await _send_whatsapp(
+            await _send_whatsapp_buttons(
                 phone,
-                "💬 Feedback rewards are not open for your account right now. Type *help* to see what else you can do.",
+                "💬 Feedback rewards are not open for your account right now.",
+                [("btn_menu", "Menu")],
             )
             return None
         await _send_feedback_request(phone, db)
@@ -2361,16 +2470,10 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
     if cmd in ("cancel subscription", "cancel pro", "cancel", "unsubscribe"):
         bal = get_credit_balance(db, phone)
         w = "token" if bal == 1 else "tokens"
-        link = _make_magic_link(phone, db, redirect_to="/subscription")
-        await _send_whatsapp(
-            phone,
-            f"CARVER is pay-per-token — no recurring plan to cancel.\n\n"
-            f"Your balance: *{bal} {w}*.\n\n"
-            f"Need more tokens? 👉 {link}",
-        )
         await _send_whatsapp_buttons(
             phone,
-            "Buy more tokens?",
+            f"CARVER is pay-per-token — no recurring plan to cancel.\n\n"
+            f"Your balance: *{bal} {w}*.",
             [("cmd_subscribe", "Buy Tokens"), ("btn_menu", "Menu")],
         )
         return None
@@ -2388,25 +2491,29 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
     if cmd in ("docs", "documents", "my docs"):
         text = await _handle_docs_command(phone, db)
         link = _make_magic_link(phone, db)
-        await _send_whatsapp(
+        await _send_whatsapp_cta_url(
             phone,
-            text + f"\n\n📎 *Upload or update your crew docs:*\n👉 {link}\n\n{_link_expiry_note()}",
+            body=text + "\n\n📎 *Upload or update your crew docs below.*",
+            button_text="Upload docs",
+            url_link=link,
+            footer=_link_expiry_note().strip("_"),
         )
         await _send_whatsapp_buttons(
             phone,
             "Need anything else?",
-            [("btn_upload_docs", "Upload Docs"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Main Menu")],
+            [("btn_view_profile", "View Profile"), ("btn_find_matches", "Matches (1 token)"), ("btn_menu", "Main Menu")],
         )
         return None
 
     if cmd in ("upload", "upload docs", "add docs", "add documents"):
         link = _make_magic_link(phone, db)
-        await _send_whatsapp(
+        await _send_whatsapp_cta_url(
             phone,
-            "📎 *Upload Crew Documents*\n\n"
-            "Tap below to upload your CV, passport, STCW, ENG1 & certs — vessels require these for crew:\n\n"
-            f"👉 {link}\n\n"
-            f"{_link_expiry_note()}",
+            header="Upload Crew Documents 📎",
+            body="Tap below to upload your CV, passport, STCW, ENG1 & certs — vessels require these for crew.",
+            button_text="Upload docs",
+            url_link=link,
+            footer=_link_expiry_note().strip("_"),
         )
         await _send_whatsapp_buttons(
             phone,
@@ -2417,12 +2524,13 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
 
     if cmd in ("edit", "edit profile", "update", "update profile", "change profile"):
         link = _make_magic_link(phone, db)
-        await _send_whatsapp(
+        await _send_whatsapp_cta_url(
             phone,
-            "✏️ *Edit Your Crew Profile*\n\n"
-            "Tap below to update your profile — role, experience, certs, salary expectations & more:\n\n"
-            f"👉 {link}\n\n"
-            f"{_link_expiry_note()}",
+            header="Edit Your Crew Profile ✏️",
+            body="Tap below to update your profile — role, experience, certs, salary expectations & more.",
+            button_text="Edit profile",
+            url_link=link,
+            footer=_link_expiry_note().strip("_"),
         )
         await _send_whatsapp_buttons(
             phone,
@@ -2432,7 +2540,8 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         return None
 
     if cmd in ("jobs", "open jobs", "positions", "vacancies"):
-        return await _handle_jobs_command(phone, db)
+        await _handle_jobs_command(phone, db)
+        return None
 
     # Bare digit → drill into the saved list when it was shown last, otherwise
     # into that result from the last match run, in chat.
@@ -2542,6 +2651,9 @@ async def _process_whatsapp_message(
     ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
     db = SessionLocal()
     try:
+        # Blue ticks + "typing…" the moment processing starts, so the user
+        # never stares at an unread message while the bot works.
+        await _send_typing_indicator(meta_message_id)
         _record_whatsapp_message(
             phone_number,
             "inbound",
@@ -2590,6 +2702,9 @@ async def _process_whatsapp_message(
                     await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
                 else:
                     await _send_job_review_wait(phone_number, "text")
+                    # The ack cleared the typing bubble — bring it back for the
+                    # slow AI review that follows.
+                    await _send_typing_indicator(meta_message_id)
                     await _process_job_text_submission(phone_number, user_text, db)
                 await _send_whatsapp_buttons(
                     phone_number,
@@ -2628,6 +2743,7 @@ async def _process_media_message(
     ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
     db = SessionLocal()
     try:
+        await _send_typing_indicator(meta_message_id)
         _record_whatsapp_message(
             phone_number,
             "inbound",
@@ -2651,6 +2767,9 @@ async def _process_media_message(
                     await _send_whatsapp(phone_number, "⚠️ AI processing is temporarily unavailable. Try again soon.")
                 else:
                     await _send_job_review_wait(phone_number, "image")
+                    # The ack cleared the typing bubble — bring it back for the
+                    # slow download + AI scan that follows.
+                    await _send_typing_indicator(meta_message_id)
                     await _process_job_image_submission(phone_number, media_id, db)
                 await _send_whatsapp_buttons(
                     phone_number,
@@ -2663,13 +2782,16 @@ async def _process_media_message(
             return
 
         link = _make_magic_link(phone_number, db)
-        await _send_whatsapp(
+        await _send_whatsapp_cta_url(
             phone_number,
-            "📎 *Upload Crew Documents*\n\n"
-            "To upload your CV, passport, STCW, certs etc. use the link below:\n\n"
-            f"👉 {link}\n\n"
-            f"{_link_expiry_note()}\n\n"
-            "_💡 Tip: Want to submit a job posting? Type *submit job* first, then send the screenshot._",
+            header="Upload Crew Documents 📎",
+            body=(
+                "To upload your CV, passport, STCW, certs etc. tap the button below.\n\n"
+                "_💡 Tip: Want to submit a job posting? Type *submit job* first, then send the screenshot._"
+            ),
+            button_text="Upload docs",
+            url_link=link,
+            footer=_link_expiry_note().strip("_"),
         )
     except Exception as exc:
         log.exception("WhatsApp media handler error | phone=%s | %s", phone_number[:6] + "****", exc)

@@ -307,7 +307,11 @@ def test_onboarding_completion_records_first_match_auto_run(monkeypatch):
     async def fake_match_run(phone, graph_id="", scope="all"):
         return None
 
+    async def fake_cta(to, **kwargs):
+        sent.append(kwargs.get("body", ""))
+
     monkeypatch.setattr(whatsapp, "_send_whatsapp", fake_send)
+    monkeypatch.setattr(whatsapp, "_send_whatsapp_cta_url", fake_cta)
     monkeypatch.setattr(whatsapp, "_record_whatsapp_message", lambda *a, **k: None)
     monkeypatch.setattr(whatsapp, "_make_magic_link", lambda phone, db, redirect_to=None: "https://x/wa/tok")
     monkeypatch.setattr(whatsapp, "get_credit_balance", lambda db, key: 2)
@@ -346,7 +350,9 @@ def test_onboarding_completion_records_first_match_auto_run(monkeypatch):
     finally:
         db.close()
 
-    assert "Welcome to the fleet" in reply
+    # Completion now sends the welcome + docs CTA itself and returns None.
+    assert reply is None
+    assert any("Welcome to the fleet" in t for t in sent)
     names = [e[1] for e in events]
     assert "onboard_completed" in names
     assert ("27820000041", "first_match_auto_run", "whatsapp") in events
