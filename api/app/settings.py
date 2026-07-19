@@ -157,6 +157,10 @@ class Settings:
   WA_MAGIC_TOKEN_TTL_SECONDS: int = int(os.getenv("WA_MAGIC_TOKEN_TTL_SECONDS", "86400"))
   # WhatsApp "Recent Posts" matching window, based on when jobs entered the database.
   WA_MATCH_RECENT_DAYS: int = int(os.getenv("WA_MATCH_RECENT_DAYS", "7"))
+  # Maintenance mode: when true, the WhatsApp bot replies to every inbound
+  # message with a "down for maintenance" notice instead of processing it.
+  # Set WHATSAPP_MAINTENANCE_MODE=false to bring the bot back online.
+  WHATSAPP_MAINTENANCE_MODE: bool = os.getenv("WHATSAPP_MAINTENANCE_MODE", "true").strip().lower() == "true"
 
   # Proactive "new jobs match your profile" WhatsApp alerts. Requires a Meta-approved
   # template (paid, business-initiated). Off until a template name is configured.

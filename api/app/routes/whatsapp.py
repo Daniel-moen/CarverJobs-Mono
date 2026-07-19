@@ -2801,6 +2801,41 @@ async def _process_media_message(
             _wa_graph_phone_id.reset(ctx_token)
 
 
+_MAINTENANCE_MESSAGE = (
+    "🛠️ *CARVER is down for maintenance*\n\n"
+    "We're really sorry — the service is temporarily offline while we make "
+    "some improvements. We'll only be down for a few days.\n\n"
+    "As a thank-you for waiting, we'll reward you when we're back. 🎁\n\n"
+    "See you soon! ⚓"
+)
+
+
+async def _send_maintenance_notice(
+    phone_number: str,
+    message_type: str = "text",
+    graph_phone_number_id: str = "",
+    meta_message_id: str = "",
+) -> None:
+    """Reply to any inbound message with the maintenance notice (maintenance mode only)."""
+    ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
+    try:
+        _record_whatsapp_message(
+            phone_number,
+            "inbound",
+            message_type or "unknown",
+            "",
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=graph_phone_number_id,
+            payload={"reason": "maintenance_mode"},
+        )
+        await _send_whatsapp(phone_number, _MAINTENANCE_MESSAGE)
+    except Exception as exc:
+        log.exception("WhatsApp maintenance notice error | phone=%s | %s", phone_number[:6] + "****", exc)
+    finally:
+        if ctx_token is not None:
+            _wa_graph_phone_id.reset(ctx_token)
+
+
 @router.post("/webhooks/whatsapp", status_code=status.HTTP_200_OK)
 async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
     """Receive incoming WhatsApp messages from Meta.
@@ -2863,6 +2898,12 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
                 continue
 
             if msg_id and _is_duplicate_or_stale(msg_id, msg_timestamp):
+                continue
+
+            if settings.WHATSAPP_MAINTENANCE_MODE:
+                background_tasks.add_task(
+                    _send_maintenance_notice, phone_number, msg_type, graph_phone_number_id, msg_id,
+                )
                 continue
 
             if msg_type == "text":
