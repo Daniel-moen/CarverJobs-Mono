@@ -1,6 +1,9 @@
-"""Maintenance mode: every inbound WhatsApp message gets the maintenance notice."""
+"""Maintenance mode kill-switch: off by default, forced on it answers every
+inbound WhatsApp message with the maintenance notice."""
+import importlib
 from unittest.mock import AsyncMock, patch
 
+import app.settings as settings_module
 from app.routes import whatsapp
 from app.settings import settings
 
@@ -18,7 +21,18 @@ def _meta_payload(msg: dict) -> dict:
     }
 
 
-def test_maintenance_mode_replies_with_notice(client, monkeypatch):
+def test_maintenance_mode_defaults_off(monkeypatch):
+    """With WHATSAPP_MAINTENANCE_MODE unset, the bot runs normally."""
+    monkeypatch.delenv("WHATSAPP_MAINTENANCE_MODE", raising=False)
+    try:
+        reloaded = importlib.reload(settings_module)
+        assert reloaded.settings.WHATSAPP_MAINTENANCE_MODE is False
+    finally:
+        # Restore the shared module object other tests imported from.
+        importlib.reload(settings_module)
+
+
+def test_maintenance_mode_forced_on_replies_with_notice(client, monkeypatch):
     monkeypatch.setattr(settings, "WHATSAPP_MAINTENANCE_MODE", True)
     monkeypatch.setattr(settings, "WHATSAPP_PHONE_NUMBER_ID", "123", raising=False)
     monkeypatch.setattr(settings, "WHATSAPP_PHONE_NUMBER_IDS", ["123"], raising=False)
@@ -52,8 +66,9 @@ def test_maintenance_mode_replies_with_notice(client, monkeypatch):
     assert "reward" in sent[0][1].lower()
 
 
-def test_maintenance_mode_off_processes_normally(client, monkeypatch):
-    monkeypatch.setattr(settings, "WHATSAPP_MAINTENANCE_MODE", False)
+def test_default_config_processes_normally(client, monkeypatch):
+    """No monkeypatch of the flag — the shipped default must let messages through."""
+    assert settings.WHATSAPP_MAINTENANCE_MODE is False
     monkeypatch.setattr(settings, "WHATSAPP_PHONE_NUMBER_ID", "123", raising=False)
     monkeypatch.setattr(settings, "WHATSAPP_PHONE_NUMBER_IDS", ["123"], raising=False)
     monkeypatch.setattr(settings, "WHATSAPP_ACCESS_TOKEN", "test-token", raising=False)
