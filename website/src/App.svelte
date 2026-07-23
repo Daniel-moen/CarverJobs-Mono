@@ -147,12 +147,29 @@
 
   const SITE_LAUNCHED = String(import.meta.env.VITE_SITE_LAUNCHED ?? 'true').toLowerCase() === 'true'
 
+  // Session hint: set after any confirmed login, cleared on logout/401/confirmed
+  // signed-out check. The auth cookie is httpOnly so this is the only way to
+  // know, before the API answers, whether blocking the UI on the session check
+  // is worth it. First-time visitors have no hint → render instantly and check
+  // the session in the background instead of holding them on "Securing session".
+  const SESSION_HINT_KEY = 'carver_session_hint'
+  function readSessionHint() {
+    try { return localStorage.getItem(SESSION_HINT_KEY) === '1' } catch { return false }
+  }
+  function writeSessionHint(active) {
+    try {
+      if (active) localStorage.setItem(SESSION_HINT_KEY, '1')
+      else localStorage.removeItem(SESSION_HINT_KEY)
+    } catch { /* ignore */ }
+  }
+
   let publicSlug = SITE_LAUNCHED ? extractCrewSlug(window.location.pathname) : ''
   let waToken = SITE_LAUNCHED ? extractWaToken(window.location.pathname) : ''
   let matchSessionId = SITE_LAUNCHED ? extractMatchSessionId(window.location.pathname) : 0
   let articleSlug = extractArticleSlug(window.location.pathname)
   let currentPage = pageFromPath(window.location.pathname)
-  let isCheckingSession = true
+  const hadSessionHint = readSessionHint()
+  let isCheckingSession = hadSessionHint
   let isAuthenticated = false
   let hasActiveSession = false
   let userRole = ''
@@ -186,6 +203,7 @@
     if (!isAuthenticated || !hasActiveSession) return
     isAuthenticated = false
     hasActiveSession = false
+    writeSessionHint(false)
     userRole = ''
     agencyName = ''
     isSubscribed = false
@@ -254,8 +272,8 @@
     }
   }
 
-  async function checkSession() {
-    isCheckingSession = true
+  async function checkSession({ blocking = true } = {}) {
+    if (blocking) isCheckingSession = true
     try {
       const response = await fetchWithRetry(`${API_BASE_URL}/auth/session`, {
         method: 'GET',
@@ -266,6 +284,7 @@
       let data = null
       try { data = response.ok ? await response.json() : null } catch { data = null }
       isAuthenticated = Boolean(data?.authenticated)
+      writeSessionHint(isAuthenticated)
       if (isAuthenticated) {
         hasActiveSession = true
         userRole = data?.session?.role ?? ''
@@ -452,6 +471,7 @@
     }
     isAuthenticated = false
     hasActiveSession = false
+    writeSessionHint(false)
     userRole = ''
     agencyName = ''
     isSubscribed = false
@@ -541,7 +561,12 @@
     window.addEventListener('beforeunload', () => { flush(); stopAutoFlush() })
     window.addEventListener('carver:unauthorized', handleUnauthorizedEvent)
 
-    await Promise.all([checkSession(), loadAuthProviders()])
+    // No prior login on this browser → don't hold first-time visitors on the
+    // "Securing session" gate; show the public page immediately and let the
+    // session check run in the background (it swaps in the app if a valid
+    // cookie turns out to exist).
+    if (!hadSessionHint && currentPage === 'signup') showSignup = true
+    await Promise.all([checkSession({ blocking: hadSessionHint }), loadAuthProviders()])
     if (currentPage === 'signup' && !isAuthenticated) showSignup = true
   })
 

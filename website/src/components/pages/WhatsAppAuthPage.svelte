@@ -46,6 +46,7 @@
         method: 'GET',
         credentials: 'include',
         skipAuthHandling: true,
+        timeoutMs: 8000,
       })
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
@@ -64,18 +65,18 @@
         setWaSessionToken(data.session_token)
       }
 
-      // Fetch subscription status so child pages render correctly.
-      try {
-        const subRes = await apiFetch(`${API_BASE_URL}/subscription/status`, {
-          method: 'GET',
-          credentials: 'include',
-        })
-        if (subRes.ok) {
-          const subData = await subRes.json()
-          isSubscribed = Boolean(subData.subscribed)
-          creditsBalance = Number(subData.balance ?? 0)
-        }
-      } catch { /* non-critical */ }
+      // Subscription status is non-critical — fetch it in the background so
+      // it never delays the page behind the "Securing session" screen.
+      apiFetch(`${API_BASE_URL}/subscription/status`, {
+        method: 'GET',
+        credentials: 'include',
+        timeoutMs: 8000,
+      }).then(async (subRes) => {
+        if (!subRes.ok) return
+        const subData = await subRes.json()
+        isSubscribed = Boolean(subData.subscribed)
+        creditsBalance = Number(subData.balance ?? 0)
+      }).catch(() => { /* non-critical */ })
 
       const matchPath = redirect.match(/^\/matches\/(\d+)$/)
       if (matchPath) {

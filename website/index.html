@@ -116,6 +116,8 @@
     <meta name="twitter:image:alt" content="Carver — Superyacht crew, automated" />
 
     <!-- Performance hints -->
+    <!-- Warm up DNS+TLS to the API before the JS bundle asks for /auth/session. -->
+    <link rel="preconnect" href="%VITE_API_BASE_URL%" crossorigin="use-credentials" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
