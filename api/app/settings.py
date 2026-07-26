@@ -173,6 +173,14 @@ class Settings:
   # How often the alert loop scans for new matching jobs.
   JOB_ALERT_CHECK_INTERVAL_HOURS: int = int(os.getenv("JOB_ALERT_CHECK_INTERVAL_HOURS", "24"))
 
+  # Match-quality feedback loop (👍/👎 pulse + "did you apply?" follow-up).
+  # Seconds after match results land before the 👍/👎 pulse is sent.
+  MATCH_FEEDBACK_DELAY_SECONDS: int = int(os.getenv("MATCH_FEEDBACK_DELAY_SECONDS", "600"))
+  # Minimum hours after a match run completes before asking "did you apply?".
+  APPLY_FOLLOWUP_MIN_AGE_HOURS: int = int(os.getenv("APPLY_FOLLOWUP_MIN_AGE_HOURS", "18"))
+  # How often the apply-followup sweep runs.
+  APPLY_FOLLOWUP_CHECK_INTERVAL_HOURS: int = int(os.getenv("APPLY_FOLLOWUP_CHECK_INTERVAL_HOURS", "1"))
+
   # Job retention — prunes the ever-growing `jobs` table (see services/job_retention.py).
   # Active jobs older than this are soft-expired (status -> "expired").
   JOB_EXPIRE_AFTER_DAYS: int = int(os.getenv("JOB_EXPIRE_AFTER_DAYS", "30"))

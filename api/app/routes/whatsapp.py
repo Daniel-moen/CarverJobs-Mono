@@ -881,6 +881,15 @@ _INTERACTIVE_CMD_MAP.update({f"btn_save_{i}": f"save {i}" for i in range(1, 10)}
 _INTERACTIVE_CMD_MAP.update({f"btn_dismiss_{i}": f"dismiss {i}" for i in range(1, 10)})
 _INTERACTIVE_CMD_MAP.update({f"btn_draft_{i}": f"draft {i}" for i in range(1, 10)})
 
+# Post-run 👍/👎 quality pulse + next-day "did you apply?" follow-up.
+_INTERACTIVE_CMD_MAP.update({
+    "btn_match_good": "match feedback good",
+    "btn_match_bad": "match feedback bad",
+    "btn_applied_yes": "applied yes",
+    "btn_applied_notyet": "applied not yet",
+    "btn_applied_none": "applied none",
+})
+
 
 _ALLOWED_REDIRECTS = frozenset({
     "/profile", "/jobs", "/status", "/", "/subscription", "/?feedback=1",
@@ -1247,7 +1256,8 @@ Style rules for WhatsApp:
 - When all done, celebrate big — they just joined the fleet.
 
 First reply only (empty conversation history in the messages you receive):
-- Include exactly one brief sentence explaining tokens: Each *Find Matches* run uses *1 token*. Type *buy tokens* to top up, or submit a valid job to earn a free token.
+- Welcome them aboard warmly and set expectations: 4 quick questions, under a minute, then you run their *first AI job match on the house* against live yacht jobs.
+- NEVER mention tokens, prices, buying, or topping up — not in the first message, not during onboarding. Deliver value first; the token system is introduced after their first match.
 
 Data rules:
 - ONLY set "done": true when ALL {len(REQUIRED_ONBOARD_FIELDS)} required fields are collected (missing list is empty).
@@ -1879,6 +1889,32 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         footer=_link_expiry_note().strip("_"),
     )
 
+    # 👍/👎 quality pulse once they've had time to browse the results — the
+    # only signal that makes match quality measurable. Best-effort: lost on
+    # redeploy, and skipped if a newer run supersedes this one.
+    asyncio.create_task(_send_match_quality_pulse(phone_number, match_session.id))
+
+
+async def _send_match_quality_pulse(phone: str, session_id: int) -> None:
+    try:
+        await asyncio.sleep(settings.MATCH_FEEDBACK_DELAY_SECONDS)
+        db = SessionLocal()
+        try:
+            ws = db.query(WhatsAppSession).filter(WhatsAppSession.phone_number == phone).first()
+            if ws is None or ws.last_match_session_id != session_id:
+                return  # a fresh run replaced this one — its own pulse will fire
+        finally:
+            db.close()
+        await _send_whatsapp_buttons(
+            phone,
+            "Quick pulse check — how did those matches look? Your 👍/👎 tunes your next run.",
+            [("btn_match_good", "👍 On target"), ("btn_match_bad", "👎 Off target")],
+        )
+        record_server_event(phone, "match_feedback_prompt", str(session_id))
+    except Exception as exc:
+        log.warning("Match quality pulse failed | phone=%s | %s", phone[:6] + "****", exc)
+
+
 async def _run_match_command_background(
     phone_number: str,
     graph_phone_number_id: str = "",
@@ -2139,6 +2175,24 @@ async def _handle_save_match(phone: str, db: Session, wa_session: WhatsAppSessio
     await _send_whatsapp(phone, f"💾 Saved *{job.title}* — type *saved* anytime to see your list.")
 
 
+async def _handle_applied_match(phone: str, db: Session, wa_session: WhatsAppSession, n: int) -> None:
+    """✅ Applied — log the application on match N; the hire-attribution hook."""
+    result, job, total = _nth_match_result(db, wa_session, n)
+    if total == 0:
+        await _send_whatsapp(phone, "No match run on record yet — type *match* to find jobs first.")
+        return
+    if result is None or job is None:
+        await _send_whatsapp(phone, f"Your last run had *{total}* match{'es' if total != 1 else ''} — reply *applied 1* to *applied {total}*.")
+        return
+    _record_match_interaction(db, phone, job.id, "applied")
+    record_server_event(phone, "match_applied", str(job.id))
+    await _send_whatsapp(
+        phone,
+        f"🤞 Logged — application in for *{job.title}*. Rooting for you!\n\n"
+        "Keep me posted on how it goes. Spotted another fit? *draft N* writes the email for you.",
+    )
+
+
 async def _handle_dismiss_match(phone: str, db: Session, wa_session: WhatsAppSession, n: int) -> None:
     """🚫 Not for me — record the dismissal and roll straight to the next match."""
     result, job, total = _nth_match_result(db, wa_session, n)
@@ -2288,12 +2342,14 @@ async def _send_saved_job_detail(phone: str, db: Session, wa_session: WhatsAppSe
 
 # ── Onboarding flow ───────────────────────────────────────────────────────────
 
+# Value first, economics later: the first message a brand-new user ever sees
+# must promise jobs, not introduce tokens — 39% of users were dropping out at
+# this exact message when it led with "buy tokens".
 _FALLBACK_GREETING = (
-    "Ahoy! 🛥️ Welcome to *CARVER* — your fast track to superyacht crew positions.\n\n"
-    "I'm going to build your crew profile in a quick chat — just 4 quick questions, "
-    "under a minute — then I'll run your *first job match on the house*.\n\n"
-    "💳 *Tokens:* Each *Find Matches* uses *1 token*. Type *buy tokens* to top up, or submit a valid job to earn a free token.\n\n"
-    "Let's start with the basics — what's your *full name*? 🪪"
+    "Ahoy! 🛥️ Welcome to *CARVER* — your personal superyacht crew agent.\n\n"
+    "Tell me a bit about yourself — *4 quick questions, under a minute* — and "
+    "I'll scan the live job board and run your *first AI job match on the house*.\n\n"
+    "First up: what's your *full name*? 🪪"
 )
 
 
@@ -2568,6 +2624,57 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
     dismiss_match = re.fullmatch(r"dismiss\s*([1-9])", cmd)
     if dismiss_match:
         await _handle_dismiss_match(phone, db, wa_session, int(dismiss_match.group(1)))
+        return None
+
+    # "applied N" → log an application on match N (hire-attribution signal).
+    applied_match = re.fullmatch(r"applied\s*([1-9])", cmd)
+    if applied_match:
+        await _handle_applied_match(phone, db, wa_session, int(applied_match.group(1)))
+        return None
+
+    # 👍/👎 pulse replies — the run-level match-quality signal.
+    if cmd in ("match feedback good", "match feedback bad"):
+        verdict = "good" if cmd.endswith("good") else "bad"
+        sid = wa_session.last_match_session_id or 0
+        record_server_event(phone, "match_feedback", f"{verdict}:{sid}")
+        if verdict == "good":
+            await _send_whatsapp(
+                phone,
+                "Love it! 🎯 Reply *1*–*3* for full details, or *draft 1* and I'll write your application email right here.",
+            )
+        else:
+            await _send_whatsapp_buttons(
+                phone,
+                "Thanks — honest feedback tunes your matches. 🔧 Most misses come from a thin profile: "
+                "certs, preferred locations and salary sharpen the next run a lot.",
+                [("btn_edit_profile", "Edit Profile"), ("btn_find_matches", "Run again"), ("btn_menu", "Menu")],
+            )
+        return None
+
+    # Next-day "did you apply?" replies.
+    if cmd in ("applied yes", "yes, applied", "i applied", "applied"):
+        record_server_event(phone, "apply_followup_reply", "yes")
+        await _send_whatsapp(
+            phone,
+            "Legend! 🙌 Which one? Reply *applied 1*, *applied 2*, … and I'll log it against the job.",
+        )
+        return None
+    if cmd in ("applied not yet", "not yet"):
+        record_server_event(phone, "apply_followup_reply", "not_yet")
+        await _send_whatsapp(
+            phone,
+            "No stress — your matches aren't going anywhere. Reply *1*–*3* for details, "
+            "or *draft 1* and I'll write the application email for you. ✍️",
+        )
+        return None
+    if cmd in ("applied none", "none fit", "none fit me"):
+        record_server_event(phone, "apply_followup_reply", "none_fit")
+        await _send_whatsapp_buttons(
+            phone,
+            "Good to know — that helps me aim better. 🔧 A fuller profile (certs, preferred "
+            "locations, salary) usually turns up stronger fits.",
+            [("btn_edit_profile", "Edit Profile"), ("btn_find_matches", "Run again"), ("btn_menu", "Menu")],
+        )
         return None
 
     if cmd in ("saved", "saved jobs", "my jobs", "my saved jobs"):

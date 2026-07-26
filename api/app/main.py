@@ -24,6 +24,7 @@ from app.logger import bind_request_id, get_logger, reset_context, setup_logging
 from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
 from app.scheduler import scraper_loop
 from app.services.checkout_recovery import checkout_recovery_loop
+from app.services.apply_followup import apply_followup_loop
 from app.services.job_alerts import job_alert_loop
 from app.services.job_retention import retention_loop
 from app.seed_users import ensure_default_user
@@ -95,6 +96,8 @@ async def lifespan(app: FastAPI):
             "template configured" if settings.WHATSAPP_JOB_ALERT_TEMPLATE else "inactive until WHATSAPP_JOB_ALERT_TEMPLATE is set",
         )
         background_tasks.append(asyncio.create_task(job_alert_loop()))
+        log.info("Starting apply follow-up loop (interval=%dh)", settings.APPLY_FOLLOWUP_CHECK_INTERVAL_HOURS)
+        background_tasks.append(asyncio.create_task(apply_followup_loop()))
         log.info("Starting abandoned-checkout recovery loop (interval=15m)")
         background_tasks.append(asyncio.create_task(checkout_recovery_loop()))
 

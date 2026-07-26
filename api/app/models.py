@@ -198,6 +198,9 @@ class WhatsAppSession(Base):
   last_match_session_id = Column(Integer, nullable=True)
   # When the proactive job-alert loop last messaged this user (template message)
   last_job_alert_at = Column(DateTime(timezone=True), nullable=True)
+  # When the next-day "did you apply?" follow-up was last sent — at most one
+  # ask per match run (must be newer than the run's completed_at to count)
+  last_apply_followup_at = Column(DateTime(timezone=True), nullable=True)
   # When the in-chat feedback invitation was last sent (cooldown stamp — the
   # invite rides along after a normal reply, never instead of it)
   feedback_prompted_at = Column(DateTime(timezone=True), nullable=True)
@@ -412,11 +415,11 @@ class MatchSessionResult(Base):
 
 
 class MatchInteraction(Base):
-  """Crew engagement signal on a matched job — saved or dismissed.
+  """Crew engagement signal on a matched job — saved, dismissed, or applied.
 
   One row per (user_key, job_id, action); repeated taps are no-ops. Dismissed
   jobs are excluded from future WhatsApp match runs, saved jobs power the
-  *saved* command.
+  *saved* command, applied rows are the hire-attribution trail.
   """
 
   __tablename__ = "match_interactions"
