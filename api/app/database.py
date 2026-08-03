@@ -205,6 +205,7 @@ def run_migrations() -> None:
     _add("whatsapp_sessions", "feedback_prompted_at", "DATETIME", was_cols)
     _add("whatsapp_sessions", "last_active_at", "DATETIME", was_cols)
     _add("whatsapp_sessions", "last_apply_followup_at", "DATETIME", was_cols)
+    _add("whatsapp_sessions", "last_winback_at", "DATETIME", was_cols)
 
     cp_cols = _existing("crew_profiles")
     _add("crew_profiles", "sex", "VARCHAR(20)", cp_cols)

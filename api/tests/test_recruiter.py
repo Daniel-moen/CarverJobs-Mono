@@ -49,9 +49,11 @@ def test_candidates_list_hides_contact_and_reports_cost(client):
     assert cand["desired_role"] == "Deckhand"
 
 
-def test_unlock_requires_enough_tokens(client):
+def test_unlock_requires_enough_tokens(client, monkeypatch):
+    # Pin the grant to zero: the signup grant and the unlock cost are tuned
+    # independently, so this must not depend on one being smaller than the other.
+    monkeypatch.setattr(settings, "FREE_SIGNUP_TOKENS", 0)
     slug = _create_profile(client)
-    # Fresh admin account has only the signup grant (< unlock cost).
     resp = client.post(f"/recruiter/candidates/{slug}/unlock")
     assert resp.status_code == 402
 

@@ -135,6 +135,10 @@ class Settings:
   # Run Apify on API startup? Default False — saves cost, first run happens after
   # the first scheduled interval instead.
   APIFY_SCRAPE_ON_STARTUP: bool = os.getenv("APIFY_SCRAPE_ON_STARTUP", "false").lower() == "true"
+  # Hours between full scrape cycles. Apify bills per actor run, so this is the
+  # main throttle when credit is short. Must stay below JOB_FRESHNESS_ALERT_HOURS
+  # (48h) — beyond that the health check reports the job pipeline stale.
+  SCRAPE_INTERVAL_HOURS: int = int(os.getenv("SCRAPE_INTERVAL_HOURS", "24"))
 
   # WhatsApp bot — Meta Cloud API
   META_APP_ID: str = os.getenv("META_APP_ID", "").strip()
@@ -180,6 +184,17 @@ class Settings:
   APPLY_FOLLOWUP_MIN_AGE_HOURS: int = int(os.getenv("APPLY_FOLLOWUP_MIN_AGE_HOURS", "18"))
   # How often the apply-followup sweep runs.
   APPLY_FOLLOWUP_CHECK_INTERVAL_HOURS: int = int(os.getenv("APPLY_FOLLOWUP_CHECK_INTERVAL_HOURS", "1"))
+
+  # Win-back nudges for users with no match run — onboarding drop-outs and
+  # onboarded-but-never-matched. Both stages are free-form sends inside Meta's
+  # 24h service window, so neither needs an approved template.
+  # Stage 1: hours of silence before the "did you want to finish?" nudge.
+  WINDOW_WINBACK_EARLY_HOURS: int = int(os.getenv("WINDOW_WINBACK_EARLY_HOURS", "3"))
+  # Stage 2: hours of silence before the last-chance nudge. Must stay under the
+  # 23h service-window limit or the send is rejected by Meta.
+  WINDOW_WINBACK_MIN_AGE_HOURS: int = int(os.getenv("WINDOW_WINBACK_MIN_AGE_HOURS", "20"))
+  # How often the win-back sweep runs.
+  WINDOW_WINBACK_CHECK_INTERVAL_HOURS: int = int(os.getenv("WINDOW_WINBACK_CHECK_INTERVAL_HOURS", "1"))
 
   # Job retention — prunes the ever-growing `jobs` table (see services/job_retention.py).
   # Active jobs older than this are soft-expired (status -> "expired").
@@ -243,8 +258,11 @@ class Settings:
 
   # Free tier — tokens granted to every user each month (reset every 30 days)
   FREE_MONTHLY_TOKENS: int = int(os.getenv("FREE_MONTHLY_TOKENS", "25"))
-  # One-time token grant for brand-new accounts (before any subscription)
-  FREE_SIGNUP_TOKENS: int = int(os.getenv("FREE_SIGNUP_TOKENS", "2"))
+  # One-time token grant for brand-new accounts (before any subscription).
+  # Onboarding auto-spends one on the first match, so this needs enough slack
+  # for a few *repeat* matches — users who run out on day one never come back,
+  # and never reach the paywall at all.
+  FREE_SIGNUP_TOKENS: int = int(os.getenv("FREE_SIGNUP_TOKENS", "5"))
   # Max free tokens a user can earn per 30-day window by posting jobs (web +
   # WhatsApp combined). Caps the old unlimited "post a job, get a token" loop.
   FREE_JOB_POST_TOKENS_PER_MONTH: int = int(os.getenv("FREE_JOB_POST_TOKENS_PER_MONTH", "5"))

@@ -334,7 +334,7 @@
         away.
       </h2>
       <p class="finale-sub">
-        Two free match runs, an extra {DEFAULT_FIRST_PURCHASE_BONUS} bonus tokens with your first pack,
+        Five free match runs, an extra {DEFAULT_FIRST_PURCHASE_BONUS} bonus tokens with your first pack,
         and never a subscription.
         <strong class="finale-urgency">Somewhere right now a captain is reading applications —
         yours should be in the pile.</strong>

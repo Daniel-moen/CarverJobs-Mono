@@ -248,7 +248,7 @@
       away.
     </h2>
     <p class="m-finale-sub">
-      Two free match runs. Bonus tokens with your first pack. Never a subscription.
+      Five free match runs. Bonus tokens with your first pack. Never a subscription.
       <strong class="m-finale-urgency">Somewhere right now a captain is reading applications —
       yours should be in the pile.</strong>
     </p>

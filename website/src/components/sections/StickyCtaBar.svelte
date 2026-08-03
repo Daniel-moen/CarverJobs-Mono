@@ -29,7 +29,7 @@
 {#if visible}
   <div class="bar" role="complementary" aria-label="Start free on WhatsApp">
     <div class="bar-copy">
-      <p class="bar-title">2 free match runs</p>
+      <p class="bar-title">5 free match runs</p>
       <p class="bar-sub">No card · no signup · just WhatsApp</p>
     </div>
     <a

@@ -31,7 +31,8 @@ def test_auth_session_reports_credit_balance(client):
     resp = client.get("/auth/session")
 
     assert resp.status_code == 200
-    assert resp.json()["session"]["credits_balance"] == 3
+    # Awarded credits sit on top of the free signup grant, whatever it is set to.
+    assert resp.json()["session"]["credits_balance"] == settings.FREE_SIGNUP_TOKENS + 3
 
 
 def test_profile_me_reports_credit_balance_without_profile(client):
@@ -41,21 +42,27 @@ def test_profile_me_reports_credit_balance_without_profile(client):
 
     assert resp.status_code == 200
     assert resp.json()["profile"] is None
-    assert resp.json()["credits_balance"] == 2
+    assert resp.json()["credits_balance"] == settings.FREE_SIGNUP_TOKENS + 2
 
 
 def test_matching_find_requires_credit(client, monkeypatch):
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-key")
+    # This is the empty-wallet path, so the signup grant must be out of the way.
+    monkeypatch.setattr(settings, "FREE_SIGNUP_TOKENS", 0)
     _seed_profile_and_job(client)
 
     resp = client.post("/matching/find")
 
     assert resp.status_code == 402
-    assert resp.json()["detail"] == "You need at least 1 credit to run matching. Submit a job to earn one."
+    assert resp.json()["detail"] == (
+        "You're out of tokens. Top up to keep matching, or submit a job to earn a free token."
+    )
 
 
 def test_matching_find_spends_one_credit_and_returns_remaining(client, monkeypatch):
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-key")
+    # Exactly one credit, so "spends one, none left" is what's being measured.
+    monkeypatch.setattr(settings, "FREE_SIGNUP_TOKENS", 0)
     _seed_profile_and_job(client)
     _award_credits("admin", 1)
 
@@ -73,6 +80,11 @@ def test_matching_find_spends_one_credit_and_returns_remaining(client, monkeypat
         ]
 
     monkeypatch.setattr("app.routes.crew_match.match_candidate_to_jobs", _fake_match_candidate_to_jobs)
+    # The result-persisting worker opens its own session straight from
+    # app.database, which bypasses the get_db override and would otherwise look
+    # for the run in the developer's real DB and report it superseded.
+    import app.database as app_database
+    monkeypatch.setattr(app_database, "SessionLocal", _TestingSession)
 
     resp = client.post("/matching/find")
 

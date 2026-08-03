@@ -206,6 +206,10 @@ class WhatsAppSession(Base):
   feedback_prompted_at = Column(DateTime(timezone=True), nullable=True)
   # Last inbound message from this user — groundwork for win-back sweeps
   last_active_at = Column(DateTime(timezone=True), nullable=True)
+  # When the last-chance win-back was sent (the nudge fired just before Meta's
+  # 24h service window closes, for users with no match run to follow up on).
+  # Compared against last_active_at, so it re-arms whenever the user replies.
+  last_winback_at = Column(DateTime(timezone=True), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),

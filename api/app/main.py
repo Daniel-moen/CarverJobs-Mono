@@ -25,6 +25,7 @@ from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew
 from app.scheduler import scraper_loop
 from app.services.checkout_recovery import checkout_recovery_loop
 from app.services.apply_followup import apply_followup_loop
+from app.services.window_winback import window_winback_loop
 from app.services.job_alerts import job_alert_loop
 from app.services.job_retention import retention_loop
 from app.seed_users import ensure_default_user
@@ -86,18 +87,27 @@ async def lifespan(app: FastAPI):
         background_tasks.append(asyncio.create_task(health_check_loop()))
         log.info("Starting background metrics recorder (interval=1m)")
         background_tasks.append(asyncio.create_task(metrics_loop()))
-        log.info("Starting APIFY scraper scheduler (interval=6h)")
+        log.info("Starting APIFY scraper scheduler (interval=%dh)", settings.SCRAPE_INTERVAL_HOURS)
         background_tasks.append(asyncio.create_task(scraper_loop()))
         log.info("Starting job retention loop (interval=%dh)", settings.JOB_RETENTION_INTERVAL_HOURS)
         background_tasks.append(asyncio.create_task(retention_loop()))
         log.info(
             "Starting job alert loop (interval=%dh, %s)",
             settings.JOB_ALERT_CHECK_INTERVAL_HOURS,
-            "template configured" if settings.WHATSAPP_JOB_ALERT_TEMPLATE else "inactive until WHATSAPP_JOB_ALERT_TEMPLATE is set",
+            "free-form + template"
+            if settings.WHATSAPP_JOB_ALERT_TEMPLATE
+            else "free-form only — dormant users need WHATSAPP_JOB_ALERT_TEMPLATE",
         )
         background_tasks.append(asyncio.create_task(job_alert_loop()))
         log.info("Starting apply follow-up loop (interval=%dh)", settings.APPLY_FOLLOWUP_CHECK_INTERVAL_HOURS)
         background_tasks.append(asyncio.create_task(apply_followup_loop()))
+        log.info(
+            "Starting win-back loop (early=%dh, last-chance=%dh, interval=%dh)",
+            settings.WINDOW_WINBACK_EARLY_HOURS,
+            settings.WINDOW_WINBACK_MIN_AGE_HOURS,
+            settings.WINDOW_WINBACK_CHECK_INTERVAL_HOURS,
+        )
+        background_tasks.append(asyncio.create_task(window_winback_loop()))
         log.info("Starting abandoned-checkout recovery loop (interval=15m)")
         background_tasks.append(asyncio.create_task(checkout_recovery_loop()))
 

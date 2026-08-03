@@ -19,22 +19,15 @@ from app import flags
 from app.analytics import record_server_event
 from app.logger import get_logger
 from app.models import MatchSession, WhatsAppSession
+from app.services.proactive import SERVICE_WINDOW_HOURS, as_aware as _as_aware, recently_pinged
 from app.settings import settings
 
 log = get_logger("carver.apply_followup")
 
-# Free-form sends only deliver inside Meta's 24h service window; 23h keeps margin.
-_SERVICE_WINDOW_HOURS = 23
 # Don't ask about runs so old the user has surely moved on.
 _MAX_RUN_AGE_DAYS = 7
 # Safety cap per sweep while Meta messaging limits are still low.
 _MAX_SENDS_PER_RUN = 50
-
-
-def _as_aware(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 async def run_apply_followups_once() -> dict[str, int]:
@@ -50,7 +43,7 @@ async def run_apply_followups_once() -> dict[str, int]:
 
     now = datetime.now(timezone.utc)
     min_age = timedelta(hours=settings.APPLY_FOLLOWUP_MIN_AGE_HOURS)
-    window_floor = now - timedelta(hours=_SERVICE_WINDOW_HOURS)
+    window_floor = now - timedelta(hours=SERVICE_WINDOW_HOURS)
 
     db = SessionLocal()
     try:
@@ -85,6 +78,11 @@ async def run_apply_followups_once() -> dict[str, int]:
             last_active = _as_aware(ws.last_active_at)
             if last_active is None or last_active < window_floor:
                 stats["outside_window"] += 1
+                continue
+
+            # Another proactive loop may have just messaged them.
+            if recently_pinged(ws, now):
+                stats["already_asked"] += 1
                 continue
 
             await _send_whatsapp_buttons(

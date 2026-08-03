@@ -1,5 +1,5 @@
 """
-Scraper scheduler — runs a full scrape cycle every 12 hours.
+Scraper scheduler — runs a full scrape cycle every SCRAPE_INTERVAL_HOURS (24h).
 
 Cycle includes:
   1. Facebook groups via Apify (raw fetch, no date filter sent to actor).
@@ -22,7 +22,10 @@ from app.settings import settings
 
 log = get_logger("carver.scheduler")
 
-SCRAPE_INTERVAL_SECONDS = 12 * 60 * 60  # 12 hours
+# Tunable because Apify bills per run: drop the frequency when credit is tight,
+# raise it when job flow matters more. Keep it under JOB_FRESHNESS_ALERT_HOURS
+# (48h) or /status/services will flag the pipeline stale between healthy runs.
+SCRAPE_INTERVAL_SECONDS = settings.SCRAPE_INTERVAL_HOURS * 60 * 60
 
 # ── In-memory state ──────────────────────────────────────────────────────────
 
