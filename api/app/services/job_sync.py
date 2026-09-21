@@ -4,8 +4,9 @@ and upserts confirmed job listings into the database.
 
 Flow per item:
   1. Compute SHA-256 of the raw post text — skip if already seen (no AI call).
-  2. Compute job fingerprint (role|location|start_date) — skip if same position
-     already stored under different wording.
+  2. Compute job fingerprint (role|location|start_date|employer) — skip if the
+     same position is already live (open/priority and posted within the last
+     _FINGERPRINT_WINDOW_DAYS days) under different wording.
   3. Call ChatGPT to determine if the post is a genuine job offer (skipped for
      trusted web sources like Dockwalk / WorkOnAYacht).
   4. If yes, merge AI-extracted fields with raw item metadata.
@@ -16,13 +17,25 @@ instead of the text reviewer; their content_hash is the SHA-256 of the image
 bytes (Facebook CDN URLs are signed/expiring, so URL hashing can't dedup them).
 
 The content_hash catches the same post shared across multiple Facebook groups.
-The job_fingerprint catches the same position re-posted with different text.
+The job_fingerprint catches the same position re-posted with different text —
+but only while that position is still live. A fingerprint match against a
+closed/expired job, or against one older than _FINGERPRINT_WINDOW_DAYS, is a
+genuinely new vacancy (yachts re-hire the same role in the same place every
+season) and must NOT block ingestion.
+
+`claim_fingerprint()` is the public entry point for that rule and the only
+supported way to fingerprint a job row. The manual text import, the screenshot
+import and the guided agency form (routes/scraper.py, routes/job_submit.py)
+call it too, so every writer builds the same key and honours the same scope.
 """
 import hashlib
 import json
 import re
 import urllib.error
 import urllib.request
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -48,6 +61,22 @@ _MEDIA_KEYS = ("attachments",)
 _MAX_IMAGE_REVIEWS_PER_RUN = 20        # cap OpenAI vision calls per sync_jobs run
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024     # 8 MB cap on a downloaded post image
 _IMAGE_DOWNLOAD_TIMEOUT = 30           # seconds for a single image download
+
+# ── Fingerprint dedup scope ───────────────────────────────────────────────────
+# A fingerprint only blocks a new post while the job it belongs to is still
+# live: active status AND posted inside this window. Jobs are soft-expired at
+# JOB_EXPIRE_AFTER_DAYS (30) and hard-deleted at JOB_DELETE_AFTER_DAYS (90), so
+# an unscoped fingerprint check silently swallowed every repeat vacancy for up
+# to 90 days ("Stewardess / Mediterranean / ASAP" once per quarter).
+_FINGERPRINT_WINDOW_DAYS = 14
+# SHARED CONTRACT with job_retention._ACTIVE_STATUSES — the client-facing set.
+_FINGERPRINT_ACTIVE_STATUSES = ("open", "priority")
+
+# Placeholder values written by _build_job_fields when the AI extracted nothing.
+# A triple built from these carries no identity, so it must not dedupe.
+_GENERIC_ROLES = {"crew", "crew member", "yacht crew"}
+_UNKNOWN_LOCATIONS = {"unknown", "n/a", "na", "tbc", "tbd", "worldwide", "various"}
+_GENERIC_EMPLOYERS = {"private yacht", "unknown", "n/a", "na", "confidential", "my", "sy"}
 
 
 class JobSyncError(Exception):
@@ -93,21 +122,54 @@ def _content_hash(post_text: str) -> str:
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
-def _job_fingerprint(role: str | None, location: str | None, start_date: str | None) -> str | None:
+def _job_fingerprint(
+    role: str | None,
+    location: str | None,
+    start_date: str | None,
+    employer: str | None = None,
+) -> str | None:
     """
-    SHA-256 of normalised role|location|start_date.
+    SHA-256 of normalised role|location|start_date|employer.
 
     Catches the same position re-posted by a different recruiter with different
-    wording: same role, same location, same start → same fingerprint.
-    Returns None if both role and location are missing (insufficient signal).
+    wording: same role, same vessel/agency, same location, same start → same
+    fingerprint. The employer (vessel name, falling back to the recruiting
+    agency) keeps two different boats hiring the same role in the same port
+    from collapsing into one listing; it is dropped from the key when it is
+    only a placeholder such as "Private Yacht".
+
+    Returns None — i.e. "do not fingerprint-dedup this one" — when the triple
+    carries no identity:
+      * role and location both missing, or
+      * the location is missing / "Unknown"-ish, or
+      * the role is the generic "Crew" placeholder.
+    Those keys match thousands of unrelated posts, so treating them as unique
+    drops real supply on the floor.
     """
     r = (role or "").strip().lower()
     l = (location or "").strip().lower()
     d = (start_date or "").strip().lower()
+    e = (employer or "").strip().lower()
     if not r and not l:
         return None
-    raw = f"{r}|{l}|{d}"
+    if not l or l in _UNKNOWN_LOCATIONS:
+        return None
+    if not r or r in _GENERIC_ROLES:
+        return None
+    if e in _GENERIC_EMPLOYERS:
+        e = ""
+    raw = f"{r}|{l}|{d}|{e}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _employer_key(fields: dict) -> str | None:
+    """Employer identity for the fingerprint: the vessel name when it is a real
+    one, else the recruiting agency. Returns None when both are placeholders."""
+    for value in (fields.get("yacht"), fields.get("recruiter_agency")):
+        name = (value or "").strip()
+        if name and name.lower() not in _GENERIC_EMPLOYERS:
+            return name
+    return None
 
 
 def _extract_email(text: str) -> str | None:
@@ -203,6 +265,93 @@ def _record_rejection(db: Session, content_hash: str, reason: str = "not_a_job")
         pass
 
 
+def _live_window_cutoff() -> datetime:
+    """Oldest created_at a stored job can have and still count as live supply."""
+    return datetime.now(timezone.utc) - timedelta(days=_FINGERPRINT_WINDOW_DAYS)
+
+
+def _live_jobs(db: Session):
+    """Query over jobs that are still on a client-facing surface and recent."""
+    return db.query(Job.id).filter(
+        Job.status.in_(_FINGERPRINT_ACTIVE_STATUSES),
+        Job.created_at >= _live_window_cutoff(),
+    )
+
+
+def _release_stale_fingerprint(db: Session, fp: str, post_url: str) -> bool:
+    """Hand a fingerprint over from a stale job to the post about to be staged.
+
+    `Job.job_fingerprint` is UNIQUE at the DB level, so relaxing the dedup
+    *query* alone is not enough — the insert would raise IntegrityError and the
+    whole run's commit would fail. At most one row can hold a given
+    fingerprint; when that row is stale (closed/expired or outside the live
+    window) the key is cleared off it so the fresh vacancy can own it and go on
+    deduping its own reposts. Returns True if a fingerprint was released.
+    """
+    holder = db.query(Job).filter(Job.job_fingerprint == fp).first()
+    if holder is None:
+        return False
+    holder.job_fingerprint = None
+    db.flush()   # emit the UPDATE before the INSERT that reuses the key
+    log.info(
+        "Fingerprint released from stale job | fp=%s | job_id=%s | status=%s | url=%s",
+        fp[:12], holder.id, holder.status, post_url,
+    )
+    return True
+
+
+def claim_fingerprint(
+    db: Session,
+    fields: dict,
+    post_url: str = "",
+    stats: Counter | None = None,
+) -> int | None:
+    """Fingerprint a job row that is about to be inserted, and claim the key for it.
+
+    THE single entry point for every writer that stages a job — the scraper
+    sync, the manual text import, the screenshot import and the guided form —
+    so all four compute the same key and apply the same scope. Callers must not
+    query `Job.job_fingerprint` themselves: an unscoped lookup re-introduces the
+    bug where a repeat vacancy is silently swallowed for the whole retention
+    window.
+
+    Side effects, in order:
+      1. Writes `fields["job_fingerprint"]` — None when the role/location/
+         start_date/employer triple carries no identity (see _job_fingerprint),
+         in which case this post is simply not fingerprint-deduped.
+      2. Looks the key up among LIVE jobs only (open/priority, created within
+         _FINGERPRINT_WINDOW_DAYS). A hit means this really is the same position
+         re-posted: the holder's id is returned and the caller must skip.
+      3. Otherwise releases the key from a stale holder (closed/expired, or
+         older than the window) so the fresh vacancy can own it — necessary
+         because jobs.job_fingerprint is UNIQUE and the INSERT would otherwise
+         fail.
+
+    Returns the live holder's job id (this post is a duplicate) or None (go
+    ahead and insert). `stats`, when given, is bumped with the outcome.
+    """
+    fp = _job_fingerprint(
+        fields.get("role"),
+        fields.get("location"),
+        fields.get("start_date"),
+        _employer_key(fields),
+    )
+    fields["job_fingerprint"] = fp
+    if not fp:
+        return None
+
+    holder = _live_jobs(db).filter(Job.job_fingerprint == fp).first()
+    if holder is not None:
+        log.debug("Duplicate skipped (fingerprint) | fp=%s | url=%s", fp[:12], post_url)
+        if stats is not None:
+            stats["dupe_fingerprint"] += 1
+        return holder[0]
+
+    if _release_stale_fingerprint(db, fp, post_url) and stats is not None:
+        stats["fingerprint_released"] += 1
+    return None
+
+
 def _finalize_job(
     db: Session,
     ai_fields: dict,
@@ -210,37 +359,44 @@ def _finalize_job(
     source: str,
     content_hash: str | None,
     post_url: str,
+    stats: Counter | None = None,
 ) -> bool:
     """Build a Job row from AI fields, run fingerprint/url/title dedup, and stage
     it. Returns True if staged, False if skipped as a duplicate. Shared by the
     text and image review paths so the post-AI dedup+insert logic lives once.
+
+    Dedup against role/location identity (fingerprint, title+role+location) is
+    scoped to LIVE jobs — active status, posted within _FINGERPRINT_WINDOW_DAYS.
+    The same vacancy re-advertised next month is new supply, not a duplicate.
+    `stats` (when given) is incremented with the skip reason so the run summary
+    can report which layer ate what.
     """
+    def _bump(key: str) -> None:
+        if stats is not None:
+            stats[key] += 1
+
     fields = _build_job_fields(ai_fields, item, source)
     fields["content_hash"] = content_hash
 
-    fp = _job_fingerprint(
-        fields.get("role"),
-        fields.get("location"),
-        fields.get("start_date"),
-    )
-    fields["job_fingerprint"] = fp
-
-    # Fingerprint dedup — same position, different wording.
-    if fp and db.query(Job.id).filter(Job.job_fingerprint == fp).first():
-        log.debug("Duplicate skipped (fingerprint) | fp=%s | url=%s", fp[:12], post_url)
+    # Fingerprint dedup — same position, different wording, still live.
+    # (claim_fingerprint sets fields["job_fingerprint"] and bumps `stats`.)
+    if claim_fingerprint(db, fields, post_url, stats) is not None:
         return False
 
-    # application_url dedup — belt-and-braces.
+    # application_url dedup — belt-and-braces. Not age-scoped: an identical URL
+    # is literally the same post, however old.
     if fields.get("application_url") and (
         db.query(Job.id).filter(Job.application_url == fields["application_url"]).first()
     ):
         log.debug("Duplicate skipped (url) | url=%s", fields["application_url"])
+        _bump("dupe_url")
         return False
 
     # title+role+location dedup — catches the same job re-scraped with different
-    # text or start_date phrasing.
+    # text or start_date phrasing. Same live-window scope as the fingerprint,
+    # otherwise it would simply re-impose the bug the fingerprint scope fixes.
     if fields.get("title") and fields.get("role") and fields.get("location") and (
-        db.query(Job.id)
+        _live_jobs(db)
         .filter(
             Job.title == fields["title"],
             Job.role == fields["role"],
@@ -252,10 +408,21 @@ def _finalize_job(
             "Duplicate skipped (title+role+location) | title=%r | url=%s",
             fields["title"], post_url,
         )
+        _bump("dupe_title")
         return False
 
-    db.add(Job(**fields))
-    db.flush()
+    # content_hash and job_fingerprint are UNIQUE columns: a concurrent run (or
+    # a manual import) can claim the same key between the checks above and this
+    # insert. A SAVEPOINT keeps that race from failing the whole run's commit —
+    # only this row rolls back, and the loser counts as a duplicate.
+    try:
+        with db.begin_nested():
+            db.add(Job(**fields))
+            db.flush()
+    except IntegrityError:
+        log.info("Duplicate skipped (unique-key race) | url=%s", post_url)
+        _bump("dupe_race")
+        return False
     log.info(
         "Job staged | source=%s | title=%r | role=%r | hash=%s | url=%s",
         source,
@@ -369,14 +536,22 @@ def sync_jobs(
 
     Deduplication layers:
       1. content_hash          — same raw text, or image bytes for photo posts
-      2. job_fingerprint       — same role+location+start_date (catches re-worded reposts)
+      2. job_fingerprint       — same role+location+start_date+employer on a LIVE
+                                 job (open/priority, posted in the last
+                                 _FINGERPRINT_WINDOW_DAYS days); skipped entirely
+                                 when the location is Unknown or the role is the
+                                 generic "Crew"
       3. application_url       — belt-and-braces URL match
-      4. title+role+location   — catches same job re-scraped with different text/start_date
+      4. title+role+location   — same job re-scraped with different text/start_date,
+                                 scoped to live jobs like layer 2
 
     Returns (created, skipped, errors).
     Raises JobSyncError if the final DB commit fails.
     """
     created = skipped = errors = 0
+    # Skip reasons, reported in the run summary so a dedup layer that starts
+    # eating real supply is visible without a DB dig.
+    stats: Counter = Counter()
     is_trusted = source in _TRUSTED_SOURCES
     image_reviews = 0          # vision calls made this run (capped)
     image_cap_logged = False   # ensures the cap-reached notice logs only once
@@ -427,6 +602,7 @@ def sync_jobs(
                 h = hashlib.sha256(img_bytes).hexdigest()
                 if db.query(Job.id).filter(Job.content_hash == h).first():
                     skipped += 1
+                    stats["dupe_content_hash"] += 1
                     log.info("Duplicate skipped (image hash) | hash=%s | url=%s", h[:12], post_url)
                     continue
                 if db.query(RejectedPost.id).filter(RejectedPost.content_hash == h).first():
@@ -460,7 +636,7 @@ def sync_jobs(
                     continue
                 parsed.pop("is_job", None)
 
-                if _finalize_job(db, parsed, item, source, h, post_url):
+                if _finalize_job(db, parsed, item, source, h, post_url, stats):
                     created += 1
                 else:
                     skipped += 1
@@ -473,6 +649,7 @@ def sync_jobs(
                 already_exists = db.query(Job.id).filter(Job.content_hash == h).first()
                 if already_exists:
                     skipped += 1
+                    stats["dupe_content_hash"] += 1
                     log.info("Duplicate skipped (hash) | hash=%s | url=%s", h[:12], post_url)
                     continue
                 rejected = db.query(RejectedPost.id).filter(RejectedPost.content_hash == h).first()
@@ -494,7 +671,7 @@ def sync_jobs(
                 continue
 
             # Step 3: shared dedup + insert (fingerprint / url / title)
-            if _finalize_job(db, ai_fields, item, source, h, post_url):
+            if _finalize_job(db, ai_fields, item, source, h, post_url, stats):
                 created += 1
             else:
                 skipped += 1
@@ -510,7 +687,10 @@ def sync_jobs(
         raise JobSyncError(f"Database commit failed during job sync: {exc}") from exc
 
     log.info(
-        "Job sync complete | source=%s | created=%d | skipped=%d | errors=%d",
+        "Job sync complete | source=%s | created=%d | skipped=%d | errors=%d | "
+        "dupes: content_hash=%d fingerprint=%d url=%d title=%d | fingerprints_released=%d",
         source, created, skipped, errors,
+        stats["dupe_content_hash"], stats["dupe_fingerprint"],
+        stats["dupe_url"], stats["dupe_title"], stats["fingerprint_released"],
     )
     return created, skipped, errors

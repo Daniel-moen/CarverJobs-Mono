@@ -143,7 +143,12 @@ def _run_import_pipeline(
 ):
     from app.models import Job
     from app.services.ai_job_reviewer import review_post
-    from app.services.job_sync import _build_job_fields, _content_hash, _job_fingerprint
+    from app.services.job_sync import (
+        _build_job_fields,
+        _content_hash,
+        _live_jobs,
+        claim_fingerprint,
+    )
 
     ai_fields = review_post(
         post_text=text,
@@ -165,12 +170,6 @@ def _run_import_pipeline(
 
     h = _content_hash(text) if text else None
     fields["content_hash"] = h
-    fp = _job_fingerprint(
-        fields.get("role"),
-        fields.get("location"),
-        fields.get("start_date"),
-    )
-    fields["job_fingerprint"] = fp
 
     db = SessionLocal()
     try:
@@ -178,10 +177,12 @@ def _run_import_pipeline(
             exists = db.query(Job.id).filter(Job.content_hash == h).first()
             if exists:
                 return {"duplicate": True, "id": exists[0]}
-        if fp:
-            exists = db.query(Job.id).filter(Job.job_fingerprint == fp).first()
-            if exists:
-                return {"duplicate": True, "id": exists[0]}
+
+        # Fingerprint dedup — scoped to live jobs, employer included in the key,
+        # stale holders released. Shared with the scraper via job_sync.
+        holder_id = claim_fingerprint(db, fields, url)
+        if holder_id is not None:
+            return {"duplicate": True, "id": holder_id}
 
         if fields.get("application_url"):
             exists = db.query(Job.id).filter(
@@ -190,8 +191,10 @@ def _run_import_pipeline(
             if exists:
                 return {"duplicate": True, "id": exists[0]}
 
+        # title+role+location — same live-window scope as the fingerprint above,
+        # otherwise it just re-imposes the bug that scope fixes.
         if fields.get("title") and fields.get("role") and fields.get("location"):
-            exists = db.query(Job.id).filter(
+            exists = _live_jobs(db).filter(
                 Job.title == fields["title"],
                 Job.role == fields["role"],
                 Job.location == fields["location"],
@@ -266,7 +269,7 @@ def _save_job_from_ai_fields(
 ):
     """Build Job row from AI-extracted fields and save to DB (dedup-aware)."""
     from app.models import Job
-    from app.services.job_sync import _build_job_fields, _job_fingerprint
+    from app.services.job_sync import _build_job_fields, _live_jobs, claim_fingerprint
 
     fields = _build_job_fields(ai_fields, {"url": url}, "manual")
     fields["source"] = source
@@ -275,19 +278,15 @@ def _save_job_from_ai_fields(
     if posted_by_agency:
         fields["posted_by_agency"] = posted_by_agency
         fields["recruiter_agency"] = posted_by_agency
-    fp = _job_fingerprint(
-        fields.get("role"),
-        fields.get("location"),
-        fields.get("start_date"),
-    )
-    fields["job_fingerprint"] = fp
 
     db = SessionLocal()
     try:
-        if fp:
-            exists = db.query(Job.id).filter(Job.job_fingerprint == fp).first()
-            if exists:
-                return {"duplicate": True, "id": exists[0]}
+        # Fingerprint dedup — scoped to live jobs, employer included in the key,
+        # stale holders released. Shared with the scraper via job_sync.
+        holder_id = claim_fingerprint(db, fields, url)
+        if holder_id is not None:
+            return {"duplicate": True, "id": holder_id}
+
         if fields.get("application_url"):
             exists = db.query(Job.id).filter(
                 Job.application_url == fields["application_url"]
@@ -295,8 +294,9 @@ def _save_job_from_ai_fields(
             if exists:
                 return {"duplicate": True, "id": exists[0]}
 
+        # Same live-window scope as the fingerprint above.
         if fields.get("title") and fields.get("role") and fields.get("location"):
-            exists = db.query(Job.id).filter(
+            exists = _live_jobs(db).filter(
                 Job.title == fields["title"],
                 Job.role == fields["role"],
                 Job.location == fields["location"],

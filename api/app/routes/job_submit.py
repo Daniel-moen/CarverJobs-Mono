@@ -256,7 +256,7 @@ def crew_submit_form(
     db: Session = Depends(get_db),
 ):
     """Guided structured form — no AI parsing, just validate + dedup + save."""
-    from app.services.job_sync import _content_hash, _job_fingerprint
+    from app.services.job_sync import _content_hash, claim_fingerprint
 
     user_id, agency_name = _poster_meta(session, db)
     is_agency = session.get("role") == "agency"
@@ -281,11 +281,6 @@ def crew_submit_form(
     ])
     if text_for_hash.strip("|"):
         fields["content_hash"] = _content_hash(text_for_hash)
-    fields["job_fingerprint"] = _job_fingerprint(
-        fields.get("role"),
-        fields.get("location"),
-        fields.get("start_date"),
-    )
 
     if fields.get("content_hash"):
         existing = db.query(models.Job.id).filter(models.Job.content_hash == fields["content_hash"]).first()
@@ -294,13 +289,16 @@ def crew_submit_form(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"This job is already on the board (id={existing[0]}).",
             )
-    if fields.get("job_fingerprint"):
-        existing = db.query(models.Job.id).filter(models.Job.job_fingerprint == fields["job_fingerprint"]).first()
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"This job is already on the board (id={existing[0]}).",
-            )
+
+    # Fingerprint dedup — sets fields["job_fingerprint"], matches only against
+    # LIVE jobs and hands the key over from a stale holder. Same helper the
+    # scraper and the manual imports use, so all four writers agree on the key.
+    holder_id = claim_fingerprint(db, fields, fields.get("application_url") or "")
+    if holder_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This job is already on the board (id={holder_id}).",
+        )
 
     job = models.Job(**fields)
     db.add(job)
