@@ -1,7 +1,7 @@
 <script>
   import { onDestroy, onMount } from 'svelte'
   import { API_BASE_URL, apiFetch } from '../../config/api'
-  import { trackClick } from '../../config/analytics'
+  import { trackClick, trackEvent } from '../../config/analytics'
 
   let { isSubscribed = false, creditsBalance = 0, onCreditsChanged = () => {}, onNavigate = () => {}, autoStartMatch = false, onMatchStarted = () => {} } = $props()
 
@@ -305,6 +305,10 @@
               } else {
                 state = 'no-match'
               }
+              trackEvent('match_run_completed', {
+                label: state === 'done' ? 'matched' : 'no_match',
+                value: String(totalScanned),
+              })
             } else if (currentEvent === 'error') {
               stopRestorePolling()
               clearActiveSessionId()

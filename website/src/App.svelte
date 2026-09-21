@@ -3,6 +3,7 @@
   import SiteHeader from './components/layout/SiteHeader.svelte'
   import SiteFooter from './components/layout/SiteFooter.svelte'
   import RouteLoading from './components/layout/RouteLoading.svelte'
+  import RouteError from './components/layout/RouteError.svelte'
   import FeedbackPrompt from './components/feedback/FeedbackPrompt.svelte'
   import { API_BASE_URL, apiFetch, getAuthProviders } from './config/api'
   import { trackPageView, trackClick, trackFunnel, trackError, trackSessionStart, startAutoFlush, stopAutoFlush, flush } from './config/analytics'
@@ -20,7 +21,14 @@
   function pageChunk(key, loader) {
     let p = _pageChunkCache.get(key)
     if (!p) {
-      p = loader()
+      // Evict on failure. A rejected import is almost always a stale
+      // content-hashed chunk after a deploy; caching the rejection meant
+      // every later attempt (including the Reload path and any re-render)
+      // replayed the same dead promise and the route could never recover.
+      p = loader().catch((err) => {
+        _pageChunkCache.delete(key)
+        throw err
+      })
       _pageChunkCache.set(key, p)
     }
     return p
@@ -536,6 +544,27 @@
       trackCurrentPageView(currentPage)
     })
 
+    // Error reporting is installed before the launch gate so the public
+    // pages (legal, articles, pricing) are covered too — they load route
+    // chunks like every other route and fail the same way.
+    //
+    // Stacks matter more than messages here: "Script error." and "Failed to
+    // fetch dynamically imported module" are indistinguishable without the
+    // frame that threw.
+    window.addEventListener('unhandledrejection', (e) => {
+      const reason = /** @type {{ message?: string, stack?: string }} */ (e.reason ?? {})
+      trackError('unhandledrejection', reason.message ?? String(e.reason), {
+        page: currentPage,
+        stack: reason.stack,
+      })
+    })
+    window.onerror = (msg, src, line, col, err) => {
+      trackError('uncaught', String(msg), {
+        page: currentPage,
+        stack: err?.stack || (src ? `${src}:${line}:${col}` : ''),
+      })
+    }
+
     if (!SITE_LAUNCHED) {
       if (isPublicContentPage(currentPage)) {
         trackCurrentPageView(currentPage)
@@ -552,12 +581,6 @@
     trackSessionStart()
     trackCurrentPageView(currentPage)
 
-    window.addEventListener('unhandledrejection', (e) => {
-      trackError('unhandledrejection', e.reason?.message ?? String(e.reason), { page: currentPage })
-    })
-    window.onerror = (msg) => {
-      trackError('uncaught', String(msg), { page: currentPage })
-    }
     window.addEventListener('beforeunload', () => { flush(); stopAutoFlush() })
     window.addEventListener('carver:unauthorized', handleUnauthorizedEvent)
 
@@ -581,6 +604,8 @@
       <RouteLoading />
     {:then { default: LaunchSignupPage }}
       <LaunchSignupPage />
+    {:catch err}
+      <RouteError error={err} page={currentPage} />
     {/await}
   {:else if currentPage === 'articles'}
     {#await pageChunk('articles', () => import('./components/pages/ArticlesPage.svelte'))}
@@ -595,6 +620,8 @@
           history.pushState({ page: currentPage }, '', path)
         }}
       />
+    {:catch err}
+      <RouteError error={err} page={currentPage} />
     {/await}
   {:else if isLegalDocumentPage(currentPage)}
     {#if currentPage === 'privacy'}
@@ -602,24 +629,32 @@
         <RouteLoading />
       {:then { default: PrivacyPolicyPage }}
         <PrivacyPolicyPage />
+      {:catch err}
+        <RouteError error={err} page={currentPage} />
       {/await}
     {:else if currentPage === 'terms'}
       {#await pageChunk('legal-terms', () => import('./components/pages/TermsOfServicePage.svelte'))}
         <RouteLoading />
       {:then { default: TermsOfServicePage }}
         <TermsOfServicePage />
+      {:catch err}
+        <RouteError error={err} page={currentPage} />
       {/await}
     {:else if currentPage === 'refund-policy'}
       {#await pageChunk('legal-refund', () => import('./components/pages/RefundPolicyPage.svelte'))}
         <RouteLoading />
       {:then { default: RefundPolicyPage }}
         <RefundPolicyPage />
+      {:catch err}
+        <RouteError error={err} page={currentPage} />
       {/await}
     {:else}
       {#await pageChunk('legal-data-deletion', () => import('./components/pages/DataDeletionPage.svelte'))}
         <RouteLoading />
       {:then { default: DataDeletionPage }}
         <DataDeletionPage />
+      {:catch err}
+        <RouteError error={err} page={currentPage} />
       {/await}
     {/if}
   {:else if currentPage === 'pricing'}
@@ -627,12 +662,16 @@
       <RouteLoading />
     {:then { default: PricingPage }}
       <PricingPage />
+    {:catch err}
+      <RouteError error={err} page={currentPage} />
     {/await}
   {:else if waToken}
     {#await pageChunk('whatsapp-auth', () => import('./components/pages/WhatsAppAuthPage.svelte'))}
       <RouteLoading />
     {:then { default: WhatsAppAuthPage }}
       <WhatsAppAuthPage token={waToken} />
+    {:catch err}
+      <RouteError error={err} page={currentPage} />
     {/await}
   {:else if publicSlug}
     <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
@@ -640,6 +679,8 @@
         <RouteLoading compact />
       {:then { default: PublicProfilePage }}
         <PublicProfilePage slug={publicSlug} />
+      {:catch err}
+        <RouteError error={err} page={currentPage} compact />
       {/await}
     </main>
   {:else if isCheckingSession}
@@ -694,6 +735,8 @@
           history.pushState({ page: 'login' }, '', '/')
         }}
       />
+    {:catch err}
+      <RouteError error={err} page={currentPage} />
     {/await}
   {:else if !isAuthenticated && !showLogin}
     {#if isMobileViewport}
@@ -705,6 +748,8 @@
           onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
           onAgencySignup={() => { authError = ''; showLogin = false; showSignup = true; history.pushState({ page: 'signup' }, '', '/signup/agency'); trackClick('agency_signup_cta') }}
         />
+      {:catch err}
+        <RouteError error={err} page={currentPage} />
       {/await}
     {:else}
       {#await pageChunk('marketing-desktop', () => import('./components/pages/LandingPage.svelte'))}
@@ -715,6 +760,8 @@
           onStartMatch={() => { authError = ''; autoStartMatch = true; showLogin = true; trackClick('landing_start_match') }}
           onAgencySignup={() => { authError = ''; showLogin = false; showSignup = true; history.pushState({ page: 'signup' }, '', '/signup/agency'); trackClick('agency_signup_cta') }}
         />
+      {:catch err}
+        <RouteError error={err} page={currentPage} />
       {/await}
     {/if}
   {:else if !isAuthenticated && showLogin}
@@ -818,12 +865,16 @@
       <RouteLoading />
     {:then { default: OnboardingFlow }}
       <OnboardingFlow onComplete={handleOnboardingComplete} />
+    {:catch err}
+      <RouteError error={err} page={currentPage} />
     {/await}
   {:else if isAuthenticated && userRole === 'agency'}
     {#await pageChunk('agency-shell', () => import('./components/layout/AgencyShell.svelte'))}
       <RouteLoading />
     {:then { default: AgencyShell }}
       <AgencyShell agencyName={agencyName} onLogout={logout} />
+    {:catch err}
+      <RouteError error={err} page={currentPage} />
     {/await}
   {:else}
     <!-- Global animated app background -->
@@ -874,6 +925,8 @@
         <RouteLoading compact />
       {:then { default: ActivePage }}
         <svelte:component this={ActivePage} isSubscribed={isSubscribed} creditsBalance={creditsBalance} onCreditsChanged={(value) => (creditsBalance = Math.max(0, Number(value) || 0))} onNavigate={navigate} autoStartMatch={autoStartMatch} onMatchStarted={() => (autoStartMatch = false)} sessionId={matchSessionId} />
+      {:catch err}
+        <RouteError error={err} page={currentPage} compact />
       {/await}
     </main>
     {#if isAuthenticated && userRole === 'crew' && !showOnboarding}

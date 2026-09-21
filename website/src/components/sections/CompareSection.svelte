@@ -7,8 +7,15 @@
    * Every Carver claim maps to a real product behaviour — no invented
    * telemetry, no fake counts.
    */
-  import { trackEvent } from '../../config/analytics'
-  import { whatsapp } from '../../config/site'
+  import { trackOutboundClick } from '../../config/analytics'
+  import { FREE_MATCH_RUNS, WA_TAGS, waMessage, whatsapp } from '../../config/site'
+
+  /**
+   * Shared by the desktop and mobile landing pages, so the wa.me source tag
+   * is passed in rather than hard-coded.
+   * @type {{ tag?: string }}
+   */
+  let { tag = WA_TAGS.hero } = $props()
 
   const oldWay = [
     'Walk the docks in the sun, handing out printed CVs',
@@ -69,14 +76,14 @@
           {/each}
         </ul>
         <a
-          href={whatsapp.link("Hi Carver — I'd like to start matching to yacht roles.")}
+          href={whatsapp.link(waMessage(tag))}
           target="_blank"
           rel="noopener noreferrer"
           class="cta-wa cta-shine compare-cta"
-          onclick={() => trackEvent('compare_whatsapp_cta')}
+          onclick={() => trackOutboundClick('compare_whatsapp_cta')}
         >
           <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
-          Start free — 2 match runs on us
+          Start free — {FREE_MATCH_RUNS} match runs on us
         </a>
       </div>
     </div>

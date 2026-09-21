@@ -1,8 +1,12 @@
 <script>
-  import { whatsapp } from '../../config/site'
+  import { WA_TAGS, waMessage, whatsapp } from '../../config/site'
 
-  let { message = "Hi Carver — I'd like to try the WhatsApp matching." } = $props()
-  const href = $derived(whatsapp.link(message))
+  /** @type {{ message?: string, tag?: string }} */
+  let {
+    message = "Hi Carver — I'd like to try the WhatsApp matching.",
+    tag = WA_TAGS.hero,
+  } = $props()
+  const href = $derived(whatsapp.link(waMessage(tag, message)))
 
   let dismissed = $state(false)
   let expanded = $state(false)

@@ -17,15 +17,15 @@
    *
    * Rule carried over from the original build: no invented telemetry, no
    * fake user counts, no fabricated testimonials. Every claim is a real
-   * product behaviour (2 free runs, +5 first-purchase bonus, job-post
+   * product behaviour (5 free runs, +5 first-purchase bonus, job-post
    * rewards, 14-day refund).
    *
    * Animation budget stays tight — heavy effects only run while the
    * section is on screen, driven by an IntersectionObserver.
    */
   import { onMount } from 'svelte'
-  import { trackEvent } from '../../config/analytics'
-  import { whatsapp } from '../../config/site'
+  import { trackEvent, trackOutboundClick } from '../../config/analytics'
+  import { FREE_MATCH_RUNS, WA_TAGS, waMessage, whatsapp } from '../../config/site'
   import { DEFAULT_FIRST_PURCHASE_BONUS } from '../../config/subscriptionCheckout'
   import TypingChat from '../sections/TypingChat.svelte'
   import RoleTicker from '../sections/RoleTicker.svelte'
@@ -44,7 +44,9 @@
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let { onSignIn = () => {}, onAgencySignup = () => {}, onStartMatch = () => {} } = $props()
 
-  const startMessage = "Hi Carver — I'd like to start matching to yacht roles."
+  // Source-tagged prefill — the trailing '· hero' lets the WhatsApp backend
+  // attribute the signup to the desktop landing page.
+  const startMessage = waMessage(WA_TAGS.hero)
 
   // Pause the typing chat when it scrolls out of view.
   let chatPaused = $state(false)
@@ -167,7 +169,7 @@
           href={whatsapp.link(startMessage)}
           target="_blank"
           rel="noopener noreferrer"
-          onclick={() => trackEvent('nav_whatsapp_cta')}
+          onclick={() => trackOutboundClick('nav_whatsapp_cta')}
           class="cta-wa nav-start"
         >
           <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
@@ -202,7 +204,7 @@
         <div class="hero-copy" data-animate data-stagger>
           <p class="hero-offer">
             <span class="hero-offer-dot" aria-hidden="true"></span>
-            Free to start — your first 2 match runs are on us
+            Free to start — your first {FREE_MATCH_RUNS} match runs are on us
           </p>
 
           <h1 class="hero-title">
@@ -226,7 +228,7 @@
               href={whatsapp.link(startMessage)}
               target="_blank"
               rel="noopener noreferrer"
-              onclick={() => trackEvent('hero_whatsapp_cta')}
+              onclick={() => trackOutboundClick('hero_whatsapp_cta')}
               class="cta-wa cta-shine cta-beacon hero-cta-primary"
             >
               <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
@@ -241,7 +243,7 @@
             <a
               href="/signup"
               class="hero-alt-link"
-              onclick={() => trackEvent('hero_web_signup')}
+              onclick={() => trackOutboundClick('hero_web_signup')}
             >Create a free web account →</a>
           </p>
 
@@ -277,7 +279,7 @@
           <TypingChat paused={chatPaused} />
           <p class="hero-chat-foot">
             What you see is what you get — script pulled directly from the
-            production bot. <a class="hero-chat-link" href={whatsapp.link('match')} target="_blank" rel="noopener noreferrer">Try “match” yourself →</a>
+            production bot. <a class="hero-chat-link" href={whatsapp.link(waMessage(WA_TAGS.hero, 'match'))} target="_blank" rel="noopener noreferrer">Try “match” yourself →</a>
           </p>
         </aside>
       </div>
@@ -306,7 +308,7 @@
 
   <!-- ── COMPARE — the old hunt vs one text ──────────────────────────── -->
   <div data-animate>
-    <CompareSection />
+    <CompareSection tag={WA_TAGS.hero} />
   </div>
 
   <!-- ── PRICING — token packs ───────────────────────────────────────── -->
@@ -334,7 +336,7 @@
         away.
       </h2>
       <p class="finale-sub">
-        Five free match runs, an extra {DEFAULT_FIRST_PURCHASE_BONUS} bonus tokens with your first pack,
+        {FREE_MATCH_RUNS} free match runs, an extra {DEFAULT_FIRST_PURCHASE_BONUS} bonus tokens with your first pack,
         and never a subscription.
         <strong class="finale-urgency">Somewhere right now a captain is reading applications —
         yours should be in the pile.</strong>
@@ -344,7 +346,7 @@
           href={whatsapp.link(startMessage)}
           target="_blank"
           rel="noopener noreferrer"
-          onclick={() => trackEvent('finale_whatsapp_cta')}
+          onclick={() => trackOutboundClick('finale_whatsapp_cta')}
           class="cta-wa cta-shine cta-beacon finale-primary"
         >
           <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
@@ -355,7 +357,7 @@
         <span class="finale-or" aria-hidden="true">or</span>
         <a
           href="/signup"
-          onclick={() => trackEvent('finale_web_signup')}
+          onclick={() => trackOutboundClick('finale_web_signup')}
           class="cta-ivory finale-secondary"
         >
           Create a web account
@@ -390,7 +392,7 @@
   </footer>
 
   <!-- Sticky WhatsApp action — shows on every section -->
-  <WhatsAppFab />
+  <WhatsAppFab tag={WA_TAGS.hero} />
 </div>
 
 <style>

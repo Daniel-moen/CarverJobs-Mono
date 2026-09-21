@@ -4,14 +4,14 @@
    * language and sharing TokenPacksSection + FaqSection with the landing
    * pages so prices and objection-handling never drift between surfaces.
    */
-  import { trackEvent } from '../../config/analytics'
-  import { whatsapp } from '../../config/site'
+  import { trackOutboundClick } from '../../config/analytics'
+  import { WA_TAGS, waMessage, whatsapp } from '../../config/site'
   import TokenPacksSection from '../sections/TokenPacksSection.svelte'
   import FaqSection from '../sections/FaqSection.svelte'
   import ScrollProgress from '../sections/ScrollProgress.svelte'
   import WhatsAppFab from '../sections/WhatsAppFab.svelte'
 
-  const startMessage = "Hi Carver — I'd like to start matching to yacht roles."
+  const startMessage = waMessage(WA_TAGS.pricing)
 </script>
 
 <div class="pricing">
@@ -27,7 +27,7 @@
       href={whatsapp.link(startMessage)}
       target="_blank"
       rel="noopener noreferrer"
-      onclick={() => trackEvent('pricing_nav_whatsapp')}
+      onclick={() => trackOutboundClick('pricing_nav_whatsapp')}
       class="cta-wa p-nav-start"
     >
       <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
@@ -55,7 +55,7 @@
       <a
         href="/signup/agency"
         class="cta-ivory p-recruiter-cta"
-        onclick={() => trackEvent('pricing_agency_signup')}
+        onclick={() => trackOutboundClick('pricing_agency_signup')}
       >
         Create an agency account
       </a>
@@ -73,7 +73,7 @@
     <p class="p-foot-meta">© {new Date().getFullYear()} Carver · made on the dock</p>
   </footer>
 
-  <WhatsAppFab />
+  <WhatsAppFab tag={WA_TAGS.pricing} />
 </div>
 
 <style>

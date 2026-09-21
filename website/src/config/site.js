@@ -39,6 +39,52 @@ export const whatsapp = {
   configured: _waRaw !== '447000000000' && _waRaw.length >= 8,
 }
 
+/**
+ * Free match runs granted at signup. Single source of truth for marketing
+ * copy — the number changed once already (2 → 5 on 3 Aug 2026) and the old
+ * value survived in five different hand-written strings. Import this instead
+ * of typing a digit.
+ */
+export const FREE_MATCH_RUNS = 5
+
+/**
+ * Roughly how many live yacht roles the matcher scans. Deliberately a
+ * rounded "at least" figure so it stays honest as the board moves.
+ */
+export const LIVE_JOBS_BLURB = '250+ live yacht jobs'
+
+/**
+ * Source tags appended to every wa.me prefill so the WhatsApp backend can
+ * attribute a signup to the surface that produced it. The tag is always the
+ * trailing token of the prefilled message, separated by a space.
+ *
+ * Keep these strings byte-stable — the backend matches on them exactly.
+ */
+export const WA_TAGS = {
+  /** Anything on the small-screen marketing page (nav, hero, finale). */
+  mobileHero: '· m-hero',
+  /** The sticky bottom CTA bar. */
+  sticky: '· sticky',
+  /** Pricing page + the shared token-packs section. */
+  pricing: '· pricing',
+  /** Anything on the desktop landing page. */
+  hero: '· hero',
+  /** CTAs inside a server-rendered SEO article. */
+  article: '· article',
+}
+
+/** The standard "start matching" prefill, untagged. */
+export const WA_START_MESSAGE = "Hi Carver — I'd like to start matching to yacht roles."
+
+/**
+ * Build a source-tagged prefill.
+ * @param {string} tag one of WA_TAGS
+ * @param {string} [message] base text; defaults to the start-matching prefill
+ */
+export function waMessage(tag, message = WA_START_MESSAGE) {
+  return tag ? `${message} ${tag}` : message
+}
+
 export const site = {
   name: 'CARVER v3',
   tagline: 'Automated superyacht job applications.',

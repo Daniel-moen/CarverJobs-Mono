@@ -99,7 +99,11 @@
       content="Text 'match' on WhatsApp. Carver scans every live superyacht role against your profile and applies on your behalf. No app. No inbox. Just the next berth."
     />
     <meta property="og:url" content="https://jobcarver.co/" />
-    <meta property="og:image" content="https://jobcarver.co/og-image.svg" />
+    <!-- PNG, not SVG: WhatsApp and Facebook refuse to rasterise an SVG OG
+         image and fall back to a bare text card. Absolute URL is required —
+         scrapers do not resolve relative paths. -->
+    <meta property="og:image" content="https://jobcarver.co/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="Carver — Superyacht crew, automated" />
@@ -112,7 +116,7 @@
       name="twitter:description"
       content="Text 'match' on WhatsApp. Carver scans every live superyacht role and applies for you. No app, no forms."
     />
-    <meta name="twitter:image" content="https://jobcarver.co/og-image.svg" />
+    <meta name="twitter:image" content="https://jobcarver.co/og-image.png" />
     <meta name="twitter:image:alt" content="Carver — Superyacht crew, automated" />
 
     <!-- Performance hints -->
@@ -123,6 +127,7 @@
     <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
     <link
       rel="stylesheet"
+      crossorigin="anonymous"
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..700,100&family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&family=Caveat:wght@400;600&family=DM+Mono:wght@400;500&display=swap"
     />
 
@@ -172,6 +177,95 @@
     </script>
   </head>
   <body>
+    <!-- ── Pre-JS shell ───────────────────────────────────────────────────
+         Something real in the first paint. Until the bundle lands, a South
+         African visitor on 3G used to stare at an empty black page; the
+         headline and a working wa.me link now arrive with the HTML, so the
+         page is usable (and convertible) before a single byte of JS runs.
+
+         Styles are inline and the font stack is system-only so this never
+         waits on the stylesheet or on Google Fonts. main.js removes the
+         whole block the moment the app mounts.
+
+         The number must match VITE_WHATSAPP_NUMBER / the fallback in
+         src/config/site.js. The "· m-hero" suffix is the same source tag
+         the mobile hero CTA uses — this shell is only on screen long enough
+         to be tapped on a slow mobile connection. -->
+    <div id="app-prelude">
+      <style>
+        #app-prelude {
+          position: fixed;
+          inset: 0;
+          z-index: 1;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 1.1rem;
+          padding: 1.5rem;
+          background: #04070b;
+          color: #f3ead8;
+          font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        }
+        #app-prelude .pl-brand {
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: 0.34em;
+          color: #a8b3bf;
+        }
+        #app-prelude h1 {
+          margin: 0;
+          font-size: clamp(2.1rem, 9vw, 3.4rem);
+          font-weight: 300;
+          line-height: 1.04;
+          letter-spacing: -0.025em;
+        }
+        #app-prelude .pl-mark { color: #e6c98c; font-style: italic; }
+        #app-prelude p {
+          margin: 0;
+          max-width: 34rem;
+          font-size: 15px;
+          line-height: 1.6;
+          color: #a8b3bf;
+        }
+        #app-prelude .pl-cta {
+          align-self: flex-start;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.55rem;
+          padding: 1rem 1.4rem;
+          border-radius: 12px;
+          background: #25d366;
+          color: #04070b;
+          font-size: 15px;
+          font-weight: 700;
+          text-decoration: none;
+        }
+        #app-prelude .pl-note {
+          font-size: 12px;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: #8df0c4;
+        }
+        @media (min-width: 768px) {
+          #app-prelude { padding: 4rem; gap: 1.4rem; }
+        }
+      </style>
+      <p class="pl-brand">CARVER</p>
+      <h1>Every live yacht job.<br />One text: <span class="pl-mark">&ldquo;match&rdquo;</span></h1>
+      <p>
+        Carver runs your whole superyacht job hunt inside WhatsApp — profile built in chat,
+        every live role scanned on demand, application emails drafted for you.
+      </p>
+      <a
+        class="pl-cta"
+        href="https://wa.me/27688516141?text=Hi%20Carver%20%E2%80%94%20I'd%20like%20to%20start%20matching%20to%20yacht%20roles.%20%C2%B7%20m-hero"
+        rel="noopener noreferrer"
+      >
+        <svg viewBox="0 0 32 32" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
+        Start free on WhatsApp
+      </a>
+      <p class="pl-note">5 free match runs &middot; no card</p>
+    </div>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>

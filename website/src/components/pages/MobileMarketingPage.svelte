@@ -12,8 +12,8 @@
    * are shared with the desktop page; no logic is forked.
    */
   import { onMount } from 'svelte'
-  import { trackEvent } from '../../config/analytics'
-  import { whatsapp } from '../../config/site'
+  import { trackEvent, trackOutboundClick } from '../../config/analytics'
+  import { FREE_MATCH_RUNS, WA_TAGS, waMessage, whatsapp } from '../../config/site'
   import TypingChat from '../sections/TypingChat.svelte'
   import RoleTicker from '../sections/RoleTicker.svelte'
   import ScrollProgress from '../sections/ScrollProgress.svelte'
@@ -29,7 +29,9 @@
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let { onSignIn = () => {}, onAgencySignup = () => {}, onStartMatch = () => {} } = $props()
 
-  const startMessage = "Hi Carver — I'd like to start matching to yacht roles."
+  // Source-tagged prefill so the WhatsApp backend can attribute the signup
+  // to this page rather than lumping every wa.me tap together.
+  const startMessage = waMessage(WA_TAGS.mobileHero)
 
   let chatPaused = $state(false)
   /** @type {HTMLElement|null} */
@@ -113,7 +115,7 @@
         href={whatsapp.link(startMessage)}
         target="_blank"
         rel="noopener noreferrer"
-        onclick={() => trackEvent('mobile_nav_whatsapp')}
+        onclick={() => trackOutboundClick('mobile_nav_whatsapp')}
         class="cta-wa m-nav-start"
       >
         <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
@@ -131,7 +133,7 @@
 
     <p class="m-offer m-enter" style="--e:0">
       <span class="m-offer-dot" aria-hidden="true"></span>
-      Free to start · 2 match runs on us
+      Free to start · {FREE_MATCH_RUNS} free match runs
     </p>
 
     <h1 class="m-title">
@@ -150,12 +152,16 @@
       No app, no forms, no card.
     </p>
 
-    <div class="m-ctas m-enter" style="--e:2">
+    <!-- Deliberately NOT `.m-enter`: the entrance choreography used to hold
+         the primary CTA at opacity:0 for ~870ms after mount, which on a 3G
+         phone is most of the time a visitor spends deciding. The button now
+         paints with the hero. -->
+    <div class="m-ctas">
       <a
         href={whatsapp.link(startMessage)}
         target="_blank"
         rel="noopener noreferrer"
-        onclick={() => trackEvent('mobile_hero_whatsapp')}
+        onclick={() => trackOutboundClick('mobile_hero_whatsapp')}
         class="cta-wa cta-shine cta-beacon m-cta-primary"
       >
         <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
@@ -165,7 +171,7 @@
       </a>
       <a
         href="/signup"
-        onclick={() => trackEvent('mobile_hero_web_signup')}
+        onclick={() => trackOutboundClick('mobile_hero_web_signup')}
         class="m-cta-secondary"
       >
         Prefer the website? Create a free account →
@@ -221,7 +227,7 @@
 
   <!-- Compare -->
   <div data-animate>
-    <CompareSection />
+    <CompareSection tag={WA_TAGS.mobileHero} />
   </div>
 
   <!-- Pricing -->
@@ -248,7 +254,7 @@
       away.
     </h2>
     <p class="m-finale-sub">
-      Five free match runs. Bonus tokens with your first pack. Never a subscription.
+      {FREE_MATCH_RUNS} free match runs. Bonus tokens with your first pack. Never a subscription.
       <strong class="m-finale-urgency">Somewhere right now a captain is reading applications —
       yours should be in the pile.</strong>
     </p>
@@ -256,7 +262,7 @@
       href={whatsapp.link(startMessage)}
       target="_blank"
       rel="noopener noreferrer"
-      onclick={() => trackEvent('mobile_finale_whatsapp')}
+      onclick={() => trackOutboundClick('mobile_finale_whatsapp')}
       class="cta-wa cta-shine cta-beacon m-finale-cta"
     >
       <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
@@ -266,7 +272,7 @@
     </a>
     <a
       href="/signup"
-      onclick={() => trackEvent('mobile_finale_web_signup')}
+      onclick={() => trackOutboundClick('mobile_finale_web_signup')}
       class="m-finale-secondary"
     >
       Or create a free web account →
@@ -421,9 +427,14 @@
     letter-spacing: -0.025em;
   }
   /* ── Hero entrance choreography (runs once on load) ────────────── */
+  /* Budget: everything above the fold is fully visible inside ~400ms.
+     The primary CTA is excluded from this entirely — see .m-ctas. */
   .m-enter {
-    animation: m-enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: calc(var(--e, 0) * 160ms + 550ms);
+    animation: m-enter 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--e, 0) * 120ms + 120ms);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .m-enter { animation: none; }
   }
   @keyframes m-enter {
     from { opacity: 0; transform: translateY(14px); }

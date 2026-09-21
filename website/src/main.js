@@ -7,6 +7,9 @@ const app = mount(App, {
   target: document.getElementById('app'),
 })
 
+// Drop the pre-JS shell from index.html now that the real app owns the page.
+document.getElementById('app-prelude')?.remove()
+
 // Load the analytics SDK (~300 kB) once the browser is idle so it never
 // competes with page chunks for bandwidth on first paint. Events fired
 // before it arrives are queued inside config/mixpanel.js.

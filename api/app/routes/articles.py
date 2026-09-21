@@ -287,6 +287,101 @@ def _esc(value: str | None) -> str:
     return html.escape(value or "", quote=True)
 
 
+# ── WhatsApp CTA ────────────────────────────────────────────────────────────
+#
+# The 45 SEO articles were pure dead ends: server-rendered prose with no
+# clickable action anywhere on the page (22 Sep 2026 conversion review).
+# Every article now carries an inline CTA after the first H2 and a sticky
+# bottom bar.
+#
+# The number mirrors VITE_WHATSAPP_NUMBER / the fallback in
+# website/src/config/site.js. `· article` is the source tag the WhatsApp
+# backend reads to attribute the signup — keep it as the trailing token.
+
+_WA_NUMBER = "27688516141"
+_WA_TAG = "· article"
+_WA_PREFILL = f"Hi Carver — I'd like to start matching to yacht roles. {_WA_TAG}"
+
+
+def _wa_href() -> str:
+    from urllib.parse import quote
+
+    return f"https://wa.me/{_WA_NUMBER}?text={quote(_WA_PREFILL, safe='')}"
+
+
+_WA_ICON = (
+    '<svg viewBox="0 0 32 32" width="16" height="16" fill="currentColor" aria-hidden="true">'
+    '<path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/>'
+    "</svg>"
+)
+
+
+def _render_inline_cta() -> str:
+    href = _esc(_wa_href())
+    return f"""<aside class="cta-inline">
+            <p class="cta-inline-kicker">Skip the dock walk</p>
+            <p class="cta-inline-body">Carver scans every live superyacht role against your profile and drafts the application emails — inside WhatsApp. 5 free match runs, no card.</p>
+            <a class="cta-btn" href="{href}" target="_blank" rel="noopener noreferrer">{_WA_ICON}<span>Start free on WhatsApp</span></a>
+          </aside>"""
+
+
+def _render_sticky_cta() -> str:
+    href = _esc(_wa_href())
+    return f"""    <div class="cta-bar" role="complementary" aria-label="Start free on WhatsApp">
+      <div class="cta-bar-copy">
+        <p class="cta-bar-title">5 free match runs</p>
+        <p class="cta-bar-sub">No card &middot; no signup &middot; just WhatsApp</p>
+      </div>
+      <a class="cta-btn" href="{href}" target="_blank" rel="noopener noreferrer">{_WA_ICON}<span>Start free</span></a>
+    </div>"""
+
+
+_CTA_CSS = """
+      .cta-btn { display:inline-flex; align-items:center; gap:0.5rem; padding:0.8rem 1.2rem; border-radius:10px; background:#25d366; color:#04070b; font-size:0.9rem; font-weight:700; text-decoration:none; line-height:1; }
+      .cta-btn:hover { background:#1ebd5d; color:#04070b; }
+      .cta-inline { margin:2.5rem 0; padding:1.4rem 1.5rem; border:1px solid rgba(212,185,122,0.3); border-radius:14px; background:rgba(212,185,122,0.05); }
+      .cta-inline-kicker { margin:0; font-size:0.72rem; letter-spacing:0.16em; text-transform:uppercase; color:var(--brass); }
+      .cta-inline-body { margin:0.6rem 0 1.1rem; color:var(--muted); font-size:0.95rem; line-height:1.6; }
+      .cta-bar { position:fixed; left:0; right:0; bottom:0; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:0.85rem; padding:0.7rem 1rem calc(0.7rem + env(safe-area-inset-bottom)); background:rgba(6,10,15,0.94); backdrop-filter:blur(14px); border-top:1px solid rgba(212,185,122,0.25); overflow:hidden; }
+      .cta-bar .cta-btn { flex:none; padding:0.7rem 1rem; font-size:0.82rem; }
+      .cta-bar-copy { min-width:0; }
+      .cta-bar-title { margin:0; color:var(--text); font-size:0.85rem; font-weight:600; }
+      .cta-bar-sub { margin:1px 0 0; color:var(--muted); font-size:0.7rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      body { padding-bottom:4.5rem; }
+"""
+
+
+# Bare URLs in article bodies rendered as dead text. Linkify http(s):// and
+# bare `jobcarver.co/...` runs *after* escaping, so the pattern only ever
+# sees entity-safe text and cannot be used to inject an attribute.
+_URL_RE = re.compile(
+    r"(?<![\w@/])((?:https?://|www\.)[^\s<>\"']+|jobcarver\.co(?:/[^\s<>\"']*)?)"
+)
+_URL_TRAILING = ".,;:!?)]}"
+
+
+def _linkify(escaped: str) -> str:
+    """Turn bare URLs in already-HTML-escaped text into anchors."""
+
+    def repl(match: re.Match[str]) -> str:
+        raw = match.group(1)
+        trailing = ""
+        while raw and raw[-1] in _URL_TRAILING:
+            trailing = raw[-1] + trailing
+            raw = raw[:-1]
+        if not raw:
+            return match.group(0)
+        # `&amp;` etc. survive escaping — unescape only to build the href.
+        href = html.unescape(raw)
+        if href.startswith("www."):
+            href = f"https://{href}"
+        elif href.startswith("jobcarver.co"):
+            href = f"https://{href}"
+        return f'<a href="{html.escape(href, quote=True)}" rel="noopener">{raw}</a>{trailing}'
+
+    return _URL_RE.sub(repl, escaped)
+
+
 def _pick_related(current: Article, candidates: list[Article], k: int = 4) -> list[Article]:
     """Pick up to `k` related articles for internal linking.
 
@@ -386,22 +481,38 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
     keywords_html = _esc(", ".join(keywords_raw))
 
     body_parts: list[str] = []
+    seen_h2 = False
+    cta_placed = False
     for block in article.get("body") or []:
         if not isinstance(block, dict):
             continue
         btype = block.get("type")
         if btype == "h2" and block.get("text"):
+            # One inline CTA, dropped just before the *second* H2 — i.e. at
+            # the end of the first section, where the reader has taken the
+            # point and is deciding whether to keep going.
+            if seen_h2 and not cta_placed:
+                body_parts.append(_render_inline_cta())
+                cta_placed = True
+            seen_h2 = True
             body_parts.append(f"<h2>{_esc(block['text'])}</h2>")
         elif btype == "p" and block.get("text"):
-            body_parts.append(f"<p>{_esc(block['text'])}</p>")
+            body_parts.append(f"<p>{_linkify(_esc(block['text']))}</p>")
         elif btype == "ul" and isinstance(block.get("items"), list):
             items = "".join(
-                f"<li>{_esc(item)}</li>" for item in block["items"] if isinstance(item, str)
+                f"<li>{_linkify(_esc(item))}</li>"
+                for item in block["items"]
+                if isinstance(item, str)
             )
             if items:
                 body_parts.append(f"<ul>{items}</ul>")
+    # Short article with only one H2 (or none): put the CTA at the end of
+    # the body rather than dropping it.
+    if not cta_placed:
+        body_parts.append(_render_inline_cta())
     body_html = "\n          ".join(body_parts)
     related_html = _render_related_section(related or [])
+    sticky_cta = _render_sticky_cta()
     mixpanel_snippet = _mixpanel_browser_snippet(f"article:{slug}")
 
     json_ld = {
@@ -437,14 +548,17 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
     <meta property="og:title" content="{title_html}" />
     <meta property="og:description" content="{description_html}" />
     <meta property="og:url" content="{_esc(canonical)}" />
-    <meta property="og:image" content="{_esc(origin)}/og-image.svg" />
+    <meta property="og:image" content="{_esc(origin)}/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="en_GB" />
     <meta property="article:published_time" content="{date_html}" />
     <meta property="article:modified_time" content="{date_modified_html}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{title_html}" />
     <meta name="twitter:description" content="{description_html}" />
-    <meta name="twitter:image" content="{_esc(origin)}/og-image.svg" />
+    <meta name="twitter:image" content="{_esc(origin)}/og-image.png" />
     <script type="application/ld+json">{json_ld_safe}</script>
 {mixpanel_snippet}    <style>
       :root {{ --bg:#05080c; --text:#e8e6e1; --muted:#8a8378; --brass:#d4b97a; --border:rgba(255,255,255,0.06); }}
@@ -475,7 +589,7 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
       .foot {{ margin-top:2rem; padding-top:1.5rem; border-top:1px solid var(--border); }}
       .back {{ color:var(--muted); font-size:0.85rem; text-decoration:none; border-bottom:1px dashed rgba(255,255,255,0.18); }}
       .back:hover {{ color: var(--text); }}
-    </style>
+{_CTA_CSS}    </style>
   </head>
   <body>
     <nav class="nav" aria-label="Primary">
@@ -502,6 +616,7 @@ def _render_article_html(article: dict, related: list[Article] | None = None) ->
         </footer>
       </article>
     </main>
+{sticky_cta}
   </body>
 </html>
 """
@@ -571,6 +686,7 @@ def _render_articles_list_html(rows: list[Article]) -> str:
         },
     }
     json_ld_safe = json.dumps(json_ld, ensure_ascii=True).replace("</", "<\\/")
+    sticky_cta = _render_sticky_cta()
     mixpanel_snippet = _mixpanel_browser_snippet("articles")
 
     return f"""<!doctype html>
@@ -591,12 +707,15 @@ def _render_articles_list_html(rows: list[Article]) -> str:
     <meta property="og:title" content="{title_html}" />
     <meta property="og:description" content="{description_html}" />
     <meta property="og:url" content="{_esc(canonical)}" />
-    <meta property="og:image" content="{_esc(origin)}/og-image.svg" />
+    <meta property="og:image" content="{_esc(origin)}/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="en_GB" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{title_html}" />
     <meta name="twitter:description" content="{description_html}" />
-    <meta name="twitter:image" content="{_esc(origin)}/og-image.svg" />
+    <meta name="twitter:image" content="{_esc(origin)}/og-image.png" />
     <script type="application/ld+json">{json_ld_safe}</script>
 {mixpanel_snippet}    <style>
       :root {{ --bg:#05080c; --text:#e8e6e1; --muted:#8a8378; --brass:#d4b97a; --border:rgba(255,255,255,0.06); }}
@@ -620,7 +739,7 @@ def _render_articles_list_html(rows: list[Article]) -> str:
       .card .desc {{ margin:0.6rem 0 0.9rem; color:var(--muted); font-size:0.95rem; line-height:1.55; }}
       .cta {{ font-size:12.5px; color: var(--brass); letter-spacing:0.02em; }}
       .empty {{ color: var(--muted); font-size:1rem; }}
-    </style>
+{_CTA_CSS}    </style>
   </head>
   <body>
     <nav class="nav" aria-label="Primary">
@@ -636,6 +755,7 @@ def _render_articles_list_html(rows: list[Article]) -> str:
       <p class="lede">Short guides on landing berths, staying match-ready between seasons, and how Carver's WhatsApp bot actually works.</p>
       {body_block}
     </main>
+{sticky_cta}
   </body>
 </html>
 """

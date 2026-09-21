@@ -7,11 +7,12 @@
    * injected for rich results in search.
    */
   import { trackEvent } from '../../config/analytics'
+  import { FREE_MATCH_RUNS } from '../../config/site'
 
   const faqs = [
     {
       q: 'How much does it cost?',
-      a: 'Starting is free — your first 2 match runs are on us, no card needed. After that you buy tokens: one token runs one full matching session and costs between R9 and R13 depending on pack size. There is no subscription and tokens never expire.',
+      a: `Starting is free — your first ${FREE_MATCH_RUNS} match runs are on us, no card needed. After that you buy tokens: one token runs one full matching session and costs between R9 and R13 depending on pack size. There is no subscription and tokens never expire.`,
     },
     {
       q: 'What exactly does one token buy?',

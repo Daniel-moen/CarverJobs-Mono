@@ -16,6 +16,7 @@
    * (the parent uses an IntersectionObserver to set this).
    */
   import { onDestroy, onMount } from 'svelte'
+  import { LIVE_JOBS_BLURB } from '../../config/site'
 
   /** @type {{ paused?: boolean }} */
   let { paused = false } = $props()
@@ -33,7 +34,7 @@
   const script = [
     { role: 'me',  text: 'match',                                         time: '09:14', afterMs: 700 },
     { role: 'bot', thinkMs: 850, time: '09:14', afterMs: 600,
-      text: '💳 *1 token used* — *2 tokens* left.\n⏳ Scanning *312 positions* (~25s) — hang tight!' },
+      text: `💳 *1 token used* — *4 tokens* left.\n⏳ Scanning *${LIVE_JOBS_BLURB}* (~25s) — hang tight!` },
     { role: 'bot', thinkMs: 1400, time: '09:14', afterMs: 1100,
       text:
         '🎯 *Found 3 matches!*\n\n' +
@@ -41,9 +42,9 @@
         '2. *M/Y Astra* — Palma    (88%)\n' +
         '3. *S/Y Hera*  — Genoa    (81%)\n\n' +
         'View all & draft applications:\n' +
-        '👉 carver.app/m/8a3f\n' +
+        '👉 jobcarver.co/m/8a3f\n' +
         '_Link expires in 30 min._\n\n' +
-        'Tokens remaining: *2*' },
+        'Tokens remaining: *4*' },
     { role: 'me',  text: 'submit job',                                    time: '09:16', afterMs: 700 },
     { role: 'bot', thinkMs: 700, time: '09:16', afterMs: 1300,
       text:
@@ -58,10 +59,10 @@
         '🧑‍✈️ Role: Bosun\n' +
         '📍 Location: Antibes\n\n' +
         'You earned *1 token* for sharing this job.\n' +
-        'Current balance: *3 tokens*.' },
+        'Current balance: *5 tokens*.' },
     { role: 'me',  text: 'balance',                                       time: '09:18', afterMs: 600 },
     { role: 'bot', thinkMs: 600,  time: '09:18', afterMs: 6000,
-      text: '💳 *Your balance: 3 tokens.*\nEach *Find Matches* run uses 1 token.' },
+      text: '💳 *Your balance: 5 tokens.*\nEach *Find Matches* run uses 1 token.' },
   ]
 
   /** Convert WhatsApp-flavoured plain text into safe display HTML.

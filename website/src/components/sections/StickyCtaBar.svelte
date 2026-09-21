@@ -8,8 +8,8 @@
    * a full-width bar out-converts a corner bubble on touch.
    */
   import { onMount } from 'svelte'
-  import { trackEvent } from '../../config/analytics'
-  import { whatsapp } from '../../config/site'
+  import { trackOutboundClick } from '../../config/analytics'
+  import { FREE_MATCH_RUNS, WA_TAGS, waMessage, whatsapp } from '../../config/site'
 
   /** @type {{ showAfter?: number, source?: string }} */
   let { showAfter = 420, source = 'mobile' } = $props()
@@ -29,15 +29,15 @@
 {#if visible}
   <div class="bar" role="complementary" aria-label="Start free on WhatsApp">
     <div class="bar-copy">
-      <p class="bar-title">5 free match runs</p>
+      <p class="bar-title">{FREE_MATCH_RUNS} free match runs</p>
       <p class="bar-sub">No card · no signup · just WhatsApp</p>
     </div>
     <a
-      href={whatsapp.link("Hi Carver — I'd like to start matching to yacht roles.")}
+      href={whatsapp.link(waMessage(WA_TAGS.sticky))}
       target="_blank"
       rel="noopener noreferrer"
       class="cta-wa cta-shine bar-cta"
-      onclick={() => trackEvent('sticky_bar_whatsapp', { page: source })}
+      onclick={() => trackOutboundClick('sticky_bar_whatsapp', { page: source })}
     >
       <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.3.7 4.5 1.8 6.4L4 29l7.8-1.8A12 12 0 0 0 16 27c6.6 0 12-5.4 12-12S22.6 3 16 3Z"/></svg>
       Start free

@@ -4,7 +4,8 @@
    * the public /pricing page.
    *
    * Persuasion architecture:
-   *  - "Free to start" is restated up top so price never reads as a gate.
+   *  - "Free to start" is restated up top so price never reads as a gate
+   *    (the count comes from FREE_MATCH_RUNS — never hand-typed).
    *  - Packs come from the same DEFAULT_TOKEN_PACKAGES the checkout uses,
    *    with strikethrough anchors + "Save RX" from packSavings() — display
    *    math only, prices unchanged.
@@ -15,8 +16,8 @@
    *    (in-chat Yoco link, shipped Jul 2026).
    */
   import { onMount } from 'svelte'
-  import { trackEvent } from '../../config/analytics'
-  import { whatsapp } from '../../config/site'
+  import { trackOutboundClick } from '../../config/analytics'
+  import { FREE_MATCH_RUNS, WA_TAGS, waMessage, whatsapp } from '../../config/site'
   import {
     DEFAULT_FIRST_PURCHASE_BONUS,
     defaultTokenPackages,
@@ -79,7 +80,7 @@
         Pay per <span class="serif-accent">match</span>, not per month.
       </h2>
       <p class="packs-lede">
-        Your first two match runs are free. After that, one token buys one full run —
+        Your first {FREE_MATCH_RUNS} match runs are free. After that, one token buys one full run —
         every live role scanned, ranked against your profile, application emails drafted.
         <strong>No subscription. Tokens never expire.</strong>
       </p>
@@ -122,7 +123,7 @@
             href="/signup"
             class="pack-cta {hot ? 'cta-brass cta-shine' : ''}"
             class:pack-cta-quiet={!hot}
-            onclick={() => trackEvent('pack_cta_click', { page: source, value: String(pkg.tokens) })}
+            onclick={() => trackOutboundClick('pack_cta_click', { page: source, value: String(pkg.tokens) })}
           >
             Get {pkg.tokens} tokens
           </a>
@@ -134,11 +135,11 @@
       <p>
         Already chatting with Carver? Just text
         <a
-          href={whatsapp.link('buy tokens')}
+          href={whatsapp.link(waMessage(WA_TAGS.pricing, 'buy tokens'))}
           target="_blank"
           rel="noopener noreferrer"
           class="packs-wa-cmd"
-          onclick={() => trackEvent('pricing_wa_buy_tokens', { page: source })}
+          onclick={() => trackOutboundClick('pricing_wa_buy_tokens', { page: source })}
         >buy tokens</a>
         in WhatsApp — pick a pack and pay right in the chat.
       </p>

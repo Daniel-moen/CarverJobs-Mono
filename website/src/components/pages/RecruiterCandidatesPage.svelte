@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { API_BASE_URL, apiFetch } from '../../config/api'
+  import { trackEvent } from '../../config/analytics'
 
   let { onNavigate = () => {} } = $props()
 
@@ -62,9 +63,11 @@
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        trackEvent('recruiter_unlock', { label: 'failed', value: String(res.status) })
         errorMessage = data.detail || 'Could not unlock this candidate.'
         return
       }
+      trackEvent('recruiter_unlock', { label: 'success', value: String(unlockCost) })
       balance = data.balance ?? balance
       candidates = candidates.map((c) =>
         c.profile_slug === slug

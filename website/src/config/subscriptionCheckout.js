@@ -1,4 +1,5 @@
 import { API_BASE_URL, apiFetch } from './api'
+import { trackEvent, trackOutboundClick } from './analytics'
 
 export const DEFAULT_TOKEN_PRICE = '11.00'
 export const DEFAULT_TOKEN_PACKAGES = [
@@ -32,11 +33,22 @@ export function formatTokenPrice(amountStr) {
   return `R${Number.isInteger(n) ? n : n.toFixed(2)}`
 }
 
+/**
+ * Read (and consume) the `?status=` Yoco drops on the return URL.
+ *
+ * Instrumented here rather than in each page so every surface that handles
+ * a checkout return — /subscription and the WhatsApp top-up page — reports
+ * the same events.
+ */
 export function readCheckoutReturnStatus() {
   const params = new URLSearchParams(window.location.search)
   const status = params.get('status')
   if (status !== 'success' && status !== 'cancelled' && status !== 'failed') return ''
   window.history.replaceState({}, '', window.location.pathname)
+  trackEvent(status === 'success' ? 'checkout_success' : 'checkout_abandoned', {
+    label: status,
+    page: window.location.pathname,
+  })
   return status
 }
 
@@ -50,6 +62,9 @@ export async function loadSubscriptionStatus() {
 }
 
 export async function startSubscriptionCheckout(tokens) {
+  // Flushed immediately: the caller hands the browser to Yoco as soon as
+  // this resolves, so a queued event would never reach the server.
+  trackOutboundClick('checkout_start', { value: String(tokens), page: window.location.pathname })
   const response = await apiFetch(`${API_BASE_URL}/subscription/checkout`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
