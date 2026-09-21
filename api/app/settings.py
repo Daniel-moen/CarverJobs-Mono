@@ -106,7 +106,7 @@ class Settings:
   MIXPANEL_API_HOST = os.getenv("MIXPANEL_API_HOST", "https://api-eu.mixpanel.com").strip().rstrip("/")
   MIXPANEL_SESSION_RECORD_PERCENT = int(os.getenv(
       "MIXPANEL_SESSION_RECORD_PERCENT",
-      os.getenv("VITE_MIXPANEL_SESSION_RECORD_PERCENT", "100"),
+      os.getenv("VITE_MIXPANEL_SESSION_RECORD_PERCENT", "10"),
   ))
   MIXPANEL_LLM_CAPTURE_CONTENT = os.getenv("MIXPANEL_LLM_CAPTURE_CONTENT", "false").lower() == "true"
 
@@ -176,6 +176,10 @@ class Settings:
   JOB_ALERT_MIN_INTERVAL_HOURS: int = int(os.getenv("JOB_ALERT_MIN_INTERVAL_HOURS", "72"))
   # How often the alert loop scans for new matching jobs.
   JOB_ALERT_CHECK_INTERVAL_HOURS: int = int(os.getenv("JOB_ALERT_CHECK_INTERVAL_HOURS", "24"))
+  # Hard cap on alerts sent per sweep. Template sends are paid and count against
+  # Meta's messaging limits, so the first sweeps after a template is approved
+  # should be staged by lowering this rather than by disabling the loop.
+  JOB_ALERT_MAX_PER_RUN: int = int(os.getenv("JOB_ALERT_MAX_PER_RUN", "50"))
 
   # Match-quality feedback loop (👍/👎 pulse + "did you apply?" follow-up).
   # Seconds after match results land before the 👍/👎 pulse is sent.
@@ -248,6 +252,15 @@ class Settings:
       {"tokens": 50, "price": "600.00", "label": "Plus"},
       {"tokens": 75, "price": "675.00", "label": "Premium", "badge": "Best Value", "highlight": True},
   ]
+
+  # Payment reconcile sweep — asks Yoco directly about checkouts we never got a
+  # webhook for, so a dropped/rejected webhook can't leave a buyer uncredited.
+  # No-ops without YOCO_SECRET_KEY, so it is safe to leave on everywhere.
+  PAYMENT_RECONCILE_ENABLED: bool = os.getenv("PAYMENT_RECONCILE_ENABLED", "true").lower() == "true"
+  # Minutes between sweeps.
+  PAYMENT_RECONCILE_INTERVAL_MINUTES: int = int(os.getenv("PAYMENT_RECONCILE_INTERVAL_MINUTES", "30"))
+  # Oldest uncredited checkout still worth asking Yoco about.
+  PAYMENT_RECONCILE_MAX_AGE_HOURS: int = int(os.getenv("PAYMENT_RECONCILE_MAX_AGE_HOURS", "48"))
 
   # Bonus tokens credited on a user's very first completed purchase (any pack).
   # Bonus framing converts better than discounting and keeps pack prices intact.

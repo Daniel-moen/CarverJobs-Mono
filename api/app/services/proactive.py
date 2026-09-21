@@ -12,6 +12,9 @@ re-tuned) in three places:
 * **The quiet gap.** Whatever the loops individually think is due, a user should
   not receive two unprompted messages within a few hours. Each loop stamps its
   own column; the gap is enforced against the most recent stamp of any of them.
+* **Opt-out.** A user who replied STOP must never be messaged first again. This
+  is a Meta policy requirement, not a preference — one un-honoured opt-out can
+  cost the number its messaging quality rating. Every loop checks it.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -26,6 +29,15 @@ def as_aware(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def is_opted_out(ws) -> bool:
+    """True when this user replied STOP and has not replied START since.
+
+    A hard gate for every bot-initiated send. It says nothing about replying to
+    messages the user sends us — those are always answered.
+    """
+    return bool(getattr(ws, "opted_out", False))
 
 
 def in_service_window(ws, now: datetime) -> bool:

@@ -32,7 +32,7 @@ from app import flags
 from app.analytics import record_server_event
 from app.logger import get_logger
 from app.models import MatchSession, WhatsAppSession
-from app.services.proactive import SERVICE_WINDOW_HOURS, as_aware, recently_pinged
+from app.services.proactive import SERVICE_WINDOW_HOURS, as_aware, is_opted_out, recently_pinged
 from app.settings import settings
 
 log = get_logger("carver.window_winback")
@@ -115,6 +115,7 @@ async def run_window_winbacks_once() -> dict[str, int]:
     stats = {
         "checked": 0, "sent": 0, "sent_early": 0, "sent_last_chance": 0,
         "too_early": 0, "window_closed": 0, "already_nudged": 0, "has_match_run": 0,
+        "opted_out": 0,
     }
     if not _wa_configured():
         return stats
@@ -138,6 +139,10 @@ async def run_window_winbacks_once() -> dict[str, int]:
                 log.warning("Window win-backs: per-run cap (%d) reached", _MAX_SENDS_PER_RUN)
                 break
             stats["checked"] += 1
+
+            if is_opted_out(ws):
+                stats["opted_out"] += 1
+                continue
 
             last_active = as_aware(ws.last_active_at)
             if last_active is None:

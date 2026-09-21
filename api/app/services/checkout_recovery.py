@@ -4,7 +4,7 @@ Abandoned-checkout recovery — the "you left money on the table" loop.
 `payments.create_checkout` writes a `pending` Subscription row and drops a Yoco
 payment link in the WhatsApp chat, but nothing ever followed up when the buyer
 didn't pay. This sweep closes that gap: every ~15 minutes it finds pending
-WhatsApp checkouts that are 45 minutes to 24 hours old and sends ONE free-text
+WhatsApp checkouts that are 15 minutes to 24 hours old and sends ONE free-text
 nudge with the original payment link (or a *buy tokens* prompt when the link
 is unknown).
 
@@ -26,13 +26,17 @@ from app.analytics import record_server_event
 from app.logger import get_logger
 from app.models import Subscription, WhatsAppSession
 from app.services import payments
+from app.services.proactive import is_opted_out
 from app.settings import settings
 
 log = get_logger("carver.checkout_recovery")
 
 CHECK_INTERVAL_SECONDS = 15 * 60
-# A pending checkout is considered abandoned once it's this old…
-REMIND_AFTER_MINUTES = 45
+# A pending checkout is considered abandoned once it's this old. Kept short on
+# purpose: buy-intent decays in minutes, and the commonest failure is the link
+# dying in WhatsApp's webview mid-payment — the sooner we hand back a working
+# one, the more of those we recover.
+REMIND_AFTER_MINUTES = 15
 # …and unreachable free-text once past the WhatsApp 24h service window.
 MAX_AGE_HOURS = 24
 # Safety cap per sweep while Meta messaging limits are still low.
@@ -59,6 +63,20 @@ def _is_whatsapp_checkout(db: Session, sub: Subscription) -> bool:
         .filter(WhatsAppSession.phone_number == sub.user_key)
         .first()
     ) is not None
+
+
+def _buyer_opted_out(db: Session, sub: Subscription) -> bool:
+    """The reminder is a bot-initiated send, so a STOP silences it too.
+
+    Unlike the other loops this one iterates Subscription rows, not sessions,
+    so the flag has to be looked up per buyer.
+    """
+    ws = (
+        db.query(WhatsAppSession)
+        .filter(WhatsAppSession.phone_number == sub.user_key)
+        .first()
+    )
+    return ws is not None and is_opted_out(ws)
 
 
 def _reminder_body(sub: Subscription) -> str:
@@ -111,6 +129,9 @@ async def run_checkout_recovery_once(db: Session | None = None) -> dict[str, int
                 stats["skipped"] += 1
                 continue
             if not _is_whatsapp_checkout(db, sub):
+                stats["skipped"] += 1
+                continue
+            if _buyer_opted_out(db, sub):
                 stats["skipped"] += 1
                 continue
             if stats["sent"] >= _MAX_REMINDERS_PER_RUN:

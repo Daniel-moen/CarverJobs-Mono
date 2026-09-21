@@ -210,6 +210,14 @@ class WhatsAppSession(Base):
   # 24h service window closes, for users with no match run to follow up on).
   # Compared against last_active_at, so it re-arms whenever the user replies.
   last_winback_at = Column(DateTime(timezone=True), nullable=True)
+  # Meta compliance: the user replied STOP / UNSUBSCRIBE. Every bot-initiated
+  # ("proactive") loop must skip them; replies to their own messages continue.
+  # Cleared when they reply START.
+  opted_out = Column(Boolean, nullable=False, default=False)
+  opted_out_at = Column(DateTime(timezone=True), nullable=True)
+  # Where this user came from — parsed from the "· <tag>" suffix the website's
+  # wa.me CTAs append to the prefill text (e.g. "m-hero", "sticky", "pricing").
+  acquisition_source = Column(String(40), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),

@@ -29,6 +29,16 @@ _package_amount = payments.package_amount
 _package_for_amount = payments.package_for_amount
 _is_first_purchase = payments.is_first_purchase
 
+# How far a webhook timestamp may drift from our clock before we reject it as a
+# replay. Yoco retries deliveries and our clock is not theirs — 180s was tight
+# enough that legitimate retries were being thrown away (and the payment lost).
+WEBHOOK_MAX_SKEW_SECONDS = 300
+
+# Checkout rows that have been paid for but not yet credited. "superseded" is a
+# checkout the buyer abandoned in favour of a newer one and then paid anyway
+# (see services/payments.create_checkout) — it credits exactly like "pending".
+CREDITABLE_STATUSES = ("pending", "superseded")
+
 
 def _verify_yoco_webhook_signature(
     raw_body: bytes,
@@ -44,7 +54,7 @@ def _verify_yoco_webhook_signature(
         ts = int(webhook_timestamp)
     except (TypeError, ValueError):
         return False
-    if abs(int(time.time()) - ts) > 180:
+    if abs(int(time.time()) - ts) > WEBHOOK_MAX_SKEW_SECONDS:
         return False
     if not secret.startswith("whsec_"):
         return False
@@ -123,6 +133,122 @@ async def _notify_whatsapp_payment_failed(user_key: str) -> None:
         log.exception("WhatsApp payment-failed notice failed | user=%s", user_key)
 
 
+async def credit_successful_payment(
+    db: Session,
+    sub: models.Subscription,
+    *,
+    tokens_hint: int | None = None,
+    payment_id: str | None = None,
+    source: str = "webhook",
+    from_whatsapp: bool | None = None,
+) -> dict:
+    """Credit a paid checkout exactly once, tokens + first-purchase bonus.
+
+    The single crediting path: the Yoco webhook calls it on payment.succeeded,
+    and the reconcile sweep (services/payment_reconcile.py) calls it for
+    payments whose webhook never arrived. Idempotent — a row already marked
+    "completed" is a no-op, so a webhook racing the sweep cannot double-credit.
+    """
+    if sub.status == "completed":
+        log.info(
+            "Payment already credited — ignoring | user=%s | ref=%s | source=%s",
+            sub.user_key, sub.m_payment_id, source,
+        )
+        return {"credited": False, "duplicate": True, "tokens": 0, "bonus": 0}
+
+    if from_whatsapp is None:
+        from_whatsapp = sub.channel == "whatsapp" or _is_whatsapp_user(db, sub.user_key)
+
+    first_purchase = _is_first_purchase(db, sub.user_key, exclude_payment_id=sub.m_payment_id)
+
+    sub.status = "completed"
+    if payment_id:
+        sub.payment_token = str(payment_id)
+    db.commit()
+
+    tokens_credited = 0
+    if tokens_hint and int(tokens_hint) > 0:
+        tokens_credited = int(tokens_hint)
+        add_credits(db, sub.user_key, tokens_credited)
+        log.info("Tokens credited | user=%s | tokens=%d | source=%s", sub.user_key, tokens_credited, source)
+    else:
+        fallback_pkg = _package_for_amount(_amount_str_to_cents(sub.amount))
+        if fallback_pkg is not None:
+            tokens_credited = int(fallback_pkg["tokens"])
+            add_credits(db, sub.user_key, tokens_credited)
+            log.info(
+                "Tokens credited (from amount) | user=%s | tokens=%d | source=%s",
+                sub.user_key, tokens_credited, source,
+            )
+        else:
+            log.warning(
+                "Could not resolve token count for completed payment | user=%s | amount=%s",
+                sub.user_key, sub.amount,
+            )
+
+    bonus_credited = 0
+    bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
+    bonus_eligible = tokens_credited >= settings.FIRST_PURCHASE_BONUS_MIN_TOKENS
+    if first_purchase and bonus > 0 and bonus_eligible:
+        bonus_credited = bonus
+        add_credits(db, sub.user_key, bonus)
+        log.info("First-purchase bonus credited | user=%s | bonus=%d", sub.user_key, bonus)
+
+    log.info("Token purchase completed | user=%s | source=%s", sub.user_key, source)
+    record_server_event(sub.user_key, "purchase_completed", str(sub.amount))
+
+    if from_whatsapp and tokens_credited > 0:
+        await _notify_whatsapp_purchase(
+            sub.user_key,
+            tokens_credited + bonus_credited,
+            bonus_credited,
+            get_credit_balance(db, sub.user_key),
+        )
+
+    return {
+        "credited": True,
+        "duplicate": False,
+        "tokens": tokens_credited,
+        "bonus": bonus_credited,
+    }
+
+
+def _reconcile_orphan_checkout(db: Session, meta: dict, payload: dict) -> models.Subscription | None:
+    """Last-resort row for a succeeded payment we have no checkout row for.
+
+    The reference is signed by Yoco, so when the metadata still carries
+    `user_key` + `tokens` we know exactly who paid for what — refusing to credit
+    them just means a charged user with nothing to show for it. Build the row
+    the checkout should have written and let the normal path credit it.
+    """
+    user_key = str(meta.get("user_key") or "").strip()
+    try:
+        tokens = int(meta.get("tokens") or 0)
+    except (TypeError, ValueError):
+        tokens = 0
+    if not user_key or tokens <= 0:
+        return None
+
+    amount_cents = payload.get("amount")
+    try:
+        amount = f"{int(amount_cents) / 100:.2f}"
+    except (TypeError, ValueError):
+        pkg = payments.find_package(tokens)
+        amount = pkg["price"] if pkg else "0.00"
+
+    sub = models.Subscription(
+        user_key=user_key,
+        m_payment_id=str(meta.get("m_payment_id")),
+        status="pending",
+        amount=amount,
+        frequency=0,
+        channel=str(meta.get("channel") or "") or None,
+    )
+    db.add(sub)
+    db.commit()
+    return sub
+
+
 @router.post("/webhook")
 async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
     """Yoco payment webhooks — verify signature, then credit tokens."""
@@ -154,74 +280,72 @@ async def yoco_webhook(request: Request, db: Session = Depends(get_db)):
 
     sub = db.query(models.Subscription).filter(models.Subscription.m_payment_id == str(m_payment_id)).first()
     if not sub:
-        log.warning("Yoco webhook unknown m_payment_id=%s", m_payment_id)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+        if event_type != "payment.succeeded":
+            log.warning("Yoco webhook unknown m_payment_id=%s", m_payment_id)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+        # Money has changed hands and we have no record of the checkout. Never
+        # drop it on the floor — rebuild the row from the signed metadata.
+        sub = _reconcile_orphan_checkout(db, meta, payload)
+        if sub is None:
+            log.error(
+                "PAYMENT_RECONCILE unresolvable | ref=%s | metadata=%s — payment succeeded "
+                "with no checkout row and no user_key/tokens in metadata",
+                m_payment_id, meta,
+            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+        log.error(
+            "PAYMENT_RECONCILE orphan credited | ref=%s | user=%s | tokens=%s | amount=%s — "
+            "no checkout row existed; crediting from webhook metadata",
+            m_payment_id, sub.user_key, meta.get("tokens"), sub.amount,
+        )
 
     from_whatsapp = meta.get("channel") == "whatsapp" or _is_whatsapp_user(db, sub.user_key)
 
     if event_type == "payment.succeeded":
-        if sub.status == "completed":
-            # Yoco delivers webhooks at-least-once, so the same payment.succeeded
-            # can arrive more than once. Tokens were already credited on the
-            # first delivery — ignore duplicates to avoid double-crediting.
-            log.info("Yoco webhook duplicate succeeded ignored | user=%s | ref=%s", sub.user_key, m_payment_id)
-            return {"ok": True}
+        # Yoco delivers webhooks at-least-once and the reconcile sweep may have
+        # got there first; credit_successful_payment() no-ops on "completed".
+        tokens_hint = meta.get("tokens")
+
         amount_cents = payload.get("amount")
         if amount_cents is not None:
             expected = _amount_str_to_cents(sub.amount)
             try:
-                if int(amount_cents) != expected:
+                mismatch = int(amount_cents) != expected
+            except (TypeError, ValueError):
+                mismatch = True
+            if mismatch:
+                # A mismatch used to be terminal, which silently ate the payment.
+                # The metadata is signed by Yoco, so when it names the buyer and
+                # the pack we credit anyway and shout about it in the logs.
+                if str(meta.get("user_key") or "").strip() and tokens_hint:
+                    log.error(
+                        "PAYMENT_RECONCILE amount mismatch credited | ref=%s | user=%s | "
+                        "expected=%s | got=%s | tokens=%s",
+                        m_payment_id, sub.user_key, expected, amount_cents, tokens_hint,
+                    )
+                else:
                     log.warning("Yoco webhook amount mismatch | expected=%s | got=%s", expected, amount_cents)
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount mismatch")
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount mismatch")
 
-        first_purchase = _is_first_purchase(db, sub.user_key, exclude_payment_id=sub.m_payment_id)
-
-        sub.status = "completed"
-        if payload.get("id"):
-            sub.payment_token = str(payload["id"])
-        db.commit()
-
-        tokens_credited = 0
-        tokens_to_add = meta.get("tokens")
-        if tokens_to_add and int(tokens_to_add) > 0:
-            tokens_credited = int(tokens_to_add)
-            add_credits(db, sub.user_key, tokens_credited)
-            log.info("Tokens credited | user=%s | tokens=%d", sub.user_key, tokens_credited)
-        else:
-            fallback_pkg = _package_for_amount(_amount_str_to_cents(sub.amount))
-            if fallback_pkg is not None:
-                tokens_credited = int(fallback_pkg["tokens"])
-                add_credits(db, sub.user_key, tokens_credited)
-                log.info("Tokens credited (from amount) | user=%s | tokens=%d", sub.user_key, tokens_credited)
-            else:
-                log.warning("Could not resolve token count for completed payment | user=%s | amount=%s", sub.user_key, sub.amount)
-
-        bonus_credited = 0
-        bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
-        bonus_eligible = tokens_credited >= settings.FIRST_PURCHASE_BONUS_MIN_TOKENS
-        if first_purchase and bonus > 0 and bonus_eligible:
-            bonus_credited = bonus
-            add_credits(db, sub.user_key, bonus)
-            log.info("First-purchase bonus credited | user=%s | bonus=%d", sub.user_key, bonus)
-
-        log.info("Token purchase completed | user=%s", sub.user_key)
-        record_server_event(sub.user_key, "purchase_completed", str(sub.amount))
-
-        if from_whatsapp and tokens_credited > 0:
-            await _notify_whatsapp_purchase(
-                sub.user_key,
-                tokens_credited + bonus_credited,
-                bonus_credited,
-                get_credit_balance(db, sub.user_key),
-            )
+        await credit_successful_payment(
+            db, sub,
+            tokens_hint=int(tokens_hint) if tokens_hint else None,
+            payment_id=payload.get("id"),
+            source="webhook",
+            from_whatsapp=from_whatsapp,
+        )
     elif event_type == "payment.failed":
-        sub.status = "failed"
-        log.warning("Token purchase payment failed | user=%s", sub.user_key)
-        db.commit()
-        if from_whatsapp:
-            await _notify_whatsapp_payment_failed(sub.user_key)
+        # Only a checkout still awaiting payment can fail — never walk back a
+        # completed one (a stale failure for a superseded attempt is common).
+        if sub.status in CREDITABLE_STATUSES:
+            sub.status = "failed"
+            log.warning("Token purchase payment failed | user=%s", sub.user_key)
+            db.commit()
+            if from_whatsapp:
+                await _notify_whatsapp_payment_failed(sub.user_key)
+        else:
+            log.info("Yoco webhook failure for non-pending checkout ignored | ref=%s | status=%s",
+                     m_payment_id, sub.status)
     else:
         log.info("Yoco webhook ignored event type | type=%s", event_type)
 

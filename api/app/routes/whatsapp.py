@@ -66,7 +66,16 @@ _http = httpx.AsyncClient(timeout=_HTTP_TIMEOUT, limits=_HTTP_LIMITS)
 _SEEN_MSG_IDS: set[str] = set()
 _SEEN_MSG_IDS_ORDER: list[str] = []
 _SEEN_MSG_MAX = 500
-_STALE_MSG_SECONDS = 300  # ignore messages older than 5 minutes
+_STALE_MSG_SECONDS = 300  # don't *process* messages older than 5 minutes
+# …but never drop one in silence: the user gets one "I was offline" nudge so
+# they know to resend, rather than staring at a message the bot never answered.
+_STALE_NOTICE = "I was offline for a bit — say that again?"
+_STALE_NOTICE_COOLDOWN_SECONDS = 600
+_STALE_NOTICE_MAX_TRACKED = 500
+_STALE_NOTICE_SENT_AT: dict[str, float] = {}
+# Sent when processing blows up (usually a failed LLM call) — anything is
+# better than the user's message vanishing without a reply.
+_GLITCH_REPLY = "Hmm, I glitched — say that again?"
 _ACTIVE_MATCH_RUNS: set[str] = set()
 _ACTIVE_MATCH_RUNS_LOCK = threading.Lock()
 _MATCH_SCOPE_ALL = "all"
@@ -106,8 +115,8 @@ def _parse_meta_timestamp(timestamp_str: str | None) -> int | None:
     return None
 
 
-def _is_duplicate_or_stale(msg_id: str, timestamp_str: str | None) -> bool:
-    """Return True (and skip processing) if the message was already handled or is too old."""
+def _inbound_skip_reason(msg_id: str, timestamp_str: str | None) -> str | None:
+    """"stale" | "duplicate" when the message must not be processed, else None."""
     # Only stale-drop messages when the timestamp clearly maps to a real Unix
     # epoch. If Meta sends an unexpected format, process it normally.
     msg_ts = _parse_meta_timestamp(timestamp_str)
@@ -115,12 +124,12 @@ def _is_duplicate_or_stale(msg_id: str, timestamp_str: str | None) -> bool:
         age = time.time() - msg_ts
         if age > _STALE_MSG_SECONDS:
             log.warning("WhatsApp stale message skipped | id=%s | age=%.0fs", msg_id, age)
-            return True
+            return "stale"
 
     # Duplicate check
     if msg_id in _SEEN_MSG_IDS:
         log.warning("WhatsApp duplicate message skipped | id=%s", msg_id)
-        return True
+        return "duplicate"
 
     _SEEN_MSG_IDS.add(msg_id)
     _SEEN_MSG_IDS_ORDER.append(msg_id)
@@ -128,7 +137,27 @@ def _is_duplicate_or_stale(msg_id: str, timestamp_str: str | None) -> bool:
         oldest = _SEEN_MSG_IDS_ORDER.pop(0)
         _SEEN_MSG_IDS.discard(oldest)
 
-    return False
+    return None
+
+
+def _should_notify_stale(phone_number: str) -> bool:
+    """One "I was offline" reply per user per burst.
+
+    After downtime Meta redelivers the whole backlog at once. Answering every
+    stale message in that burst reads as a malfunction, so the first one speaks
+    for all of them and the rest stay silent for a cooldown.
+    """
+    now = time.time()
+    last = _STALE_NOTICE_SENT_AT.get(phone_number)
+    if last is not None and now - last < _STALE_NOTICE_COOLDOWN_SECONDS:
+        return False
+    _STALE_NOTICE_SENT_AT[phone_number] = now
+    if len(_STALE_NOTICE_SENT_AT) > _STALE_NOTICE_MAX_TRACKED:
+        for oldest in sorted(_STALE_NOTICE_SENT_AT, key=_STALE_NOTICE_SENT_AT.get)[
+            : _STALE_NOTICE_MAX_TRACKED // 2
+        ]:
+            _STALE_NOTICE_SENT_AT.pop(oldest, None)
+    return True
 
 
 def _try_start_match_run(phone_number: str) -> bool:
@@ -961,7 +990,109 @@ def _get_or_create_session(phone_number: str, db: Session) -> WhatsAppSession:
         record_server_event(phone_number, "wa_signup")
         # Durable twin of the in-memory counter — funnel maths must survive deploys.
         record_server_event(phone_number, "onboard_started", "whatsapp")
+        # Transient (never persisted) marker so the caller can tag acquisition
+        # source off the very first inbound message.
+        session.is_new_contact = True
     return session
+
+
+# ── Acquisition source ───────────────────────────────────────────────────────
+# The website's wa.me CTAs append a source tag to the prefill text, e.g.
+# "match · m-hero" / "match · sticky" / "match · pricing" / "match · article".
+# It is parsed off the first inbound message, stored for funnel attribution and
+# stripped before anything else sees it — the bot must never answer the tag.
+_SOURCE_TAG_RE = re.compile(r"\s*·\s*([A-Za-z0-9][A-Za-z0-9 _.\-]{0,38})\s*$")
+# Recorded when a first contact carries no tag (typed the number in, saved
+# contact, QR code) so the flag is always set and never re-parsed.
+_SOURCE_DIRECT = "direct"
+
+
+def _split_source_tag(text: str) -> tuple[str, str | None]:
+    """("match", "m-hero") from "match · m-hero"; (text, None) when untagged."""
+    match = _SOURCE_TAG_RE.search(text or "")
+    if not match:
+        return text, None
+    return text[: match.start()].strip(), match.group(1).strip()
+
+
+def _is_first_contact(wa_session: WhatsAppSession) -> bool:
+    """True only for the very first inbound message of a brand-new user."""
+    if getattr(wa_session, "acquisition_source", None):
+        return False
+    if getattr(wa_session, "is_new_contact", False):
+        return True
+    # Pre-existing sessions from before the column landed: the history is still
+    # empty only on the very first turn.
+    return (getattr(wa_session, "history", None) or "[]") == "[]"
+
+
+def _record_first_contact(
+    phone_number: str, wa_session: WhatsAppSession, user_text: str, db: Session
+) -> str:
+    """Store where this user came from; return their message minus the tag."""
+    text, tag = _split_source_tag(user_text)
+    source = (tag or _SOURCE_DIRECT)[:40]
+    wa_session.acquisition_source = source
+    db.commit()
+    record_server_event(phone_number, "wa_first_contact", source)
+    log.info(
+        "WhatsApp first contact | phone=%s | source=%s",
+        phone_number[:6] + "****", source,
+    )
+    # A message that was *only* a tag still has to say something to the bot.
+    return text or user_text
+
+
+# ── Opt-out (Meta compliance) ────────────────────────────────────────────────
+# Meta requires an honoured opt-out before any business-initiated messaging.
+# Matched against the whole trimmed message, case-insensitively: "stop" on its
+# own unsubscribes, "stop sending deck jobs" is an ordinary message.
+_OPT_OUT_KEYWORDS: frozenset[str] = frozenset({"stop", "unsubscribe", "opt out", "optout"})
+_OPT_IN_KEYWORDS: frozenset[str] = frozenset({"start"})
+
+_OPT_OUT_REPLY = (
+    "You're unsubscribed — I won't message you first anymore. "
+    "Reply START anytime to switch alerts back on."
+)
+_OPT_IN_REPLY = (
+    "✅ You're back on — I'll ping you when jobs that fit you land.\n\n"
+    "Reply *STOP* anytime to switch them off again."
+)
+
+
+async def _handle_opt_out_keywords(
+    phone_number: str, wa_session: WhatsAppSession, user_text: str, db: Session
+) -> bool:
+    """STOP / START handling. True when the message was one and is fully handled.
+
+    Runs *before* command routing: "unsubscribe" used to land on the billing
+    reply ("no recurring plan to cancel") and "stop" opened the help menu, so
+    neither opt-out word actually opted anyone out.
+    """
+    cmd = (user_text or "").strip().lower()
+    phone = phone_number
+
+    if cmd in _OPT_OUT_KEYWORDS:
+        wa_session.opted_out = True
+        wa_session.opted_out_at = datetime.now(timezone.utc)
+        db.commit()
+        record_server_event(phone, "wa_opted_out", cmd)
+        log.info("WhatsApp opt-out | phone=%s | keyword=%s", phone[:6] + "****", cmd)
+        await _send_whatsapp(phone, _OPT_OUT_REPLY)
+        return True
+
+    # "start" is only special for someone who opted out — for everyone else it
+    # falls through to the normal router (which opens the menu).
+    if cmd in _OPT_IN_KEYWORDS and getattr(wa_session, "opted_out", False):
+        wa_session.opted_out = False
+        wa_session.opted_out_at = None
+        db.commit()
+        record_server_event(phone, "wa_opted_in", cmd)
+        log.info("WhatsApp opt-in | phone=%s", phone[:6] + "****")
+        await _send_whatsapp(phone, _OPT_IN_REPLY)
+        return True
+
+    return False
 
 
 def _save_session(session: WhatsAppSession, db: Session, history: list, partial_profile: dict, mode: str | None = None) -> None:
@@ -1146,13 +1277,19 @@ async def _start_whatsapp_checkout(phone: str, tokens: int, db: Session) -> None
 
     price = f"{float(pkg['price']):g}"
     bonus_line = f"🎁 Includes *+{bonus} bonus tokens* — first-purchase gift.\n" if first else ""
+    # The CTA button opens inside WhatsApp's webview, where a 3-D Secure
+    # hand-off to the buyer's banking app has nowhere to come back to and the
+    # payment dies with no error. The plain URL below is the escape hatch:
+    # long-pressing it offers "Open in browser", which survives the redirect.
+    # (Apple Pay / Google Pay are unavailable in that webview — never promise them.)
     await _send_whatsapp_cta_url(
         phone,
         body=(
             f"🪙 *{pkg['label']} Pack — {tokens} tokens for R{price}*\n"
             f"{bonus_line}\n"
-            "Pay securely with Yoco (card, Apple Pay or Google Pay). "
-            "Tokens are added automatically — I'll confirm here the moment your payment lands. ⚡"
+            "Pay by card (takes ~1 min). "
+            "Tokens are added automatically — I'll confirm here the moment your payment lands. ⚡\n\n"
+            f"_If payment doesn't open properly: tap and hold the link below, then 'Open in browser'_ — {pay_url}"
         ),
         button_text="Pay now 💳",
         url_link=pay_url,
@@ -1417,25 +1554,33 @@ async def _call_openai(system: str, history: list, user_message: str, *, model: 
     if not _gpt5:
         payload["temperature"] = 0.5
 
-    resp = await _http.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-        json=payload,
-        timeout=25.0,
-    )
-    if resp.status_code >= 400:
-        log.error("OpenAI error | status=%d | body=%s", resp.status_code, resp.text[:300])
+    # Never raise: every caller is on the WhatsApp hot path, where an
+    # unhandled timeout or malformed body means the user's message is answered
+    # by nothing at all. An empty dict is the "LLM failed" signal callers
+    # already understand, and they each have a non-AI fallback.
+    try:
+        resp = await _http.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+            json=payload,
+            timeout=25.0,
+        )
+        if resp.status_code >= 400:
+            log.error("OpenAI error | status=%d | body=%s", resp.status_code, resp.text[:300])
+            return {}
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return {}
+        text = ((choices[0].get("message") or {}).get("content") or "").strip()
+        if not text:
+            log.error("OpenAI empty content | finish=%s | model=%s",
+                      choices[0].get("finish_reason", "?"), model)
+            return {}
+        return _extract_json(text)
+    except Exception as exc:
+        log.exception("OpenAI call failed | model=%s | %s", model, exc)
         return {}
-    data = resp.json()
-    choices = data.get("choices") or []
-    if not choices:
-        return {}
-    text = ((choices[0].get("message") or {}).get("content") or "").strip()
-    if not text:
-        log.error("OpenAI empty content | finish=%s | model=%s",
-                  choices[0].get("finish_reason", "?"), model)
-        return {}
-    return _extract_json(text)
 
 
 # ── Profile helpers ───────────────────────────────────────────────────────────
@@ -1446,6 +1591,23 @@ def _apply_updates(partial: dict, updates: dict) -> dict:
         if isinstance(v, str) and v.strip():
             partial[k] = v.strip()
     return partial
+
+
+def _record_onboard_fields(phone_number: str, before: dict, after: dict) -> None:
+    """One durable event per onboarding field, the first time it is captured.
+
+    Question-by-question drop-off is invisible from `onboard_started` /
+    `onboard_completed` alone — this is what shows *which* question loses people.
+    Re-answering a field never fires again, so counts stay comparable.
+    """
+    for field, value in after.items():
+        if field.startswith("_"):          # _retryField / _retryCount bookkeeping
+            continue
+        if str(before.get(field, "")).strip():
+            continue
+        if not str(value or "").strip():
+            continue
+        record_server_event(phone_number, "onboard_field_filled", field)
 
 
 def _save_profile_to_db(phone_number: str, partial: dict, db: Session) -> None:
@@ -2131,7 +2293,11 @@ async def _send_application_draft(phone: str, db: Session, wa_session: WhatsAppS
     profile_url = f"{settings.FRONTEND_BASE_URL}/crew/{profile.profile_slug}" if profile.profile_slug else ""
     system = build_draft_email_system_prompt(profile_text, profile.first_name or "the applicant", job, profile_url)
 
-    parsed = await _call_openai(system, [], "Write the email.", model=settings.EMAIL_AI_MODEL)
+    try:
+        parsed = await _call_openai(system, [], "Write the email.", model=settings.EMAIL_AI_MODEL)
+    except Exception as exc:
+        log.exception("Draft-email LLM call failed | phone=%s | %s", phone[:6] + "****", exc)
+        parsed = {}
     body = str(parsed.get("body", "")).strip()
     if not body:
         await _send_whatsapp(phone, "⚠️ Drafting hit a snag — try *draft " + str(n) + "* again in a moment.")
@@ -2358,14 +2524,24 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
     partial = json.loads(wa_session.partial_profile)
 
     system = _build_onboard_system(partial)
-    parsed = await _call_openai(system, history, user_message)
+    try:
+        parsed = await _call_openai(system, history, user_message)
+    except Exception as exc:
+        # Deterministic fallback extraction below keeps onboarding moving.
+        log.exception(
+            "Onboarding LLM call failed | phone=%s | %s",
+            wa_session.phone_number[:6] + "****", exc,
+        )
+        parsed = {}
 
     # First message: use AI greeting, fall back to static if AI fails
     if not history:
         message = (parsed.get("message") or "").strip() or _FALLBACK_GREETING
         updates = parsed.get("updates") if isinstance(parsed.get("updates"), dict) else {}
         clean_updates = {k: str(v).strip() for k, v in updates.items() if isinstance(k, str) and v and str(v).strip()}
+        _before = dict(partial)
         partial = _apply_updates(partial, clean_updates)
+        _record_onboard_fields(wa_session.phone_number, _before, partial)
         history.append({"role": "user", "content": user_message})
         history.append({"role": "assistant", "content": message})
         _save_session(wa_session, db, history, partial)
@@ -2385,7 +2561,9 @@ async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Se
         clean_updates = _fallback_extract(partial, user_message)
         log.warning("LLM failed — fallback extraction | updates=%s", clean_updates)
 
+    _before = dict(partial)
     partial = _apply_updates(partial, clean_updates)
+    _record_onboard_fields(wa_session.phone_number, _before, partial)
     if clean_updates:
         # Progress made — clear the consecutive-retry tracker for the stuck field.
         partial.pop("_retryField", None)
@@ -2523,7 +2701,9 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
         await _start_whatsapp_checkout(phone, tokens, db)
         return None
 
-    if cmd in ("cancel subscription", "cancel pro", "cancel", "unsubscribe"):
+    # "unsubscribe" deliberately absent — it is an opt-out keyword, handled
+    # before routing (see _handle_opt_out_keywords), never a billing command.
+    if cmd in ("cancel subscription", "cancel pro", "cancel"):
         bal = get_credit_balance(db, phone)
         w = "token" if bal == 1 else "tokens"
         await _send_whatsapp_buttons(
@@ -2740,7 +2920,7 @@ async def whatsapp_verify(request: Request):
 _GLOBAL_CMDS: frozenset[str] = frozenset({
     "subscribe", "pro", "upgrade", "paid", "subscription",
     "buy tokens", "buy", "top up", "topup",
-    "cancel subscription", "cancel pro", "cancel", "unsubscribe",
+    "cancel subscription", "cancel pro", "cancel",
     "help", "commands", "menu",
     "credits", "balance", "my credits", "tokens", "my tokens",
     "feedback", "give feedback", "review", "survey",
@@ -2773,6 +2953,17 @@ async def _process_whatsapp_message(
         # Groundwork for win-back sweeps: stamp every inbound touch.
         wa_session.last_active_at = datetime.now(timezone.utc)
         db.commit()
+
+        # Strip the website's "· <tag>" acquisition marker before anything
+        # else reads the message.
+        if _is_first_contact(wa_session):
+            user_text = _record_first_contact(phone_number, wa_session, user_text, db)
+
+        # Opt-out beats command routing — see _handle_opt_out_keywords.
+        if await _handle_opt_out_keywords(phone_number, wa_session, user_text, db):
+            metrics.increment("whatsapp_messages")
+            return
+
         _cmd = user_text.strip().lower()
 
         # Feedback invitation rides along AFTER the user's command is answered
@@ -2833,6 +3024,12 @@ async def _process_whatsapp_message(
         await _finish()
     except Exception as exc:
         log.exception("WhatsApp message processing error | phone=%s | %s", phone_number[:6] + "****", exc)
+        # Anything that got here (most often a failed LLM call) would otherwise
+        # leave the user's message unanswered. Say something.
+        try:
+            await _send_whatsapp(phone_number, _GLITCH_REPLY)
+        except Exception:
+            log.exception("WhatsApp fallback reply failed | phone=%s", phone_number[:6] + "****")
     finally:
         db.close()
         if ctx_token is not None:
@@ -2915,6 +3112,18 @@ _MAINTENANCE_MESSAGE = (
     "As a thank-you for waiting, we'll reward you when we're back. 🎁\n\n"
     "See you soon! ⚓"
 )
+
+
+async def _send_stale_notice(phone_number: str, graph_phone_number_id: str = "") -> None:
+    """Tell a user their message landed too late to process, instead of dropping it."""
+    ctx_token = _wa_graph_phone_id.set(graph_phone_number_id) if graph_phone_number_id else None
+    try:
+        await _send_whatsapp(phone_number, _STALE_NOTICE)
+    except Exception as exc:
+        log.exception("WhatsApp stale notice error | phone=%s | %s", phone_number[:6] + "****", exc)
+    finally:
+        if ctx_token is not None:
+            _wa_graph_phone_id.reset(ctx_token)
 
 
 async def _send_maintenance_notice(
@@ -3004,7 +3213,16 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
             if not phone_number:
                 continue
 
-            if msg_id and _is_duplicate_or_stale(msg_id, msg_timestamp):
+            skip_reason = _inbound_skip_reason(msg_id, msg_timestamp) if msg_id else None
+            if skip_reason == "stale":
+                # Status callbacks arrive with no `messages` array and never
+                # reach this loop, so only a real user message is answered here.
+                if msg_type == "text" and _should_notify_stale(phone_number):
+                    background_tasks.add_task(
+                        _send_stale_notice, phone_number, graph_phone_number_id,
+                    )
+                continue
+            if skip_reason:
                 continue
 
             if settings.WHATSAPP_MAINTENANCE_MODE:

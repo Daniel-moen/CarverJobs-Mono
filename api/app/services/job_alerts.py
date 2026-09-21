@@ -38,6 +38,7 @@ from app.models import CrewProfile, Job, WhatsAppSession
 from app.services.proactive import (
     SERVICE_WINDOW_HOURS,
     as_aware as _as_aware,
+    is_opted_out,
     recently_pinged,
 )
 from app.services.role_taxonomy import (
@@ -54,8 +55,6 @@ _GRAPH_URL = "https://graph.facebook.com/v19.0"
 _ACTIVE_STATUSES = ("open", "priority")
 # Never alert about jobs older than this, even for long-dormant users.
 _MAX_JOB_AGE_DAYS = 7
-# Safety cap per cycle while Meta messaging limits are still low.
-_MAX_ALERTS_PER_RUN = 50
 # How many job titles to name in a free-form alert before summarising the rest.
 _FREEFORM_JOB_PREVIEW = 3
 
@@ -200,7 +199,7 @@ async def run_job_alerts_once() -> dict[str, int]:
 
     stats = {
         "checked": 0, "sent": 0, "sent_freeform": 0, "sent_template": 0,
-        "skipped_recent": 0, "no_match": 0, "needs_template": 0,
+        "skipped_recent": 0, "no_match": 0, "needs_template": 0, "opted_out": 0,
     }
     if not _wa_credentials_ok():
         log.debug("Job alerts skipped — WhatsApp credentials not configured")
@@ -231,12 +230,20 @@ async def run_job_alerts_once() -> dict[str, int]:
             .all()
         )
 
+        # Read at runtime, not import time: staging the first template sweeps
+        # is an env-var change (JOB_ALERT_MAX_PER_RUN), not a deploy.
+        max_per_run = settings.JOB_ALERT_MAX_PER_RUN
+
         async with httpx.AsyncClient() as client:
             for ws in sessions:
-                if stats["sent"] >= _MAX_ALERTS_PER_RUN:
-                    log.warning("Job alerts: per-run cap (%d) reached", _MAX_ALERTS_PER_RUN)
+                if stats["sent"] >= max_per_run:
+                    log.warning("Job alerts: per-run cap (%d) reached", max_per_run)
                     break
                 stats["checked"] += 1
+
+                if is_opted_out(ws):
+                    stats["opted_out"] += 1
+                    continue
 
                 last_alert = _as_aware(ws.last_job_alert_at)
                 if last_alert and now - last_alert < min_interval:

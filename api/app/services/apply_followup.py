@@ -19,7 +19,12 @@ from app import flags
 from app.analytics import record_server_event
 from app.logger import get_logger
 from app.models import MatchSession, WhatsAppSession
-from app.services.proactive import SERVICE_WINDOW_HOURS, as_aware as _as_aware, recently_pinged
+from app.services.proactive import (
+    SERVICE_WINDOW_HOURS,
+    as_aware as _as_aware,
+    is_opted_out,
+    recently_pinged,
+)
 from app.settings import settings
 
 log = get_logger("carver.apply_followup")
@@ -35,7 +40,7 @@ async def run_apply_followups_once() -> dict[str, int]:
     from app.database import SessionLocal
     from app.routes.whatsapp import _send_whatsapp_buttons, _wa_configured
 
-    stats = {"checked": 0, "sent": 0, "outside_window": 0, "already_asked": 0}
+    stats = {"checked": 0, "sent": 0, "outside_window": 0, "already_asked": 0, "opted_out": 0}
     if not _wa_configured():
         return stats
     if not flags.is_enabled("whatsapp"):
@@ -60,6 +65,10 @@ async def run_apply_followups_once() -> dict[str, int]:
                 log.warning("Apply follow-ups: per-run cap (%d) reached", _MAX_SENDS_PER_RUN)
                 break
             stats["checked"] += 1
+
+            if is_opted_out(ws):
+                stats["opted_out"] += 1
+                continue
 
             ms = db.query(MatchSession).filter(MatchSession.id == ws.last_match_session_id).first()
             if ms is None or (ms.total_matched or 0) <= 0:

@@ -114,14 +114,25 @@ async def create_checkout(db: Session, user_key: str, tokens: int, *, channel: s
     cents = package_amount(tokens)
     amount_str = f"{cents / 100:.2f}"
 
-    existing = (
+    # A user can open checkout A, ignore it, open checkout B, then go back and
+    # pay A. Deleting the earlier row used to make that payment unattributable —
+    # the webhook found no row for A and the buyer was charged but never
+    # credited. Park the old rows as "superseded" instead: the webhook (and the
+    # reconcile sweep) still credit them if they are actually paid, while the
+    # abandoned-checkout reminder only ever looks at "pending".
+    superseded = (
         db.query(models.Subscription)
         .filter(models.Subscription.user_key == user_key, models.Subscription.status == "pending")
-        .first()
+        .all()
     )
-    if existing:
-        db.delete(existing)
+    for old in superseded:
+        old.status = "superseded"
+    if superseded:
         db.flush()
+        log.info(
+            "Superseded %d earlier pending checkout(s) | user=%s | refs=%s",
+            len(superseded), user_key, ",".join(s.m_payment_id for s in superseded),
+        )
 
     sub = models.Subscription(
         user_key=user_key,
