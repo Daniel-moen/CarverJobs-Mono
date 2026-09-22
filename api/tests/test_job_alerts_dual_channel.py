@@ -6,6 +6,7 @@ approval, so the retention loop is live today; the template half switches on by
 env var alone once the template is approved.
 """
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 from app import models
@@ -233,6 +234,102 @@ def test_loop_is_inert_without_whatsapp_credentials(monkeypatch):
         assert buttons == []
     finally:
         db.close()
+
+
+# ── Template sends must be auditable (reply rate is measured off these) ──────
+
+
+class _FakeGraphResponse:
+    def __init__(self, status_code=200, message_id="wamid.TEMPLATE1"):
+        self.status_code = status_code
+        self._message_id = message_id
+        self.text = "{}"
+
+    def json(self):
+        return {"messages": [{"id": self._message_id}]} if self._message_id else {}
+
+
+class _FakeGraphClient:
+    def __init__(self, response):
+        self._response = response
+        self.posts = []
+
+    async def post(self, url, **kwargs):
+        self.posts.append((url, kwargs))
+        return self._response
+
+
+def _patch_template_send(monkeypatch, events):
+    monkeypatch.setattr(job_alerts, "record_server_event", lambda *a: events.append(a))
+    monkeypatch.setattr(settings, "WHATSAPP_PHONE_NUMBER_ID", "1234567890")
+    monkeypatch.setattr(settings, "WHATSAPP_ACCESS_TOKEN", "test-token")
+    monkeypatch.setattr(settings, "WHATSAPP_JOB_ALERT_TEMPLATE", "job_alert_v1")
+    monkeypatch.setattr(settings, "WHATSAPP_JOB_ALERT_LANGUAGE", "en")
+    # The audit helper opens its own session and pings Mixpanel; keep both local.
+    monkeypatch.setattr(whatsapp, "SessionLocal", _TestingSession)
+    monkeypatch.setattr(whatsapp, "mixpanel_track", lambda **kw: None)
+
+
+def test_template_send_records_outbound_row_and_event(monkeypatch):
+    """Paid reactivation sends were invisible in `whatsapp_messages`, so no
+    reply rate could be measured for them. They must log like free-form does."""
+    events = []
+    _patch_template_send(monkeypatch, events)
+    client = _FakeGraphClient(_FakeGraphResponse())
+
+    db = _TestingSession()
+    try:
+        ok = asyncio.run(job_alerts._send_template(client, PHONE, "Sam", 3))
+        assert ok is True
+
+        row = db.query(models.WhatsAppMessage).filter_by(phone_number=PHONE).one()
+        assert row.direction == "outbound"
+        assert row.message_type == "template"
+        # Rendered body, not a bare template name — the transcript must read.
+        assert "Sam" in row.content
+        assert "3 new yacht jobs" in row.content
+        assert row.meta_message_id == "wamid.TEMPLATE1"
+        assert row.graph_phone_number_id == "1234567890"
+
+        payload = json.loads(row.payload_json)
+        assert payload["template"] == "job_alert_v1"
+        assert payload["language"] == "en"
+        assert payload["params"] == ["Sam", "3"]
+        assert payload["status_code"] == 200
+
+        assert (PHONE, "job_alert_template_sent", "3") in events
+    finally:
+        db.close()
+
+
+def test_failed_template_send_records_nothing(monkeypatch):
+    events = []
+    _patch_template_send(monkeypatch, events)
+    client = _FakeGraphClient(_FakeGraphResponse(status_code=400, message_id=""))
+
+    db = _TestingSession()
+    try:
+        assert asyncio.run(job_alerts._send_template(client, PHONE, "Sam", 3)) is False
+        assert db.query(models.WhatsAppMessage).count() == 0
+        assert events == []
+    finally:
+        db.close()
+
+
+def test_audit_failure_never_fails_a_delivered_template(monkeypatch):
+    """The message is already delivered by the time we log it."""
+    events = []
+    _patch_template_send(monkeypatch, events)
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(whatsapp, "SessionLocal", _boom)
+    client = _FakeGraphClient(_FakeGraphResponse())
+
+    assert asyncio.run(job_alerts._send_template(client, PHONE, "Sam", 1)) is True
+    # The funnel event still lands even when the transcript row can't.
+    assert (PHONE, "job_alert_template_sent", "1") in events
 
 
 def test_freeform_body_summarises_the_tail(monkeypatch):

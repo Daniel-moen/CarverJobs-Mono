@@ -116,7 +116,67 @@ def _matching_jobs(jobs: list[Job], desired_role: str) -> list[Job]:
     return out
 
 
+def _template_body(first_name: str, count: int) -> str:
+    """The approved template's body with its params substituted in.
+
+    Meta stores the copy, not us, so the transcript would otherwise record a
+    template *name* nobody can read. This mirrors the approved body documented
+    in JOB_ALERTS_SETUP.md ({{1}} = first name, {{2}} = job count) so
+    `whatsapp_messages` reads as an actual conversation — if the approved copy
+    is ever edited in WhatsApp Manager, update this string with it.
+    """
+    who = (first_name or "").strip() or "there"
+    return (
+        f"Hi {who}, {count} new yacht jobs matching your profile just landed on "
+        "CARVER. Reply *match* and I'll rank them against your profile. 🛥️"
+    )
+
+
+def _record_template_send(
+    phone: str,
+    first_name: str,
+    count: int,
+    params: list[str],
+    *,
+    status_code: int | None,
+    meta_message_id: str | None,
+) -> None:
+    """Persist the outbound template in `whatsapp_messages` + funnel event.
+
+    The free-form channel gets this for free via `_send_whatsapp_buttons`;
+    the template channel posts to Graph directly, so without this a paid
+    reactivation sweep leaves no trace and its reply rate is unmeasurable.
+    Best-effort by contract: the message is already delivered by the time we
+    get here, so nothing in here may turn a successful send into a failure.
+    """
+    try:
+        from app.routes.whatsapp import _record_whatsapp_message
+
+        _record_whatsapp_message(
+            phone,
+            "outbound",
+            "template",
+            _template_body(first_name, count),
+            meta_message_id=meta_message_id,
+            graph_phone_number_id=settings.WHATSAPP_PHONE_NUMBER_ID,
+            payload={
+                "template": settings.WHATSAPP_JOB_ALERT_TEMPLATE,
+                "language": settings.WHATSAPP_JOB_ALERT_LANGUAGE,
+                "params": params,
+                "status_code": status_code,
+                "source": "job_alerts",
+            },
+        )
+    except Exception as exc:
+        log.warning("Job alert template audit failed | to=%s | %s", phone[:6] + "****", exc)
+    try:
+        record_server_event(phone, "job_alert_template_sent", str(count))
+    except Exception as exc:
+        log.warning("Job alert template event failed | to=%s | %s", phone[:6] + "****", exc)
+
+
 async def _send_template(client: httpx.AsyncClient, phone: str, first_name: str, count: int) -> bool:
+    params = [first_name or "there", str(count)]
     payload = {
         "messaging_product": "whatsapp",
         "to": phone,
@@ -126,10 +186,7 @@ async def _send_template(client: httpx.AsyncClient, phone: str, first_name: str,
             "language": {"code": settings.WHATSAPP_JOB_ALERT_LANGUAGE},
             "components": [{
                 "type": "body",
-                "parameters": [
-                    {"type": "text", "text": first_name or "there"},
-                    {"type": "text", "text": str(count)},
-                ],
+                "parameters": [{"type": "text", "text": p} for p in params],
             }],
         },
     }
@@ -144,10 +201,22 @@ async def _send_template(client: httpx.AsyncClient, phone: str, first_name: str,
             log.error("Job alert template send failed | to=%s | status=%d | body=%s",
                       phone[:6] + "****", resp.status_code, resp.text[:300])
             return False
-        return True
     except httpx.HTTPError as exc:
         log.error("Job alert template send error | to=%s | %s", phone[:6] + "****", exc)
         return False
+
+    meta_message_id = None
+    try:
+        from app.routes.whatsapp import _meta_response_message_id
+
+        meta_message_id = _meta_response_message_id(resp)
+    except Exception as exc:
+        log.warning("Job alert template message id unreadable | to=%s | %s", phone[:6] + "****", exc)
+    _record_template_send(
+        phone, first_name, count, params,
+        status_code=resp.status_code, meta_message_id=meta_message_id,
+    )
+    return True
 
 
 def _freeform_body(first_name: str, jobs: list[Job]) -> str:
