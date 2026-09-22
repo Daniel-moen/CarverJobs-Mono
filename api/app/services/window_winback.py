@@ -53,8 +53,27 @@ def _onboarding_progress(ws: WhatsAppSession) -> tuple[str, int]:
     return str(partial.get("firstName", "")).strip(), len(missing)
 
 
-def _early_onboarding_nudge(ws: WhatsAppSession) -> tuple[str, list[tuple[str, str]]]:
+def _free_runs(db, user_key: str) -> int:
+    """Match runs this user can actually pay for right now.
+
+    Proactive copy must never promise a run the paywall will then refuse — a
+    real user was told "your first run is free", tapped Match and hit the
+    paywall on 0 tokens. Best-effort: an unreadable balance counts as 0, which
+    only ever makes the copy more cautious.
+    """
+    from app.services.credits import get_credit_balance
+
+    try:
+        return int(get_credit_balance(db, user_key) or 0)
+    except Exception as exc:
+        log.warning("Win-back balance lookup failed | user=%s | %s", user_key[:6] + "****", exc)
+        return 0
+
+
+def _early_onboarding_nudge(ws: WhatsAppSession, balance: int = 0) -> tuple[str, list[tuple[str, str]]]:
     """Stage 1 — a few hours after they went quiet mid-onboarding."""
+    from app.services.credits import crew_match_free
+
     name, missing = _onboarding_progress(ws)
     hello = f"Hey {name} 👋" if name else "Hey 👋"
 
@@ -65,9 +84,14 @@ def _early_onboarding_nudge(ws: WhatsAppSession) -> tuple[str, list[tuple[str, s
             "Want to wrap it up? Takes about 20 seconds."
         )
     else:
+        # Only call the first match free when it actually is.
+        free_bit = (
+            " and your first AI job match is free"
+            if crew_match_free() or balance >= 1 else ""
+        )
         body = (
             f"{hello} Did you want to finish setting up your profile? "
-            "It's 4 quick questions and your first AI job match is free — "
+            f"It's 4 quick questions{free_bit} — "
             "just reply and we'll carry on where we stopped."
         )
     return body, []
@@ -98,12 +122,38 @@ def _remember_assistant_turn(ws: WhatsAppSession, body: str) -> None:
     ws.history = json.dumps(history)
 
 
-def _no_match_nudge(_ws: WhatsAppSession) -> tuple[str, list[tuple[str, str]]]:
-    """For someone who finished onboarding but never ran a match."""
+def _no_match_nudge(_ws: WhatsAppSession, balance: int = 0) -> tuple[str, list[tuple[str, str]]]:
+    """For someone who finished onboarding but never ran a match.
+
+    Balance-aware on purpose: the old copy promised "your first run is free"
+    to everyone, so a user on 0 tokens tapped *Find matches* and landed on the
+    paywall — the worst possible first experience of the price.
+    """
+    from app.services.credits import crew_match_free
+
+    if crew_match_free():
+        return (
+            "Your profile's ready to go 🛥️ Want me to scan the live job board and "
+            "rank what fits you? Takes about a minute — matching is free right now.",
+            [("btn_find_matches", "🔍 Find matches"), ("btn_view_profile", "👤 My profile")],
+        )
+
+    if balance >= 1:
+        runs = f"{balance} free run{'s' if balance != 1 else ''}"
+        return (
+            "Your profile's ready to go 🛥️ Want me to scan the live job board and "
+            f"rank what fits you? Takes about a minute — you've got {runs} on your account.",
+            [("btn_find_matches", "🔍 Find matches"), ("btn_view_profile", "👤 My profile")],
+        )
+
+    # No tokens: promise nothing that costs one. The job list is free and real.
     return (
-        "Your profile's ready to go 🛥️ Want me to scan the live job board and "
-        "rank what fits you? Takes about a minute — your first run is free.",
-        [("btn_find_matches", "🔍 Find matches"), ("btn_view_profile", "👤 My profile")],
+        "Your profile's ready to go 🛥️ You're out of match tokens, so a full ranked "
+        "run isn't on me right now — but the live board is always free: reply *JOBS* "
+        "to see what's just landed.\n\n"
+        "_Want the full AI ranking? Type *buy tokens*, or submit a job you've seen "
+        "posted to earn one._",
+        [("cmd_jobs", "🔎 See live jobs"), ("btn_view_profile", "👤 My profile")],
     )
 
 
@@ -187,9 +237,9 @@ async def run_window_winbacks_once() -> dict[str, int]:
                     continue
 
             if not onboarding:
-                body, buttons = _no_match_nudge(ws)
+                body, buttons = _no_match_nudge(ws, _free_runs(db, ws.phone_number))
             elif stage == "early":
-                body, buttons = _early_onboarding_nudge(ws)
+                body, buttons = _early_onboarding_nudge(ws, _free_runs(db, ws.phone_number))
             else:
                 body, buttons = _last_chance_onboarding_nudge(ws)
 

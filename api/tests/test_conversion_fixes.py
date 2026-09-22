@@ -291,11 +291,13 @@ def test_pack_picker_records_shown_event_and_anchor_line(monkeypatch):
         db.close()
 
     assert (PHONE, "pack_picker_shown", "whatsapp") in events
-    # Value anchor derived from the pack badged most popular in settings.
-    popular = next(p for p in settings.TOKEN_PACKAGES if "popular" in str(p.get("badge", "")).lower())
+    # Value anchor points at the pack that is genuinely cheapest per match run
+    # for THIS buyer (no first-purchase bonus here) — anchoring on a pack the
+    # listed per-token rates show to be worse reads as a sales trick.
+    best = min(settings.TOKEN_PACKAGES, key=lambda p: whatsapp._pack_rate(p, False))
     body = lists[0]["body"]
-    assert f"{int(popular['tokens'])}-token pack" in body
-    assert f"R{float(popular['price']):g}" in body
+    assert f"{int(best['tokens'])}-token pack" in body
+    assert f"R{float(best['price']):g}" in body
     assert "per match run" in body
 
 

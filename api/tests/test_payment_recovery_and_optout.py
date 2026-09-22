@@ -608,7 +608,11 @@ def test_stale_notice_sent_once_per_burst(monkeypatch):
     assert whatsapp._should_notify_stale("27820009999") is True
 
 
-def test_stale_message_is_flagged_not_silently_dropped():
+def test_stale_message_is_flagged_not_silently_dropped(monkeypatch):
+    # Dedup is durable now — keep the claim rows in the test DB.
+    monkeypatch.setattr(whatsapp, "SessionLocal", _TestingSession)
+    whatsapp._SEEN_MSG_IDS.clear()
+    whatsapp._SEEN_MSG_IDS_ORDER.clear()
     old = str(int(datetime.now(timezone.utc).timestamp()) - 3600)
     assert whatsapp._inbound_skip_reason("wamid.stale", old) == "stale"
     fresh = str(int(datetime.now(timezone.utc).timestamp()))

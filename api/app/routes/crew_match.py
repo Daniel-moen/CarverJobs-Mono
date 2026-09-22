@@ -27,7 +27,7 @@ from app.schemas import (
 )
 from app.security import require_session
 from app.services.ai_client import AIClientError, call_openai
-from app.services.credits import add_credits, get_credit_balance, spend_credits
+from app.services.credits import add_credits, crew_match_free, get_credit_balance, spend_credits
 from app.services.matching_engine import (
     CandidateProfile,
     JobSummary,
@@ -238,7 +238,9 @@ def _expire_stale_running_match_sessions(db: Session, user_key: str) -> int:
             continue
         s.status = "failed"
         expired += 1
-        add_credits(db, user_key, amount=1)
+        # Nothing was charged for a free run, so there is nothing to refund.
+        if not crew_match_free():
+            add_credits(db, user_key, amount=1)
     if expired:
         db.commit()
         log.warning("Expired %d stale match sessions | user=%s", expired, user_key)
@@ -290,13 +292,18 @@ async def find_match(
             yield f"event: complete\ndata: {data}\n\n"
         return StreamingResponse(empty_stream(), media_type="text/event-stream")
 
-    credits_remaining = spend_credits(db, user_key, amount=1)
-    if credits_remaining is None:
-        record_server_event(user_key, "paywall_hit", "web")
-        raise HTTPException(
-            status_code=402,
-            detail="You're out of tokens. Top up to keep matching, or submit a job to earn a free token.",
-        )
+    # CREW_MATCH_FREE: run without charging and without ever refusing. The
+    # balance is still reported (the UI shows it), it just isn't touched.
+    if crew_match_free():
+        credits_remaining = get_credit_balance(db, user_key)
+    else:
+        credits_remaining = spend_credits(db, user_key, amount=1)
+        if credits_remaining is None:
+            record_server_event(user_key, "paywall_hit", "web")
+            raise HTTPException(
+                status_code=402,
+                detail="You're out of tokens. Top up to keep matching, or submit a job to earn a free token.",
+            )
     deleted_sessions = _delete_user_match_sessions(db, user_key)
     if deleted_sessions:
         log.info("Deleted %d previous match sessions | user=%s", deleted_sessions, user_key)
@@ -357,7 +364,8 @@ async def find_match(
                 s = result_db.query(MatchSession).get(session_id)
                 if s:
                     s.status = "failed"
-                add_credits(result_db, user_key, amount=1)
+                if not crew_match_free():
+                    add_credits(result_db, user_key, amount=1)
                 result_db.commit()
             finally:
                 result_db.close()
@@ -406,7 +414,8 @@ async def find_match(
                 s = result_db.query(MatchSession).get(session_id)
                 if s:
                     s.status = "failed"
-                add_credits(result_db, user_key, amount=1)
+                if not crew_match_free():
+                    add_credits(result_db, user_key, amount=1)
                 result_db.commit()
             except Exception:
                 log.exception("Failed to mark match session %d as failed", session_id)
@@ -559,7 +568,8 @@ async def get_session(
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=MATCH_RUN_TIMEOUT_SECONDS)
         if not created_at or created_at <= cutoff:
             match_session.status = "failed"
-            add_credits(db, user_key, amount=1)
+            if not crew_match_free():
+                add_credits(db, user_key, amount=1)
             db.commit()
             db.refresh(match_session)
 

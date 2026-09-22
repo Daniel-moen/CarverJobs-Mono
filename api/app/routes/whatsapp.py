@@ -13,6 +13,7 @@ that sets a session cookie and lands the user on the existing web profile page.
 from __future__ import annotations
 import asyncio
 
+import base64
 import hashlib
 import hmac
 import json
@@ -22,24 +23,26 @@ import threading
 import time
 from contextvars import ContextVar
 from datetime import datetime, timezone, timedelta
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import PlainTextResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import flags, metrics
 from app.analytics import record_server_event
 from app.database import SessionLocal, get_db
 from app.logger import get_logger
-from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchInteraction, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSession
+from app.models import CrewProfile, Document, Job, JobHistoryEntry, MatchInteraction, MatchSession, MatchSessionResult, WhatsAppMagicToken, WhatsAppMessage, WhatsAppSeenMessage, WhatsAppSession
 from app.security import issue_session_token
 from app.settings import settings
 from app.services.ai_client import AIClientError
 from app.services.mixpanel_server import track as mixpanel_track
 from app.routes.subscription import _is_first_purchase
 from app.services import payments
-from app.services.credits import add_credits, award_job_post_credit, get_credit_balance, is_subscribed, spend_credits
+from app.services.credits import add_credits, award_job_post_credit, crew_match_free, get_credit_balance, is_subscribed, spend_credits
 from app.services.feedback_settings import FEEDBACK_REWARD_TOKENS, feedback_is_eligible
 
 log = get_logger("carver.whatsapp")
@@ -61,11 +64,17 @@ _HTTP_LIMITS = httpx.Limits(
 _http = httpx.AsyncClient(timeout=_HTTP_TIMEOUT, limits=_HTTP_LIMITS)
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
-# Keep the last 500 processed Meta message IDs in memory.
-# Prevents duplicate sends when Meta retries a webhook (e.g. after server restart).
+# Keep the last 500 processed Meta message IDs in memory as a fast path, backed
+# by the durable whatsapp_seen_messages table. The in-memory set alone died with
+# the process, so a deploy plus a Meta retry re-processed the message — and a
+# re-processed *match* spends the user's token twice.
 _SEEN_MSG_IDS: set[str] = set()
 _SEEN_MSG_IDS_ORDER: list[str] = []
 _SEEN_MSG_MAX = 500
+# How long a message id stays on record. Meta's retry window is hours, not days.
+_SEEN_MSG_RETENTION_HOURS = 48
+_SEEN_MSG_PRUNE_INTERVAL_SECONDS = 3600
+_seen_msg_last_prune = 0.0
 _STALE_MSG_SECONDS = 300  # don't *process* messages older than 5 minutes
 # …but never drop one in silence: the user gets one "I was offline" nudge so
 # they know to resend, rather than staring at a message the bot never answered.
@@ -115,6 +124,64 @@ def _parse_meta_timestamp(timestamp_str: str | None) -> int | None:
     return None
 
 
+def _remember_msg_id_in_memory(msg_id: str) -> None:
+    _SEEN_MSG_IDS.add(msg_id)
+    _SEEN_MSG_IDS_ORDER.append(msg_id)
+    if len(_SEEN_MSG_IDS_ORDER) > _SEEN_MSG_MAX:
+        oldest = _SEEN_MSG_IDS_ORDER.pop(0)
+        _SEEN_MSG_IDS.discard(oldest)
+
+
+def _prune_seen_messages(db: Session) -> None:
+    """Drop message ids older than the retention window, at most hourly."""
+    global _seen_msg_last_prune
+    now = time.time()
+    if now - _seen_msg_last_prune < _SEEN_MSG_PRUNE_INTERVAL_SECONDS:
+        return
+    _seen_msg_last_prune = now
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_SEEN_MSG_RETENTION_HOURS)
+    db.query(WhatsAppSeenMessage).filter(WhatsAppSeenMessage.seen_at < cutoff).delete(
+        synchronize_session=False
+    )
+    db.commit()
+
+
+def _claim_msg_id(msg_id: str) -> bool:
+    """Claim a Meta message id for processing. False when it was already seen.
+
+    Durable half of the dedup: the row survives a deploy, so Meta's retry of a
+    message we already answered is dropped instead of re-run. A DB problem here
+    must never swallow a real message, so any unexpected failure claims it.
+    """
+    try:
+        db = SessionLocal()
+    except Exception as exc:
+        log.warning("WhatsApp dedup store unreachable | id=%s | %s", msg_id, exc)
+        return True
+    try:
+        seen = (
+            db.query(WhatsAppSeenMessage.msg_id)
+            .filter(WhatsAppSeenMessage.msg_id == msg_id)
+            .first()
+        )
+        if seen is not None:
+            return False
+        db.add(WhatsAppSeenMessage(msg_id=msg_id, seen_at=datetime.now(timezone.utc)))
+        db.commit()
+        _prune_seen_messages(db)
+        return True
+    except IntegrityError:
+        # Concurrent webhook deliveries of the same message — the other one won.
+        db.rollback()
+        return False
+    except Exception as exc:
+        db.rollback()
+        log.warning("WhatsApp dedup store unavailable | id=%s | %s", msg_id, exc)
+        return True
+    finally:
+        db.close()
+
+
 def _inbound_skip_reason(msg_id: str, timestamp_str: str | None) -> str | None:
     """"stale" | "duplicate" when the message must not be processed, else None."""
     # Only stale-drop messages when the timestamp clearly maps to a real Unix
@@ -126,16 +193,17 @@ def _inbound_skip_reason(msg_id: str, timestamp_str: str | None) -> str | None:
             log.warning("WhatsApp stale message skipped | id=%s | age=%.0fs", msg_id, age)
             return "stale"
 
-    # Duplicate check
+    # Duplicate check — in-memory fast path first, then the durable table.
     if msg_id in _SEEN_MSG_IDS:
         log.warning("WhatsApp duplicate message skipped | id=%s", msg_id)
         return "duplicate"
 
-    _SEEN_MSG_IDS.add(msg_id)
-    _SEEN_MSG_IDS_ORDER.append(msg_id)
-    if len(_SEEN_MSG_IDS_ORDER) > _SEEN_MSG_MAX:
-        oldest = _SEEN_MSG_IDS_ORDER.pop(0)
-        _SEEN_MSG_IDS.discard(oldest)
+    if not _claim_msg_id(msg_id):
+        _remember_msg_id_in_memory(msg_id)
+        log.warning("WhatsApp duplicate message skipped (durable) | id=%s", msg_id)
+        return "duplicate"
+
+    _remember_msg_id_in_memory(msg_id)
 
     return None
 
@@ -576,6 +644,12 @@ async def _send_match_scope_menu(to: str) -> None:
 
 def _credits_summary_for_menu(balance: int, subscribed: bool = False) -> str:
     w = "token" if balance == 1 else "tokens"
+    if crew_match_free():
+        # Nothing to sell while runs are free — saying otherwise is just noise.
+        return (
+            f"💳 *Your balance: {balance} {w}.*\n"
+            "*Find Matches* runs are free right now — run as many as you like."
+        )
     return (
         f"💳 *Your balance: {balance} {w}.*\n"
         "Each *Find Matches* run uses 1 token. "
@@ -592,7 +666,12 @@ async def _send_help_menu(to: str, db: Session) -> None:
     """Send interactive list menu with all available commands."""
     balance = get_credit_balance(db, to)
     sub = is_subscribed(db, to)
-    body_text = f"What would you like to do?\n\n{_credits_summary_for_menu(balance, sub)}"
+    # The list is already at WhatsApp's 10-row ceiling, so the referral loop
+    # earns its discoverability in the body instead of a row of its own.
+    body_text = (
+        f"What would you like to do?\n\n{_credits_summary_for_menu(balance, sub)}\n\n"
+        f"🤝 Type *refer* to invite a friend — you both get {_REFERRAL_BONUS_TOKENS} match runs."
+    )
     url = _messages_url()
     payload = {
         "messaging_product": "whatsapp",
@@ -731,6 +810,13 @@ async def _send_job_posted_confirmation(phone_number: str, job: Job, award: dict
     title = job.title or "Yacht Crew Position"
     role = job.role or "Crew"
     location = job.location or "Unknown"
+    # Growth loop: the submitter is standing in the group the job came from,
+    # so the cheapest distribution we will ever get is asking them to paste the
+    # public board back into it.
+    share_line = (
+        "\n\nIf it came from a group, paste this back there so the crew can find it: "
+        f"{settings.FRONTEND_BASE_URL.rstrip('/')}/jobs/board (or reply JOBS in WhatsApp)"
+    )
     balance = award["balance"]
     balance_w = "token" if balance == 1 else "tokens"
     header = (
@@ -745,7 +831,8 @@ async def _send_job_posted_confirmation(phone_number: str, job: Job, award: dict
             header
             + f"You earned *1 token* for sharing this job.\n"
             f"Current balance: *{balance}* {balance_w}.\n\n"
-            f"_The listing is now live for crew to see._",
+            f"_The listing is now live for crew to see._"
+            + share_line,
         )
         return
 
@@ -756,7 +843,8 @@ async def _send_job_posted_confirmation(phone_number: str, job: Job, award: dict
         + f"Thanks for sharing — the listing is now live for crew to see! 🙌\n\n"
         f"You've already earned your *{cap} free tokens* from job posts this "
         f"month, so no token this time — the counter resets every 30 days.\n"
-        f"Current balance: *{balance}* {balance_w}.",
+        f"Current balance: *{balance}* {balance_w}."
+        + share_line,
     )
     await _send_whatsapp_buttons(
         phone_number,
@@ -1002,6 +1090,111 @@ def _get_or_create_session(phone_number: str, db: Session) -> WhatsAppSession:
     return session
 
 
+# ── Referral loop ─────────────────────────────────────────────────────────────
+# The product had no growth loop at all: every user arrived through a paid or
+# hand-placed link and told nobody. The referral code rides the acquisition-tag
+# mechanism that already exists — "Hi Carver · REF-AB12CD" is just a first
+# message with a tag — so nothing new has to be parsed or stored to attribute it.
+_REFERRAL_PREFIX = "REF-"
+_REFERRAL_CODE_LEN = 6
+# Paid to BOTH sides when the invited user finishes onboarding. Two runs is a
+# real gift (a run is the unit we sell) without being worth farming.
+_REFERRAL_BONUS_TOKENS = 2
+# Falls back to the number the website's wa.me CTAs already hardcode.
+_REFERRAL_WA_NUMBER_FALLBACK = "27688516141"
+
+
+def _referral_code(phone_number: str) -> str:
+    """Stable per-user code, e.g. "REF-AB12CD".
+
+    Derived from the phone number rather than stored, so it needs no column,
+    no uniqueness check and no backfill — the same user always gets the same
+    code, and the code never leaks the number it came from.
+    """
+    digest = hashlib.sha256(f"carver-referral:{phone_number}".encode()).digest()
+    return _REFERRAL_PREFIX + base64.b32encode(digest).decode("ascii")[:_REFERRAL_CODE_LEN]
+
+
+def _resolve_referral_code(db: Session, code: str | None) -> str | None:
+    """Phone number behind a REF- code, or None (unknown code / not a code).
+
+    The code is a one-way hash, so resolution is a scan of existing sessions.
+    That is fine at this scale and self-limiting: only a first contact whose
+    tag starts with REF- ever reaches it.
+    """
+    code = (code or "").strip().upper()
+    if not code.startswith(_REFERRAL_PREFIX) or len(code) != len(_REFERRAL_PREFIX) + _REFERRAL_CODE_LEN:
+        return None
+    for (phone,) in db.query(WhatsAppSession.phone_number).all():
+        if _referral_code(phone) == code:
+            return phone
+    return None
+
+
+def _referral_link(phone_number: str) -> str:
+    """wa.me deep link whose prefill carries this user's code as the tag."""
+    number = settings.WHATSAPP_PUBLIC_NUMBER or _REFERRAL_WA_NUMBER_FALLBACK
+    text = f"Hi Carver · {_referral_code(phone_number)}"
+    return f"https://wa.me/{number}?text={quote(text, safe='')}"
+
+
+def _referral_invite_line(phone_number: str) -> str:
+    """One-line share prompt appended to every completed match run."""
+    return (
+        f"Know someone job hunting? Send them this — you both get "
+        f"{_REFERRAL_BONUS_TOKENS} extra match runs: {_referral_link(phone_number)}"
+    )
+
+
+def _credit_referral(wa_session: WhatsAppSession, db: Session) -> str | None:
+    """Pay both sides of a referral, once. Returns the referrer's number or None.
+
+    Called when the invited user completes onboarding — the first point at
+    which they are a real user rather than a click. `referral_credited` is set
+    (and committed) before any token moves, so a retry can never pay twice.
+    """
+    referrer = getattr(wa_session, "referred_by", None)
+    if not referrer or getattr(wa_session, "referral_credited", False):
+        return None
+    if referrer == wa_session.phone_number:
+        return None  # self-referral — belt and braces, also blocked at signup
+
+    wa_session.referral_credited = True
+    db.commit()
+
+    add_credits(db, wa_session.phone_number, _REFERRAL_BONUS_TOKENS)
+    add_credits(db, referrer, _REFERRAL_BONUS_TOKENS)
+    record_server_event(wa_session.phone_number, "referral_completed", "invitee")
+    record_server_event(referrer, "referral_completed", "referrer")
+    log.info(
+        "WhatsApp referral credited | invitee=%s | referrer=%s | tokens=%d",
+        wa_session.phone_number[:6] + "****", referrer[:6] + "****", _REFERRAL_BONUS_TOKENS,
+    )
+    return referrer
+
+
+async def _notify_referrer(referrer: str, db: Session) -> None:
+    """Tell the referrer their invite landed. Never raises into onboarding."""
+    try:
+        ref_session = (
+            db.query(WhatsAppSession)
+            .filter(WhatsAppSession.phone_number == referrer)
+            .first()
+        )
+        if ref_session is not None and getattr(ref_session, "opted_out", False):
+            return  # Meta compliance: no bot-initiated message to an opt-out
+        bal = get_credit_balance(db, referrer)
+        w = "token" if bal == 1 else "tokens"
+        await _send_whatsapp(
+            referrer,
+            f"🎁 Someone you invited just joined CARVER — *+{_REFERRAL_BONUS_TOKENS} match runs* "
+            f"are on your account. You're at *{bal}* {w}.\n\n"
+            "Type *refer* for your link anytime.",
+        )
+    except Exception as exc:
+        log.warning("Referral notify failed | phone=%s | %s", referrer[:6] + "****", exc)
+
+
 # ── Acquisition source ───────────────────────────────────────────────────────
 # The website's wa.me CTAs append a source tag to the prefill text, e.g.
 # "match · m-hero" / "match · sticky" / "match · pricing" / "match · article".
@@ -1039,6 +1232,13 @@ def _record_first_contact(
     text, tag = _split_source_tag(user_text)
     source = (tag or _SOURCE_DIRECT)[:40]
     wa_session.acquisition_source = source
+    # A REF- tag is also a person: link the two sessions so both get paid when
+    # this user finishes onboarding. Every other tag (SCHOOL-…, m-hero, …) is
+    # attribution only and stops at acquisition_source.
+    referrer = _resolve_referral_code(db, source)
+    if referrer and referrer != phone_number:
+        wa_session.referred_by = referrer
+        record_server_event(phone_number, "referral_signup", source)
     db.commit()
     record_server_event(phone_number, "wa_first_contact", source)
     log.info(
@@ -1163,9 +1363,30 @@ async def _send_feedback_request(phone: str, db: Session) -> None:
 # ── Token purchase (in-chat Yoco checkout) ────────────────────────────────────
 
 
-def _per_token_label(pkg: dict) -> str:
-    rate = float(pkg["price"]) / int(pkg["tokens"])
+def _pack_tokens_with_bonus(pkg: dict, bonus_eligible: bool) -> int:
+    """Tokens this buyer actually receives, first-purchase bonus included."""
+    tokens = int(pkg["tokens"])
+    bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
+    if bonus_eligible and bonus > 0 and tokens >= settings.FIRST_PURCHASE_BONUS_MIN_TOKENS:
+        return tokens + bonus
+    return tokens
+
+
+def _pack_rate(pkg: dict, bonus_eligible: bool = False) -> float:
+    return float(pkg["price"]) / _pack_tokens_with_bonus(pkg, bonus_eligible)
+
+
+def _per_token_label(pkg: dict, bonus_eligible: bool = False) -> str:
+    """"R13/token", or the true rate once the first-purchase bonus is applied.
+
+    The website priced packs with the bonus included and WhatsApp did not, so
+    the pack that is actually cheapest per run looked worse in chat than on the
+    site — to exactly the buyers the bonus exists to convert.
+    """
+    rate = _pack_rate(pkg, bonus_eligible)
     rate_str = f"{rate:.2f}".rstrip("0").rstrip(".")
+    if _pack_tokens_with_bonus(pkg, bonus_eligible) != int(pkg["tokens"]):
+        return f"R{rate_str}/token with bonus"
     return f"R{rate_str}/token"
 
 
@@ -1202,33 +1423,38 @@ async def _send_token_pack_picker(phone: str, db: Session) -> None:
 
     bonus = settings.FIRST_PURCHASE_BONUS_TOKENS
     bonus_min = settings.FIRST_PURCHASE_BONUS_MIN_TOKENS
+    bonus_eligible = bonus > 0 and _is_first_purchase(db, phone)
     bonus_line = ""
-    if bonus > 0 and _is_first_purchase(db, phone):
+    if bonus_eligible:
         bonus_line = (
             f"🎁 First purchase? You get *+{bonus} bonus tokens* on any pack of "
             f"{bonus_min}+ tokens.\n\n"
         )
 
-    # Value anchor: point at the pack flagged most popular in settings so the
-    # mid-tier reads as the default choice (never hardcode prices here).
+    # Value anchor: point at the pack that is genuinely cheapest per match run
+    # *for this buyer* — with the first-purchase bonus counted, that is not
+    # always the one wearing the "Most Popular" badge, and anchoring on a pack
+    # the list itself shows to be worse reads as a sales trick.
     anchor_line = ""
-    popular = next(
-        (p for p in settings.TOKEN_PACKAGES if "popular" in str(p.get("badge", "")).lower()),
-        None,
+    best = min(
+        settings.TOKEN_PACKAGES,
+        key=lambda p: _pack_rate(p, bonus_eligible),
+        default=None,
     )
-    if popular:
-        pop_price = f"{float(popular['price']):g}"
-        rate = float(popular["price"]) / int(popular["tokens"])
-        rate_str = f"{rate:.2f}".rstrip("0").rstrip(".")
+    if best:
+        best_price = f"{float(best['price']):g}"
+        rate_str = f"{_pack_rate(best, bonus_eligible):.2f}".rstrip("0").rstrip(".")
+        with_bonus = _pack_tokens_with_bonus(best, bonus_eligible)
+        bonus_bit = f" (+{bonus} bonus = {with_bonus})" if with_bonus != int(best["tokens"]) else ""
         anchor_line = (
-            f"💡 Most crew grab the *{int(popular['tokens'])}-token pack (R{pop_price})* — "
+            f"💡 Best value for you: the *{int(best['tokens'])}-token pack (R{best_price})*{bonus_bit} — "
             f"about R{rate_str} per match run.\n\n"
         )
 
     rows = []
     for p in settings.TOKEN_PACKAGES:
         price = f"{float(p['price']):g}"
-        desc = _per_token_label(p)
+        desc = _per_token_label(p, bonus_eligible)
         if p.get("badge"):
             desc = f"{p['badge']} · {desc}"
         rows.append({
@@ -1634,13 +1860,39 @@ def _save_profile_to_db(phone_number: str, partial: dict, db: Session) -> None:
         db.commit()
 
 
+# ── Public crew profile link ─────────────────────────────────────────────────
+# Every crew profile already has a slug and a public page — it was only ever
+# surfaced inside AI-drafted application emails, so users never knew they had
+# a shareable card. One link makes the profile worth completing.
+
+def _ensure_profile_slug(db: Session, profile: CrewProfile) -> str:
+    """The profile's slug, minting one first if a legacy row is missing it."""
+    if profile.profile_slug:
+        return profile.profile_slug
+    from app.routes.profile import _generate_slug
+
+    slug = _generate_slug()
+    while db.query(CrewProfile).filter(CrewProfile.profile_slug == slug).first():
+        slug = _generate_slug()
+    profile.profile_slug = slug
+    db.commit()
+    return slug
+
+
+def _public_profile_url(db: Session, profile: CrewProfile) -> str:
+    return f"{settings.FRONTEND_BASE_URL.rstrip('/')}/crew/{_ensure_profile_slug(db, profile)}"
+
+
 # ── Command handlers ──────────────────────────────────────────────────────────
 
 async def _handle_profile_command(phone_number: str, db: Session) -> str:
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone_number).first()
     bal = get_credit_balance(db, phone_number)
     tok_w = "token" if bal == 1 else "tokens"
-    token_line = f"\n\n💳 *Tokens:* {bal} {tok_w} — each *Find Matches* uses 1; *buy tokens* to top up or submit a job to earn 1."
+    if crew_match_free():
+        token_line = f"\n\n💳 *Tokens:* {bal} {tok_w} — *Find Matches* runs are free right now."
+    else:
+        token_line = f"\n\n💳 *Tokens:* {bal} {tok_w} — each *Find Matches* uses 1; *buy tokens* to top up or submit a job to earn 1."
     if not profile:
         return (
             "👋 *Welcome aboard CARVER!*\n\n"
@@ -1672,6 +1924,7 @@ async def _handle_profile_command(phone_number: str, db: Session) -> str:
         lines.append(f"💰 *Salary:* {salary_str}/mo")
     if profile.available_from:
         lines.append(f"📅 *Available:* {profile.available_from}")
+    lines.append(f"\n🔗 *Your public profile:* {_public_profile_url(db, profile)}\n_Send it to a captain or recruiter — no login needed to view it._")
     lines.append(token_line.strip())
     return "\n".join(lines)
 
@@ -1916,11 +2169,17 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         )
         return
 
-    credits_remaining = spend_credits(db, phone_number, amount=1)
-    if credits_remaining is None:
-        record_server_event(phone_number, "paywall_hit", "whatsapp")
-        await _send_paywall_teaser(phone_number, db, profile, all_jobs)
-        return
+    # CREW_MATCH_FREE: the run costs nothing and can never be refused. The
+    # balance is still read so it keeps appearing where it already did.
+    free_run = crew_match_free()
+    if free_run:
+        credits_remaining = get_credit_balance(db, phone_number)
+    else:
+        credits_remaining = spend_credits(db, phone_number, amount=1)
+        if credits_remaining is None:
+            record_server_event(phone_number, "paywall_hit", "whatsapp")
+            await _send_paywall_teaser(phone_number, db, profile, all_jobs)
+            return
 
     _AVG_SECS_PER_BATCH = 8
     scored_jobs = min(len(all_jobs), PREFILTER_TOP_N)
@@ -1930,9 +2189,13 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     est_str = f"~{est_secs}s" if est_secs < 60 else f"~{round(est_secs / 60)} min"
 
     tok_left = "token" if credits_remaining == 1 else "tokens"
+    spend_note = (
+        "🎁 *This run is free.*\n\n" if free_run
+        else f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
+    )
     await _send_whatsapp(
         phone_number,
-        f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
+        spend_note
         + (widen_note + "\n\n" if widen_note else "")
         + f"⏳ Ranking *{len(all_jobs)} positions* from *{scope_label}* against your profile ({est_str}) — hang tight.",
     )
@@ -2000,10 +2263,16 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         )
     except Exception as exc:
         log.error("WhatsApp match engine error | %s", exc)
-        credits_remaining = add_credits(db, phone_number, amount=1)
+        # Nothing was charged for a free run, so there is nothing to refund —
+        # and promising a refund that never happens is worse than saying less.
+        if free_run:
+            snag = "⚠️ Matching hit a snag. Try again in a moment?"
+        else:
+            credits_remaining = add_credits(db, phone_number, amount=1)
+            snag = "⚠️ Matching hit a snag — your token was refunded. Try again in a moment?"
         await _send_whatsapp_buttons(
             phone_number,
-            "⚠️ Matching hit a snag — your token was refunded. Try again in a moment?",
+            snag,
             [("btn_find_matches", "Try Again"), ("btn_menu", "Menu")],
         )
         return
@@ -2013,15 +2282,22 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         # A run that surfaces nothing delivered nothing — the user does not pay
         # for it. add_credits is the refund path (same as the engine-error
         # branch above) and returns the new balance.
-        credits_remaining = add_credits(db, phone_number, amount=1)
+        if not free_run:
+            credits_remaining = add_credits(db, phone_number, amount=1)
         record_server_event(phone_number, "match_zero_refund", str(len(all_jobs)))
         bal_w = "token" if credits_remaining == 1 else "tokens"
+        ranked = (
+            f"I ranked {len(all_jobs)} live position{'s' if len(all_jobs) != 1 else ''} "
+            "and none of them clear the bar for you right now"
+        )
         await _send_whatsapp(
             phone_number,
-            f"I ranked {len(all_jobs)} live position{'s' if len(all_jobs) != 1 else ''} "
-            "and none of them clear the bar for you right now — so I've put your "
-            f"token back. You're at *{credits_remaining}* {bal_w}.\n\n"
-            "Certs, preferred cruising grounds and a salary range usually turn "
+            (
+                f"{ranked}.\n\n" if free_run else
+                f"{ranked} — so I've put your token back. "
+                f"You're at *{credits_remaining}* {bal_w}.\n\n"
+            )
+            + "Certs, preferred cruising grounds and a salary range usually turn "
             "this around on the next run.",
         )
         await _send_whatsapp_buttons(
@@ -2087,10 +2363,13 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     lines.append(f"\n💬 Reply {digits} for full details & how to apply — right here in chat.")
 
     lines.append(f"\nTokens remaining: *{credits_remaining}*")
-    if credits_remaining <= 1:
+    if credits_remaining <= 1 and not free_run:
         # Peak-engagement nudge: they just saw real matches and are about to
         # run out of runs. The picker makes topping up a two-tap flow.
         lines.append("_Running low — type *buy tokens* to top up in seconds._")
+
+    # The growth loop, at the one moment the product has just proved itself.
+    lines.append("\n" + _referral_invite_line(phone_number))
 
     await _send_whatsapp(phone_number, "\n".join(lines))
 
@@ -2147,6 +2426,58 @@ async def _run_match_command_background(
         _finish_match_run(phone_number)
         if ctx_token is not None:
             _wa_graph_phone_id.reset(ctx_token)
+
+
+# ── Free first match run (durable) ───────────────────────────────────────────
+# The run promised at the end of onboarding used to live only in the asyncio
+# task that was about to perform it, so a deploy in that window silently broke
+# the promise. `whatsapp_sessions.pending_first_match` is the durable record:
+# set before the task starts, cleared when it finishes, resumed on the user's
+# next message if the process died in between.
+
+def _set_pending_first_match(phone: str, value: bool) -> None:
+    """Best-effort flag write on its own session (callers are detached tasks)."""
+    db = SessionLocal()
+    try:
+        ws = db.query(WhatsAppSession).filter(WhatsAppSession.phone_number == phone).first()
+        if ws is not None and bool(ws.pending_first_match) != value:
+            ws.pending_first_match = value
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        log.warning("pending_first_match write failed | phone=%s | %s", phone[:6] + "****", exc)
+    finally:
+        db.close()
+
+
+async def _first_match_task(phone: str, graph_phone_number_id: str = "", delay_seconds: float = 3.0) -> None:
+    """The free post-onboarding run, plus the enrichment nudge that follows it."""
+    try:
+        if delay_seconds:
+            # Small delay so the welcome message lands before match updates.
+            await asyncio.sleep(delay_seconds)
+        # Freshness first: the automatic run scans the last WA_MATCH_RECENT_DAYS
+        # and widens itself when that is too thin.
+        await _run_match_command_background(phone, graph_phone_number_id, _MATCH_SCOPE_RECENT)
+        # Results are on screen — best moment to ask for the one optional field
+        # that sharpens matching most (certs left out of the 4-question
+        # onboarding on purpose).
+        await _send_post_match_enrichment(phone)
+    finally:
+        _set_pending_first_match(phone, False)
+
+
+async def _resume_pending_first_match(wa_session: WhatsAppSession, db: Session) -> bool:
+    """Kick off a first run this process never delivered. True when resumed."""
+    if not getattr(wa_session, "pending_first_match", False):
+        return False
+    phone = wa_session.phone_number
+    if not _try_start_match_run(phone):
+        return False  # still running here — its own task will clear the flag
+    record_server_event(phone, "first_match_resumed", "whatsapp")
+    log.info("Resuming promised first match run | phone=%s", phone[:6] + "****")
+    asyncio.create_task(_first_match_task(phone, _wa_graph_phone_id.get() or "", delay_seconds=0))
+    return True
 
 
 async def _send_post_match_enrichment(phone: str, db: Session | None = None) -> None:
@@ -2726,9 +3057,16 @@ async def _send_role_job_preview(
 
     remaining = len([f for f in _missing_onboard_fields(partial) if f != "desiredRole"])
     target = f"all {n}" if n > 1 else "it"
+    # Only call the run free when this user can actually pay for one — the
+    # same lie in the win-back copy sent a user with 0 tokens straight to the
+    # paywall from a button that said "free".
+    free_bit = (
+        " and your first run is free"
+        if crew_match_free() or get_credit_balance(db, phone) >= 1 else ""
+    )
     lines.append(
         f"\nWant me to rank {target} against your profile? "
-        f"{remaining} quick question{'s' if remaining != 1 else ''} and your first run is free."
+        f"{remaining} quick question{'s' if remaining != 1 else ''}{free_bit}."
     )
 
     text = "\n".join(lines)
@@ -2936,27 +3274,23 @@ async def _finish_onboarding(
     link = _make_magic_link(wa_session.phone_number, db)
     name = partial.get("firstName", "crew")
 
+    # Growth loop: an invited user is only real once they finish onboarding,
+    # so this is where both sides get paid — exactly once.
+    referrer = _credit_referral(wa_session, db)
+
     # Activation moment: run the first match immediately on the free signup
     # token instead of hoping the user discovers the *match* command later.
     balance = get_credit_balance(db, wa_session.phone_number)
-    first_match_started = balance > 0 and _try_start_match_run(wa_session.phone_number)
+    first_match_started = (balance > 0 or crew_match_free()) and _try_start_match_run(wa_session.phone_number)
     if first_match_started:
         record_server_event(wa_session.phone_number, "first_match_auto_run", "whatsapp")
         graph_phone_number_id = _wa_graph_phone_id.get() or ""
-        phone = wa_session.phone_number
-
-        async def _first_match_run() -> None:
-            # Small delay so the welcome message lands before match updates.
-            await asyncio.sleep(3)
-            # Freshness first: the automatic run scans the last
-            # WA_MATCH_RECENT_DAYS and widens itself when that is too thin.
-            await _run_match_command_background(phone, graph_phone_number_id, _MATCH_SCOPE_RECENT)
-            # Results are on screen — best moment to ask for the one optional
-            # field that sharpens matching most (certs left out of the
-            # 4-question onboarding on purpose).
-            await _send_post_match_enrichment(phone)
-
-        asyncio.create_task(_first_match_run())
+        # The promise ("your results land right here") outlives this process,
+        # so it is written down: a deploy between here and the run resumes it
+        # on the user's next message instead of stranding them.
+        wa_session.pending_first_match = True
+        db.commit()
+        asyncio.create_task(_first_match_task(wa_session.phone_number, graph_phone_number_id))
 
     message += (
         f"\n\n🎉 *Welcome to the fleet, {name}!* Your crew profile is live.\n\n"
@@ -2966,12 +3300,31 @@ async def _finish_onboarding(
             "🚀 I'm already ranking the live jobs against your profile, on the house — "
             "your results land right here in a minute or two.\n\n"
         )
-    message += (
-        f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
-        f"type *buy tokens* to top up, or submit a valid job to earn a free token. "
-        f"_Type *help* anytime to see what I can do for you._ ⚡"
-    )
+    if referrer:
+        message += (
+            f"🎁 You came in on a friend's invite — *+{_REFERRAL_BONUS_TOKENS} match runs* "
+            "added to both your accounts.\n\n"
+        )
+    profile = db.query(CrewProfile).filter(CrewProfile.user_key == wa_session.phone_number).first()
+    if profile is not None:
+        message += (
+            f"🔗 *Your public profile:* {_public_profile_url(db, profile)} — "
+            "send it to any captain or recruiter.\n\n"
+        )
+    if crew_match_free():
+        message += (
+            "💳 *Find Matches* runs are free right now — run as many as you like. "
+            "_Type *help* anytime to see what I can do for you._ ⚡"
+        )
+    else:
+        message += (
+            f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
+            f"type *buy tokens* to top up, or submit a valid job to earn a free token. "
+            f"_Type *help* anytime to see what I can do for you._ ⚡"
+        )
     await _send_whatsapp(wa_session.phone_number, message)
+    if referrer:
+        await _notify_referrer(referrer, db)
     await _send_whatsapp_cta_url(
         wa_session.phone_number,
         body="To really stand out, upload your docs — CV, passport, STCW & certs:",
@@ -3033,6 +3386,35 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
             f"CARVER is pay-per-token — no recurring plan to cancel.\n\n"
             f"Your balance: *{bal} {w}*.",
             [("cmd_subscribe", "Buy Tokens"), ("btn_menu", "Menu")],
+        )
+        return None
+
+    if cmd in ("refer", "invite", "referral", "refer a friend", "invite a friend", "my code"):
+        record_server_event(phone, "referral_link_requested", "whatsapp")
+        await _send_whatsapp(
+            phone,
+            f"🤝 *Your invite code: {_referral_code(phone)}*\n\n"
+            + _referral_invite_line(phone)
+            + "\n\nThey get a profile and their first ranked jobs in a couple of minutes — "
+            f"and *{_REFERRAL_BONUS_TOKENS} runs* land on both accounts the moment they finish signing up.",
+        )
+        return None
+
+    if cmd in ("profile link", "my link", "public profile", "share profile", "my profile link"):
+        profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone).first()
+        if not profile:
+            await _send_whatsapp(
+                phone,
+                "You don't have a crew profile yet — type *edit profile* to set one up, "
+                "then I'll give you a public link to share.",
+            )
+            return None
+        record_server_event(phone, "profile_link_shared", "whatsapp")
+        await _send_whatsapp(
+            phone,
+            f"🔗 *Your public crew profile*\n{_public_profile_url(db, profile)}\n\n"
+            "Send it to a captain, an agency or a group — no login needed to view it. "
+            "A complete profile (docs, certs, photo) is what makes it land.",
         )
         return None
 
@@ -3292,6 +3674,10 @@ async def _process_whatsapp_message(
         # else reads the message.
         if _is_first_contact(wa_session):
             user_text = _record_first_contact(phone_number, wa_session, user_text, db)
+
+        # A first run we promised but never delivered (deploy mid-onboarding)
+        # restarts here, alongside — never instead of — this message's reply.
+        await _resume_pending_first_match(wa_session, db)
 
         # Opt-out beats command routing — see _handle_opt_out_keywords.
         if await _handle_opt_out_keywords(phone_number, wa_session, user_text, db):

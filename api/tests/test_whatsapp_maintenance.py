@@ -3,9 +3,25 @@ inbound WhatsApp message with the maintenance notice."""
 import importlib
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 import app.settings as settings_module
 from app.routes import whatsapp
 from app.settings import settings
+
+from tests.conftest import _TestingSession
+
+
+@pytest.fixture(autouse=True)
+def _dedup_in_test_db(monkeypatch):
+    """Webhook dedup is durable — keep its claim rows out of the dev DB.
+
+    Without this the fixed message ids below are "already seen" on the second
+    run of the suite and the webhook drops them.
+    """
+    monkeypatch.setattr(whatsapp, "SessionLocal", _TestingSession)
+    whatsapp._SEEN_MSG_IDS.clear()
+    whatsapp._SEEN_MSG_IDS_ORDER.clear()
 
 
 def _meta_payload(msg: dict) -> dict:

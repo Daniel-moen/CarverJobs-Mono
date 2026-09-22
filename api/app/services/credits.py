@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -6,6 +7,19 @@ from sqlalchemy.orm import Session
 
 from app.models import CreditAccount, Subscription
 from app.settings import settings
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def crew_match_free() -> bool:
+    """Flag: crew match runs cost nothing (env CREW_MATCH_FREE, default off).
+
+    Read at call time, not import time, so the flag can be flipped on a running
+    process (and monkeypatched in tests). When on, neither channel spends a
+    token on a match run and none of the paywall copy is shown — balances still
+    display where they already did, they just never block a run.
+    """
+    return os.getenv("CREW_MATCH_FREE", "false").strip().lower() in _TRUTHY
 
 
 def _get_or_create_account(db: Session, user_key: str) -> CreditAccount:
