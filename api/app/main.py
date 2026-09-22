@@ -29,6 +29,10 @@ from app.services.apply_followup import apply_followup_loop
 from app.services.window_winback import window_winback_loop
 from app.services.job_alerts import job_alert_loop
 from app.services.job_retention import retention_loop
+from app.services.weekly_digest_article import (
+    ENV_ENABLED as WEEKLY_DIGEST_ARTICLE_ENV,
+    weekly_digest_article_loop,
+)
 from app.seed_users import ensure_default_user
 from app.shadow_capture import install_shadow_capture
 from app.go_routing import install_go_canary, load_flagged_users
@@ -100,6 +104,12 @@ async def lifespan(app: FastAPI):
             else "free-form only — dormant users need WHATSAPP_JOB_ALERT_TEMPLATE",
         )
         background_tasks.append(asyncio.create_task(job_alert_loop()))
+        log.info(
+            "Starting weekly jobs-article loop (interval=6h, %s=%s)",
+            WEEKLY_DIGEST_ARTICLE_ENV,
+            os.getenv(WEEKLY_DIGEST_ARTICLE_ENV, "true"),
+        )
+        background_tasks.append(asyncio.create_task(weekly_digest_article_loop()))
         log.info("Starting apply follow-up loop (interval=%dh)", settings.APPLY_FOLLOWUP_CHECK_INTERVAL_HOURS)
         background_tasks.append(asyncio.create_task(apply_followup_loop()))
         log.info(

@@ -6,8 +6,9 @@ Public (no auth):
   GET  /articles/{slug}       — single published article.
 
 Agent-authenticated (bearer token AGENT_API_TOKEN):
-  POST   /agent/articles          — create or upsert (by slug).
-  DELETE /agent/articles/{slug}   — delete permanently.
+  POST   /agent/articles                 — create or upsert (by slug).
+  POST   /agent/articles/weekly-digest   — publish the weekly jobs round-up.
+  DELETE /agent/articles/{slug}          — delete permanently.
 
 The body is stored as a validated JSON list of structured blocks
 (`p`, `h2`, `ul`). The frontend renders them as escaped text, never
@@ -20,7 +21,7 @@ import json
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
@@ -28,9 +29,13 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.error_codes import CRV_2004, CRV_5005
+from app.error_codes import CRV_1003, CRV_2004, CRV_5005
 from app.logger import get_logger
 from app.models import Article
+from app.services.weekly_digest_article import (
+    MIN_JOBS_FOR_ARTICLE,
+    publish_weekly_article,
+)
 from app.settings import settings
 
 log = get_logger("carver.articles")
@@ -887,6 +892,43 @@ def upsert_article(
         "created": created,
         "article": _serialise(row),
     }
+
+
+@agent_router.post("/weekly-digest", dependencies=[Depends(_require_agent_token)])
+@_limiter.limit("30/minute")
+def publish_weekly_digest_article(
+    request: Request,
+    week: str | None = Query(
+        None, description='ISO week, e.g. "2026-W38". Defaults to the last completed week.'
+    ),
+    force: bool = Query(
+        False, description="Publish even when the week has fewer than the minimum roles."
+    ),
+    db: Session = Depends(get_db),
+):
+    """Publish (or refresh) the public "Superyacht jobs this week" article.
+
+    Manual twin of `weekly_digest_article_loop` — same deterministic slug, so
+    calling it twice for one week updates the row rather than duplicating it.
+    """
+    try:
+        row = publish_weekly_article(
+            db, week, min_jobs=0 if force else MIN_JOBS_FOR_ARTICLE
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+            headers={"X-Error-Code": CRV_1003},
+        ) from exc
+
+    if row is None:
+        return {
+            "ok": True,
+            "published": False,
+            "reason": f"fewer than {MIN_JOBS_FOR_ARTICLE} roles posted in that week",
+        }
+    return {"ok": True, "published": True, "article": _serialise(row)}
 
 
 @agent_router.delete("/{slug}", dependencies=[Depends(_require_agent_token)])
