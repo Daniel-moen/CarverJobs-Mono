@@ -42,13 +42,14 @@ def scraper_status():
     actor_ids = [a for a in settings.APIFY_ACTOR_IDS if a.strip()]
     start_urls = [u for u in settings.APIFY_START_URLS if u.strip()]
 
-    # Build a list of active web scrapers for the dashboard
+    # Build a list of active web scrapers for the dashboard. Dockwalk,
+    # CrewFinders, Viking Crew and Reed were dropped in Sep 2026 (dead sources,
+    # scrapers deleted) — listing them here showed "enabled" for scrapers the
+    # cycle no longer runs, which is exactly the kind of false green the
+    # dashboard exists to prevent.
     web_scrapers: list[dict] = [
-        {"name": "Dockwalk",     "enabled": settings.DOCKWALK_ENABLED,      "needs_proxy": True},
         {"name": "Yotspot",      "enabled": settings.WORKONAYACHT_ENABLED,   "needs_proxy": True},
         {"name": "Faststream",   "enabled": settings.FASTSTREAM_ENABLED,     "needs_proxy": False},
-        {"name": "CrewFinders",  "enabled": settings.CREWFINDERS_ENABLED,    "needs_proxy": False},
-        {"name": "Viking Crew",  "enabled": settings.VIKINGCREW_ENABLED,     "needs_proxy": True},
     ]
     scrape_do_ok = bool(settings.SCRAPE_DO_TOKEN)
 

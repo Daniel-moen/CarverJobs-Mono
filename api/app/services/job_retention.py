@@ -6,7 +6,13 @@ table grows without bound. This module applies a two-tier, age-based policy
 (age measured from `Job.created_at`):
 
   1. Soft-expire — jobs still on active surfaces (`status in ("open","priority")`)
-     older than JOB_EXPIRE_AFTER_DAYS are flipped to status ``"expired"``. The
+     past their expiry age are flipped to status ``"expired"``. The age limit
+     depends on where the job came from: Facebook-group posts expire after
+     JOB_EXPIRE_AFTER_DAYS_FB (14) because a yacht vacancy posted in a crew
+     group is filled within days — showing a three-week-old group post as live
+     supply is how crew learn the board is stale. Job-board sources keep the
+     longer JOB_EXPIRE_AFTER_DAYS (30); those listings are taken down at source
+     when filled, so age alone says much less about them. The
      row is kept (preserving match history / audit), but the matching engine and
      job board only show ``status in ("open","priority")``, so the job vanishes
      from all client-facing surfaces. The ``"expired"`` string is a SHARED
@@ -20,8 +26,10 @@ A background loop (`retention_loop`) runs this on a fixed interval, mirroring
 loop continues.
 """
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func, not_, or_
 from sqlalchemy.orm import Session
 
 from app.logger import get_logger
@@ -35,26 +43,77 @@ log = get_logger("carver.retention")
 _ACTIVE_STATUSES = ("open", "priority")
 _EXPIRED_STATUS = "expired"
 
+# Job.source values that mean "scraped out of a Facebook crew group". Apify is
+# the only Facebook ingest path; the application_url check below catches jobs
+# imported by hand from a group post, which carry a facebook.com link.
+_FB_SOURCES = ("apify",)
+
+
+def fb_expire_after_days() -> int:
+    """Expiry age for Facebook-group jobs, in days (JOB_EXPIRE_AFTER_DAYS_FB).
+
+    Falls back to the env var, then to 14, so this module keeps working against
+    a settings build that predates the setting.
+    """
+    configured = getattr(settings, "JOB_EXPIRE_AFTER_DAYS_FB", None)
+    if isinstance(configured, int):
+        return configured
+    try:
+        return int(os.getenv("JOB_EXPIRE_AFTER_DAYS_FB", "14"))
+    except ValueError:
+        log.warning("JOB_EXPIRE_AFTER_DAYS_FB is not an integer — falling back to 14")
+        return 14
+
+
+def _is_facebook_sourced():
+    """SQL predicate matching Facebook-group jobs.
+
+    COALESCE on both columns matters: in SQL, ``NULL IN (...)`` and
+    ``NULL LIKE ...`` are NULL, not false, so the negated predicate used for
+    the non-Facebook pass would silently match nothing for rows with a NULL
+    source or application_url — i.e. those jobs would never expire at all.
+    """
+    return or_(
+        func.coalesce(Job.source, "").in_(_FB_SOURCES),
+        func.coalesce(Job.application_url, "").like("%facebook.com%"),
+    )
+
 
 def purge_stale_jobs(db: Session) -> dict[str, int]:
     """Apply the two-tier retention policy in bulk and return counts.
 
     Returns ``{"expired": n, "deleted": n}`` where ``expired`` is the number of
-    active jobs flipped to ``"expired"`` and ``deleted`` the number of rows
+    active jobs flipped to ``"expired"`` (Facebook-group jobs on the short
+    clock, everything else on the long one) and ``deleted`` the number of rows
     removed entirely.
     """
     now = datetime.now(timezone.utc)
-    expire_cutoff = now - timedelta(days=settings.JOB_EXPIRE_AFTER_DAYS)
+    fb_days = fb_expire_after_days()
+    fb_cutoff = now - timedelta(days=fb_days)
+    other_cutoff = now - timedelta(days=settings.JOB_EXPIRE_AFTER_DAYS)
     delete_cutoff = now - timedelta(days=settings.JOB_DELETE_AFTER_DAYS)
 
-    # 1. Soft-expire active jobs older than the expiry cutoff.
-    expired = (
+    is_fb = _is_facebook_sourced()
+
+    # 1a. Soft-expire Facebook-group jobs on the short clock.
+    expired_fb = (
         db.query(Job)
-        .filter(Job.status.in_(_ACTIVE_STATUSES), Job.created_at < expire_cutoff)
+        .filter(Job.status.in_(_ACTIVE_STATUSES), is_fb, Job.created_at < fb_cutoff)
         .update({Job.status: _EXPIRED_STATUS}, synchronize_session=False)
     )
 
-    # 2. Hard-delete anything older than the delete cutoff (any status).
+    # 1b. Soft-expire everything else on the original clock.
+    expired_other = (
+        db.query(Job)
+        .filter(
+            Job.status.in_(_ACTIVE_STATUSES),
+            not_(is_fb),
+            Job.created_at < other_cutoff,
+        )
+        .update({Job.status: _EXPIRED_STATUS}, synchronize_session=False)
+    )
+
+    # 2. Hard-delete anything older than the delete cutoff (any status/source).
     deleted = (
         db.query(Job)
         .filter(Job.created_at < delete_cutoff)
@@ -63,11 +122,12 @@ def purge_stale_jobs(db: Session) -> dict[str, int]:
 
     db.commit()
 
+    expired = expired_fb + expired_other
     log.info(
-        "Job retention complete | expired=%d | deleted=%d | "
-        "expire_after_days=%d | delete_after_days=%d",
-        expired, deleted,
-        settings.JOB_EXPIRE_AFTER_DAYS, settings.JOB_DELETE_AFTER_DAYS,
+        "Job retention complete | expired=%d (facebook=%d other=%d) | deleted=%d | "
+        "fb_expire_after_days=%d | expire_after_days=%d | delete_after_days=%d",
+        expired, expired_fb, expired_other, deleted,
+        fb_days, settings.JOB_EXPIRE_AFTER_DAYS, settings.JOB_DELETE_AFTER_DAYS,
     )
     return {"expired": expired, "deleted": deleted}
 

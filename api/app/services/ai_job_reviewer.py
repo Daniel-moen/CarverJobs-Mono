@@ -13,6 +13,20 @@ from app.services.ai_client import AIClientError, call_openai
 
 log = get_logger("carver.ai_reviewer")
 
+# Appended to both prompts. Crew apply by phone as often as by email — a yacht
+# post that says "WhatsApp me" and nothing else is unactionable without this —
+# but the numbers arrive in every format their country uses, so the model is
+# told exactly when it may infer a country code and when it must not.
+_PHONE_RULES = """
+
+PHONE RULES for contact_phone:
+- Return E.164: a leading "+", the country code, then digits only. No spaces, dashes, brackets, or "WhatsApp"/"Tel" labels.
+- The number already carries an international prefix ("+27 82 123 4567", "0027821234567", "0033 6 12 34 56 78") → keep that country code.
+- The number is LOCAL and the post names the country or an unambiguous port → add that country code and drop the national trunk "0": South Africa 082 123 4567 → +27821234567; France 06 12 34 56 78 → +33612345678; UK 07911 123456 → +447911123456; US/Canada (415) 555-0123 → +14155550123.
+- You cannot tell which country it belongs to → return it exactly as written rather than guessing a country code.
+- Never invent, complete, or correct digits. Never return something that is not a phone number (vessel length, salary, year, MMSI, licence tonnage).
+- Several numbers given → return the one to apply on, preferring a WhatsApp/mobile number over an office landline."""
+
 _SYSTEM_PROMPT = """You are a strict yacht industry job listing analyst. You receive text from a Facebook post in a yacht crew jobs group.
 
 Your job:
@@ -76,13 +90,14 @@ If it IS a hiring post:
   "requirements": "Key requirements as a concise paragraph, or null",
   "benefits": "Any benefits mentioned (accommodation, travel, etc.) or null",
   "contact_email": "email address extracted verbatim or null",
+  "contact_phone": "contact/WhatsApp phone number in E.164 (e.g. +27821234567, +33612345678, +14155550123) or null — see the phone rules below",
   "recruiter_name": "contact/recruiter name or null",
   "recruiter_agency": "agency or company name or null",
   "urgent_hire": false,
   "visa_support": false,
   "accommodation": "Onboard | Shoreside | null",
   "travel_reimbursement": false
-}"""
+}""" + _PHONE_RULES
 
 _NORMALISE_PROMPT = """You are a yacht industry data normaliser. You receive text scraped from a yacht crew job board website.
 
@@ -124,13 +139,14 @@ If it IS a real job listing:
   "requirements": "Key requirements as a concise paragraph, or null",
   "benefits": "Any benefits mentioned or null",
   "contact_email": "email address extracted verbatim or null",
+  "contact_phone": "contact/WhatsApp phone number in E.164 (e.g. +27821234567) or null — see the phone rules below",
   "recruiter_name": "contact/recruiter name or null",
   "recruiter_agency": "agency or company name or null",
   "urgent_hire": false,
   "visa_support": false,
   "accommodation": "Onboard | Shoreside | null",
   "travel_reimbursement": false
-}"""
+}""" + _PHONE_RULES
 
 
 def review_post(

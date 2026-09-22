@@ -3,16 +3,22 @@ Scraper scheduler — runs a full scrape cycle every SCRAPE_INTERVAL_HOURS (24h)
 
 Cycle includes:
   1. Facebook groups via Apify (raw fetch, no date filter sent to actor).
-  2. Dockwalk.com job listings (if enabled).
-  3. WorkOnAYacht.com job listings (if enabled).
-  4. CrewFinders (if enabled).
-  5. Viking Crew (if enabled).
-  6. Faststream (if enabled).
-  7. Reed/SuperYachtTimes (if enabled).
+  2. WorkOnAYacht.com / Yotspot job listings (if enabled).
+  3. Faststream (if enabled).
+
+Dockwalk, CrewFinders, Viking Crew and Reed/SuperYachtTimes were removed in
+Sep 2026: all four sources stopped returning listings (layout changes and
+bot-walls), so their scrapers were dead weight that made the cycle look busier
+than it was. Their scraper modules are gone — do not re-add a call here without
+re-adding a working scraper.
 
 Deduplication is handled by job_sync (content_hash, job_fingerprint, URL).
 State is held in-memory and exposed via get_scraper_state() for the
 /scraper/status admin endpoint.
+
+A cycle that fails, or that produces no new jobs several runs in a row, pages
+the operator over WhatsApp (services/ops_alerts) — the dead-Apify outage that
+ran for months was invisible precisely because nothing here ever spoke up.
 """
 import asyncio
 from datetime import datetime, timezone
@@ -42,6 +48,20 @@ _state: dict = {
 }
 
 _HISTORY_MAX = 100
+
+# Consecutive cycles that created nothing before the operator is paged. One
+# empty cycle is normal (quiet weekend, everything deduped); three in a row at
+# a 24h interval means the supply side is dead, which is the outage that went
+# unnoticed for months. Alerts fire once when the streak is reached, not on
+# every cycle after it — steady-state nagging is how a channel gets muted.
+_ZERO_RUN_ALERT_THRESHOLD = 3
+_zero_run_streak = 0
+
+
+def reset_alert_state() -> None:
+    """Clear the zero-result streak. Test seam; also used by manual triggers."""
+    global _zero_run_streak
+    _zero_run_streak = 0
 
 
 def get_scraper_state() -> dict:
@@ -74,11 +94,12 @@ async def run_scrape_once(
     """
     Execute one full scrape cycle:
       1. Apify Facebook groups (with watermark-based date filtering).
-      2. Dockwalk.com (if DOCKWALK_ENABLED).
-      3. WorkOnAYacht.com (if WORKONAYACHT_ENABLED).
+      2. WorkOnAYacht.com / Yotspot (if WORKONAYACHT_ENABLED).
+      3. Faststream (if FASTSTREAM_ENABLED).
 
     All errors are caught, logged with their CRV code, and stored in _state
-    so /scraper/status always reflects the latest outcome.
+    so /scraper/status always reflects the latest outcome. They are also
+    collected locally so the cycle can page the operator once at the end.
 
     force=True    — bypasses feature flags (used by manual trigger).
     startup=True  — marks this as the on-boot call; Apify is skipped unless
@@ -123,6 +144,9 @@ async def run_scrape_once(
 
         total_created = total_skipped = total_errors = 0
         total_fetched = 0
+        # Human-readable failures from THIS cycle (per-source, not per-item), so
+        # the ops alert reports what actually broke instead of "something did".
+        failures: list[str] = []
 
         # ── 1. Apify (Facebook groups — paid) ────────────────────────────────
         if apify_enabled:
@@ -165,54 +189,24 @@ async def run_scrape_once(
                 _record_source("apify", len(items), created, skipped)
 
             except ApifyKeyMissingError as exc:
-                _set_error(CRV_6001, exc)
+                failures.append(_set_error(CRV_6001, exc))
             except ApifyActorMissingError as exc:
-                _set_error(CRV_6002, exc)
+                failures.append(_set_error(CRV_6002, exc))
             except ApifyTimeoutError as exc:
-                _set_error(CRV_6003, exc)
+                failures.append(_set_error(CRV_6003, exc))
             except ApifyRunFailedError as exc:
-                _set_error(CRV_6004, exc)
+                failures.append(_set_error(CRV_6004, exc))
             except (ApifyHTTPError, ApifyNetworkError, ApifyError) as exc:
-                _set_error(CRV_6005, exc)
+                failures.append(_set_error(CRV_6005, exc))
             except JobSyncError as exc:
-                _set_error(CRV_6006, exc)
+                failures.append(_set_error(CRV_6006, exc))
             except Exception as exc:
-                _set_error(CRV_6006, exc)
+                failures.append(_set_error(CRV_6006, exc))
                 log.exception("Apify scrape failed with unexpected error | %s", exc)
         else:
             log.info("Apify scraper disabled by feature flag — skipping")
 
-        # ── 2. Dockwalk ───────────────────────────────────────────────────────
-        if web_enabled and settings.DOCKWALK_ENABLED:
-            try:
-                from app.services.dockwalk_scraper import DockwalkScraper
-                dw_items: list[dict] = await asyncio.to_thread(
-                    DockwalkScraper(scrape_do_token=settings.SCRAPE_DO_TOKEN).scrape
-                )
-                total_fetched += len(dw_items)
-                log.info("Dockwalk scrape complete | items=%d", len(dw_items))
-
-                def _sync_dockwalk() -> tuple[int, int, int]:
-                    db = SessionLocal()
-                    try:
-                        return sync_jobs(
-                            db, dw_items,
-                            openai_api_key=settings.OPENAI_API_KEY,
-                            openai_model=settings.OPENAI_MODEL,
-                            source="dockwalk",
-                        )
-                    finally:
-                        db.close()
-
-                c, s, e = await asyncio.to_thread(_sync_dockwalk)
-                total_created += c
-                total_skipped += s
-                total_errors += e
-                _record_source("dockwalk", len(dw_items), c, s)
-            except Exception as exc:
-                log.error("Dockwalk scrape failed | error=%s", exc)
-
-        # ── 3. WorkOnAYacht / Yotspot ─────────────────────────────────────────
+        # ── 2. WorkOnAYacht / Yotspot ─────────────────────────────────────────
         if web_enabled and settings.WORKONAYACHT_ENABLED:
             try:
                 from app.services.workonayacht_scraper import WorkOnAYachtScraper
@@ -241,66 +235,9 @@ async def run_scrape_once(
                 _record_source("workonayacht", len(woa_items), c, s)
             except Exception as exc:
                 log.error("WorkOnAYacht scrape failed | error=%s", exc)
+                failures.append(f"WorkOnAYacht scrape failed: {exc}")
 
-        # ── 4. CrewFinders ────────────────────────────────────────────────────
-        if web_enabled and settings.CREWFINDERS_ENABLED:
-            try:
-                from app.services.crewfinders_scraper import CrewFindersScraper
-                cf_items: list[dict] = await asyncio.to_thread(CrewFindersScraper().scrape)
-                total_fetched += len(cf_items)
-                log.info("CrewFinders scrape complete | items=%d", len(cf_items))
-
-                def _sync_crewfinders() -> tuple[int, int, int]:
-                    db = SessionLocal()
-                    try:
-                        return sync_jobs(
-                            db, cf_items,
-                            openai_api_key=settings.OPENAI_API_KEY,
-                            openai_model=settings.OPENAI_MODEL,
-                            source="crewfinders",
-                        )
-                    finally:
-                        db.close()
-
-                c, s, e = await asyncio.to_thread(_sync_crewfinders)
-                total_created += c
-                total_skipped += s
-                total_errors += e
-                _record_source("crewfinders", len(cf_items), c, s)
-            except Exception as exc:
-                log.error("CrewFinders scrape failed | error=%s", exc)
-
-        # ── 5. Viking Crew ────────────────────────────────────────────────────
-        if web_enabled and settings.VIKINGCREW_ENABLED:
-            try:
-                from app.services.vikingcrew_scraper import VikingCrewScraper
-                vc_items: list[dict] = await asyncio.to_thread(
-                    VikingCrewScraper(scrape_do_token=settings.SCRAPE_DO_TOKEN).scrape
-                )
-                total_fetched += len(vc_items)
-                log.info("Viking Crew scrape complete | items=%d", len(vc_items))
-
-                def _sync_vikingcrew() -> tuple[int, int, int]:
-                    db = SessionLocal()
-                    try:
-                        return sync_jobs(
-                            db, vc_items,
-                            openai_api_key=settings.OPENAI_API_KEY,
-                            openai_model=settings.OPENAI_MODEL,
-                            source="vikingcrew",
-                        )
-                    finally:
-                        db.close()
-
-                c, s, e = await asyncio.to_thread(_sync_vikingcrew)
-                total_created += c
-                total_skipped += s
-                total_errors += e
-                _record_source("vikingcrew", len(vc_items), c, s)
-            except Exception as exc:
-                log.error("Viking Crew scrape failed | error=%s", exc)
-
-        # ── 6. Faststream ─────────────────────────────────────────────────────
+        # ── 3. Faststream ─────────────────────────────────────────────────────
         if web_enabled and settings.FASTSTREAM_ENABLED:
             try:
                 from app.services.faststream_scraper import FaststreamScraper
@@ -327,38 +264,13 @@ async def run_scrape_once(
                 _record_source("faststream", len(fs_items), c, s)
             except Exception as exc:
                 log.error("Faststream scrape failed | error=%s", exc)
-
-        # ── 7. Reed (registered as superyachttimes) ───────────────────────────
-        if web_enabled and settings.SUPERYACHTTIMES_ENABLED:
-            try:
-                from app.services.superyachttimes_scraper import SuperYachtTimesScraper
-                reed_items: list[dict] = await asyncio.to_thread(SuperYachtTimesScraper().scrape)
-                total_fetched += len(reed_items)
-                log.info("Reed scrape complete | items=%d", len(reed_items))
-
-                def _sync_reed() -> tuple[int, int, int]:
-                    db = SessionLocal()
-                    try:
-                        return sync_jobs(
-                            db, reed_items,
-                            openai_api_key=settings.OPENAI_API_KEY,
-                            openai_model=settings.OPENAI_MODEL,
-                            source="reed",
-                        )
-                    finally:
-                        db.close()
-
-                c, s, e = await asyncio.to_thread(_sync_reed)
-                total_created += c
-                total_skipped += s
-                total_errors += e
-                _record_source("reed", len(reed_items), c, s)
-            except Exception as exc:
-                log.error("Reed scrape failed | error=%s", exc)
+                failures.append(f"Faststream scrape failed: {exc}")
 
         # ── Finalise state ────────────────────────────────────────────────────
-        if _state.get("last_status") != "error":
-            _state["last_status"] = "ok"
+        # Derived from THIS cycle's failures, not from the leftover value: the
+        # old `!= "error"` guard made one bad cycle pin last_status to "error"
+        # for the life of the process, so /scraper/status never recovered.
+        _state["last_status"] = "error" if failures else "ok"
 
         _state["last_counts"] = {
             "items_fetched": total_fetched,
@@ -373,11 +285,58 @@ async def run_scrape_once(
 
         _state["running"] = False
 
+    # Outside the lock: paging the operator must not hold up the next cycle.
+    await _alert_on_cycle_outcome(total_created, total_fetched, failures)
 
-def _set_error(code: str, exc: Exception) -> None:
+
+def _set_error(code: str, exc: Exception) -> str:
+    """Record a fatal source error in _state and return a one-line description."""
     _state["last_status"] = "error"
     _state["last_error"] = {"code": code, "detail": str(exc)}
     log.error("Scrape failed | code=%s | %s", code, exc)
+    return f"Apify scrape failed ({code}): {exc}"
+
+
+async def _alert_on_cycle_outcome(
+    created: int, fetched: int, failures: list[str]
+) -> None:
+    """Page the operator when a cycle breaks, or when supply has dried up.
+
+    Two triggers, both deliberately quiet:
+      * any source failed this cycle — one message listing them. Cycles are a
+        day apart, so this is at most one message a day.
+      * _ZERO_RUN_ALERT_THRESHOLD cycles in a row created no jobs — one message
+        when the streak is reached, then silence until something is created
+        again. Ongoing staleness is already covered by the job_pipeline health
+        check, which alerts on its own ok→failed flip.
+
+    Never raises: the scrape loop must survive a broken alert channel.
+    """
+    global _zero_run_streak
+
+    if created > 0:
+        _zero_run_streak = 0
+    else:
+        _zero_run_streak += 1
+
+    lines: list[str] = []
+    if failures:
+        lines.append("Scrape cycle had failures:")
+        lines += [f"• {f}" for f in failures]
+    if _zero_run_streak == _ZERO_RUN_ALERT_THRESHOLD:
+        lines.append(
+            f"No new jobs created in {_zero_run_streak} consecutive scrape cycles "
+            f"(last cycle fetched {fetched} raw item(s)). The supply side looks dead — "
+            "check the Apify actors and the Facebook groups."
+        )
+    if not lines:
+        return
+
+    try:
+        from app.services.ops_alerts import notify_ops
+        await notify_ops("\n".join(lines))
+    except Exception as exc:
+        log.error("Scrape cycle ops alert failed | %s", exc)
 
 
 # ── Background loop ──────────────────────────────────────────────────────────

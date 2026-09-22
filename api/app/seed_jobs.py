@@ -1,6 +1,19 @@
+"""
+Demo job seeder — a local development convenience, never a production tool.
+
+Nothing in the application calls run_seed(); it only runs when this file is
+executed directly (`python -m app.seed_jobs`). It used to open with
+`Base.metadata.drop_all()`, i.e. one stray invocation next to prod credentials
+would drop every table in the database — users, payments, WhatsApp sessions,
+the lot. That path is now gated behind BOTH an explicit ALLOW_DB_DROP=1 and a
+non-production APP_ENV, and refuses loudly otherwise.
+"""
+import os
+
 from app.database import Base, SessionLocal, engine
 from app.logger import get_logger
 from app.models import Job
+from app.settings import settings
 
 log = get_logger("carver.seed_jobs")
 
@@ -86,8 +99,30 @@ def make_job(i: int) -> Job:
   )
 
 
-def run_seed():
-  Base.metadata.drop_all(bind=engine)
+def drop_allowed() -> bool:
+  """Two independent conditions, both required, before any table is dropped.
+
+  ALLOW_DB_DROP=1 is the deliberate opt-in; the APP_ENV check is the backstop
+  for the case the opt-in ends up in a production environment file by accident.
+  """
+  return (
+    os.getenv("ALLOW_DB_DROP", "").strip() == "1"
+    and settings.APP_ENV != "production"
+  )
+
+
+def run_seed(*, drop: bool = False):
+  """Insert 50 demo jobs. Additive by default — pass drop=True (and set
+  ALLOW_DB_DROP=1 outside production) to wipe the schema first."""
+  if drop:
+    if not drop_allowed():
+      raise RuntimeError(
+        "Refusing to drop the database: set ALLOW_DB_DROP=1 and run with "
+        f"APP_ENV != production (APP_ENV={settings.APP_ENV!r})"
+      )
+    log.warning("dropping_all_tables_before_seed", app_env=settings.APP_ENV)
+    Base.metadata.drop_all(bind=engine)
+
   Base.metadata.create_all(bind=engine)
 
   db = SessionLocal()
@@ -101,4 +136,12 @@ def run_seed():
 
 
 if __name__ == "__main__":
-  run_seed()
+  import argparse
+
+  parser = argparse.ArgumentParser(description="Seed 50 demo jobs (development only)")
+  parser.add_argument(
+    "--drop",
+    action="store_true",
+    help="Drop every table first. Requires ALLOW_DB_DROP=1 and APP_ENV != production.",
+  )
+  run_seed(drop=parser.parse_args().drop)

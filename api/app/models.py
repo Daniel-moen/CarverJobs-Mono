@@ -42,6 +42,10 @@ class Job(Base):
   requirements = Column(Text, nullable=True)
   benefits = Column(Text, nullable=True)
   contact_email = Column(String(160), nullable=True)
+  # Recruiter phone, E.164 where the post gave enough to normalise it (yacht
+  # posts from SA/Europe/US quote numbers in every local format imaginable).
+  # Stored verbatim-but-trimmed when the country can't be inferred.
+  contact_phone = Column(String(40), nullable=True)
   application_url = Column(String(260), nullable=True)
   recruiter_name = Column(String(120), nullable=True)
   recruiter_agency = Column(String(120), nullable=True)
@@ -218,6 +222,15 @@ class WhatsAppSession(Base):
   # Where this user came from — parsed from the "· <tag>" suffix the website's
   # wa.me CTAs append to the prefill text (e.g. "m-hero", "sticky", "pricing").
   acquisition_source = Column(String(40), nullable=True)
+  # Referral loop: phone number of the user whose REF- code brought this one in
+  # (set on first contact). referral_credited flips once both sides have been
+  # paid their bonus tokens, so a re-run of onboarding can never double-credit.
+  referred_by = Column(String(30), nullable=True)
+  referral_credited = Column(Boolean, nullable=False, default=False)
+  # The free first match run promised at the end of onboarding. Persisted (not
+  # process memory) so a deploy mid-onboarding doesn't strand the user without
+  # the run they were told was coming.
+  pending_first_match = Column(Boolean, nullable=False, default=False)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
   updated_at = Column(
     DateTime(timezone=True),
@@ -225,6 +238,19 @@ class WhatsAppSession(Base):
     onupdate=func.now(),
     nullable=False,
   )
+
+
+class WhatsAppSeenMessage(Base):
+  """Durable webhook dedup — one row per processed Meta message id.
+
+  The in-memory `_SEEN_MSG_IDS` set in routes/whatsapp.py is a fast path only:
+  it dies with the process, so a deploy plus a Meta retry used to re-process a
+  message (and spend the user's token twice). Rows older than 48h are pruned.
+  """
+  __tablename__ = "whatsapp_seen_messages"
+
+  msg_id = Column(String(120), primary_key=True)
+  seen_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
 class WhatsAppMessage(Base):

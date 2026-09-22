@@ -145,6 +145,58 @@ def _record_history(name: str, connected: bool, checked_at: str) -> None:
     _history[name].append({"connected": connected, "checked_at": checked_at})
 
 
+# ── Ops alerting ─────────────────────────────────────────────────────────────
+# Last known connected state per service. Purely in-memory: a restart re-arms
+# the baseline, which is the right trade — the alternative is replaying old
+# outages out of a table on every deploy.
+_alert_state: dict[str, bool] = {}
+
+# Services worth waking someone for. `google_login` and `auth_session` are
+# excluded on purpose: google_login reports connected=False whenever OAuth is
+# simply not configured, which is a steady state on every dev box, not an
+# outage — alerting on it is exactly the noise that gets a channel muted.
+_ALERTABLE = ("database", "job_pipeline", "openai_ai")
+
+
+def _dispatch_ops_alerts(results: dict) -> None:
+    """Send one WhatsApp message per state FLIP. Never raises.
+
+    Edge-triggered: a service that has been down for a week is silent, a
+    service that just went down (or just came back) is one message. The first
+    observation after boot is the baseline and normally alerts nothing — the
+    exception is a critical service that is *already* failing, which is news
+    after a restart and still costs at most one message per process.
+    """
+    from app.services import ops_alerts
+
+    if not ops_alerts.is_configured():
+        # Still track state so enabling the number mid-flight doesn't replay history.
+        for name, info in results.items():
+            _alert_state[name] = bool(info["connected"])
+        return
+
+    lines: list[str] = []
+    for name, info in results.items():
+        now_ok = bool(info["connected"])
+        previous = _alert_state.get(name)
+        _alert_state[name] = now_ok
+        if previous == now_ok:
+            continue                       # steady state — say nothing
+        if previous is None:
+            if now_ok or name not in _ALERTABLE:
+                continue                   # baseline, nothing to report
+            lines.append(f"❌ {name} is DOWN at startup — {info.get('detail', '')}".rstrip())
+            continue
+        if now_ok:
+            lines.append(f"✅ {name} RECOVERED — {info.get('detail', '')}".rstrip())
+        else:
+            lines.append(f"❌ {name} FAILED — {info.get('detail', '')}".rstrip())
+
+    if not lines:
+        return
+    ops_alerts.notify_ops_sync("Service status changed:\n\n" + "\n".join(lines))
+
+
 def run_checks() -> dict:
     global _results, _last_run
     log.info("Running health checks…")
@@ -171,6 +223,13 @@ def run_checks() -> dict:
     _last_run = datetime.now(timezone.utc)
     statuses = {k: ("✓" if v["connected"] else "✗") for k, v in _results.items()}
     log.info("Health check done | %s", " | ".join(f"{k}={v}" for k, v in statuses.items()))
+
+    # Alerting must never be able to break the check loop that feeds /status/services.
+    try:
+        _dispatch_ops_alerts(raw)
+    except Exception as exc:
+        log.error("Ops alert dispatch failed | %s", exc)
+
     return _results
 
 

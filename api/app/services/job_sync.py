@@ -48,7 +48,9 @@ log = get_logger("carver.job_sync")
 
 # Sources that come from dedicated job boards — already confirmed jobs,
 # classification pre-filter is skipped, auto-apply is enabled when email present.
-_TRUSTED_SOURCES = {"dockwalk", "workonayacht", "vikingcrew", "faststream"}
+# dockwalk/vikingcrew dropped Sep 2026 along with their (dead) scrapers; stored
+# rows from those sources are unaffected, this set only gates ingestion.
+_TRUSTED_SOURCES = {"workonayacht", "faststream"}
 
 # Keys the Facebook actor uses to carry a media payload. Grounded in a real
 # prod dataset: photo posts carry a list under "attachments", each photo dict
@@ -178,6 +180,62 @@ def _extract_email(text: str) -> str | None:
         return None
     m = re.search(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", text)
     return m.group(0) if m else None
+
+
+# Internationally-prefixed numbers only: a leading "+" or "00", then 7–16 more
+# digits with the usual separators. Bare local numbers are deliberately NOT
+# matched here — "082 123 4567" is indistinguishable from a salary range or a
+# vessel spec without context, and guessing wrong puts a stranger's phone
+# number on a job ad. The AI reviewer has the post's context and handles those.
+_PHONE_RE = re.compile(r"(?:\+|\b00)\s*\d(?:[\s().\-]?\d){6,15}\b")
+
+# E.164 allows at most 15 digits; anything shorter than 8 is not a reachable
+# international number (and is usually a year, price, or licence tonnage).
+_PHONE_MIN_DIGITS = 8
+_PHONE_MAX_DIGITS = 15
+# A number kept in local form has no country code to spend digits on, so the
+# bar is higher: national numbers run 9–11 digits, while the 8-digit runs that
+# turn up in yacht posts are salary ranges ("3000-4000") and dates.
+_PHONE_MIN_LOCAL_DIGITS = 9
+
+
+def _normalise_phone(value: object) -> str | None:
+    """Normalise a phone number to E.164 where the country code is knowable.
+
+    Returns "+<digits>" when the value carries an international prefix ("+" or
+    a "00" IDD prefix), and the cleaned original otherwise — a local number
+    without context cannot be given a country code, and a wrong one is worse
+    than an unnormalised one. Returns None for anything that isn't plausibly a
+    phone number.
+    """
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    international = raw.startswith("+") or raw.lstrip("+").lstrip().startswith("00")
+    digits = "".join(c for c in raw if c.isdigit())
+    if international and digits.startswith("00"):
+        digits = digits[2:]
+    floor = _PHONE_MIN_DIGITS if international else _PHONE_MIN_LOCAL_DIGITS
+    if not (floor <= len(digits) <= _PHONE_MAX_DIGITS):
+        return None
+    if international:
+        return f"+{digits}"
+    # Local format — keep what the poster wrote, minus decorative whitespace.
+    return _trunc(" ".join(raw.split()), 40)
+
+
+def _extract_phone(text: str) -> str | None:
+    """Pull the first internationally-formatted phone number out of a post."""
+    if not text:
+        return None
+    for match in _PHONE_RE.finditer(text):
+        normalised = _normalise_phone(match.group(0))
+        if normalised:
+            return normalised
+    return None
 
 
 def _has_media(item: dict) -> bool:
@@ -450,6 +508,16 @@ def _build_job_fields(ai: dict, raw: dict, source: str) -> dict:
         or _extract_email(raw.get("text", ""))
     )
 
+    # Contact phone: same precedence as the email. The regex fallback only ever
+    # catches internationally-prefixed numbers (see _PHONE_RE) — inferring a
+    # country code for a bare local number is the AI reviewer's job, because it
+    # is the only step that can see which country the post is talking about.
+    contact_phone = (
+        _normalise_phone(ai.get("contact_phone"))
+        or _normalise_phone(raw.get("contact_phone"))
+        or _extract_phone(raw.get("text", ""))
+    )
+
     recruiter_name = (
         _trunc(ai.get("recruiter_name"), 120)
         or _trunc(raw.get("user", {}).get("name"), 120)
@@ -500,6 +568,7 @@ def _build_job_fields(ai: dict, raw: dict, source: str) -> dict:
         "benefits":                  _trunc(ai.get("benefits"), 5000),
 
         "contact_email":             contact_email,
+        "contact_phone":             contact_phone,
         "application_url":           app_url,
         "recruiter_name":            recruiter_name,
         "recruiter_agency":          _trunc(ai.get("recruiter_agency"), 120),
@@ -525,7 +594,7 @@ def sync_jobs(
     """
     Run AI review on each item and upsert confirmed job listings.
 
-    For trusted web sources (dockwalk, workonayacht):
+    For trusted web sources (workonayacht, faststream):
       - Skips the "is this even a job?" classification step.
       - Sets auto_apply_enabled=True when contact_email is present.
       - Skips items that have neither contact_email nor application_url.

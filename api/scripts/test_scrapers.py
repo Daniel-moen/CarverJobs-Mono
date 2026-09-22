@@ -3,13 +3,12 @@ Standalone scraper debug tool — runs any scraper independently and prints resu
 
 Usage (from api/ directory):
     python scripts/test_scrapers.py apify
-    python scripts/test_scrapers.py dockwalk
     python scripts/test_scrapers.py workonayacht
     python scripts/test_scrapers.py faststream
-    python scripts/test_scrapers.py crewfinders
-    python scripts/test_scrapers.py vikingcrew
-    python scripts/test_scrapers.py reed
     python scripts/test_scrapers.py all       # run all enabled scrapers
+
+Dockwalk, CrewFinders, Viking Crew and Reed/SuperYachtTimes were removed in
+Sep 2026 — those sources stopped returning listings and their scrapers are gone.
 
 Flags:
     --no-sync     fetch raw items only, skip DB sync (no AI calls, no DB writes)
@@ -108,18 +107,6 @@ def run_apify(no_sync: bool, limit: int | None) -> None:
         _sync(items, "apify")
 
 
-def run_dockwalk(no_sync: bool) -> None:
-    _hdr("Dockwalk")
-    from app.services.dockwalk_scraper import DockwalkScraper
-    try:
-        items = DockwalkScraper(scrape_do_token=settings.SCRAPE_DO_TOKEN).scrape()
-    except Exception as exc:
-        print(f"Error: {exc}"); return
-    _show_items(items, "Dockwalk")
-    if not no_sync:
-        _sync(items, "dockwalk")
-
-
 def run_workonayacht(no_sync: bool) -> None:
     _hdr("WorkOnAYacht / Yotspot")
     from app.services.workonayacht_scraper import WorkOnAYachtScraper
@@ -144,49 +131,13 @@ def run_faststream(no_sync: bool) -> None:
         _sync(items, "faststream")
 
 
-def run_crewfinders(no_sync: bool) -> None:
-    _hdr("CrewFinders")
-    from app.services.crewfinders_scraper import CrewFindersScraper
-    try:
-        items = CrewFindersScraper().scrape()
-    except Exception as exc:
-        print(f"Error: {exc}"); return
-    _show_items(items, "CrewFinders")
-    if not no_sync:
-        _sync(items, "crewfinders")
-
-
-def run_vikingcrew(no_sync: bool) -> None:
-    _hdr("Viking Crew")
-    from app.services.vikingcrew_scraper import VikingCrewScraper
-    try:
-        items = VikingCrewScraper(scrape_do_token=settings.SCRAPE_DO_TOKEN).scrape()
-    except Exception as exc:
-        print(f"Error: {exc}"); return
-    _show_items(items, "Viking Crew")
-    if not no_sync:
-        _sync(items, "vikingcrew")
-
-
-def run_reed(no_sync: bool) -> None:
-    _hdr("Reed (SuperYachtTimes)")
-    from app.services.superyachttimes_scraper import SuperYachtTimesScraper
-    try:
-        items = SuperYachtTimesScraper().scrape()
-    except Exception as exc:
-        print(f"Error: {exc}"); return
-    _show_items(items, "Reed")
-    if not no_sync:
-        _sync(items, "reed")
-
-
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a scraper independently for debugging")
     parser.add_argument(
         "scraper",
-        choices=["apify", "dockwalk", "workonayacht", "faststream", "crewfinders", "vikingcrew", "reed", "all"],
+        choices=["apify", "workonayacht", "faststream", "all"],
         help="Which scraper to run",
     )
     parser.add_argument("--no-sync", action="store_true", help="Skip DB sync (no AI calls, no writes)")
@@ -196,7 +147,7 @@ def main() -> int:
     Base.metadata.create_all(bind=engine)
 
     targets = (
-        ["apify", "dockwalk", "workonayacht", "faststream", "crewfinders", "vikingcrew", "reed"]
+        ["apify", "workonayacht", "faststream"]
         if args.scraper == "all"
         else [args.scraper]
     )
@@ -204,18 +155,10 @@ def main() -> int:
     for t in targets:
         if t == "apify":
             run_apify(args.no_sync, args.limit)
-        elif t == "dockwalk":
-            run_dockwalk(args.no_sync)
         elif t == "workonayacht":
             run_workonayacht(args.no_sync)
         elif t == "faststream":
             run_faststream(args.no_sync)
-        elif t == "crewfinders":
-            run_crewfinders(args.no_sync)
-        elif t == "vikingcrew":
-            run_vikingcrew(args.no_sync)
-        elif t == "reed":
-            run_reed(args.no_sync)
 
     return 0
 

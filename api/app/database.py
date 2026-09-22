@@ -1,9 +1,14 @@
+import logging
 import os
 import sqlite3
 from pathlib import Path
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+# Plain stdlib logging: app.logger imports app.settings, and this module is the
+# one every other module imports first — keep it dependency-free.
+_log = logging.getLogger("carver.database")
 
 # SQLite only — no PostgreSQL. Optional absolute path for the DB file (e.g. mounted volume).
 _sqlite_override = os.getenv("CARVER_SQLITE_PATH", "").strip()
@@ -52,6 +57,26 @@ def get_db():
     yield db
   finally:
     db.close()
+
+
+def _safe_index(conn, sql: str, fallback: str | None = None) -> None:
+  """Create an index, tolerating data that won't accept it.
+
+  A UNIQUE index over a column that already holds duplicates raises, and a
+  raise here aborts run_migrations — which, in production, aborts startup. An
+  index is an optimisation, never a reason to refuse to boot, so a failure
+  degrades to the non-unique `fallback` (when given) and then to a log line.
+  """
+  try:
+    conn.execute(sql)
+    return
+  except sqlite3.Error as exc:
+    _log.warning("Index not created (%s) — %s", exc, sql)
+  if fallback:
+    try:
+      conn.execute(fallback)
+    except sqlite3.Error as exc:
+      _log.warning("Fallback index not created (%s) — %s", exc, fallback)
 
 
 def run_migrations() -> None:
@@ -115,8 +140,22 @@ def run_migrations() -> None:
     _add("jobs", "job_fingerprint", "VARCHAR(64)", jobs_cols)
     _add("jobs", "posted_by_user_id", "INTEGER", jobs_cols)
     _add("jobs", "posted_by_agency", "VARCHAR(160)", jobs_cols)
+    _add("jobs", "contact_phone", "VARCHAR(40)", jobs_cols)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS ix_jobs_posted_by_user_id ON jobs (posted_by_user_id)"
+    )
+    # Indexes declared on the Job model reach an EXISTING table only from here:
+    # create_all() skips a table it did not create, indexes included. Every
+    # ingest run probes content_hash once per scraped post, and both the job
+    # board and the retention scan filter status + order/filter created_at.
+    _safe_index(
+        conn,
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_content_hash ON jobs (content_hash)",
+        fallback="CREATE INDEX IF NOT EXISTS ix_jobs_content_hash ON jobs (content_hash)",
+    )
+    _safe_index(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_jobs_status_created_at ON jobs (status, created_at)",
     )
 
     # scrape_watermarks — tracks newest post timestamp per source URL so
@@ -209,6 +248,23 @@ def run_migrations() -> None:
     _add("whatsapp_sessions", "opted_out", "BOOLEAN NOT NULL DEFAULT 0", was_cols)
     _add("whatsapp_sessions", "opted_out_at", "DATETIME", was_cols)
     _add("whatsapp_sessions", "acquisition_source", "VARCHAR(40)", was_cols)
+    _add("whatsapp_sessions", "referred_by", "VARCHAR(30)", was_cols)
+    _add("whatsapp_sessions", "referral_credited", "BOOLEAN NOT NULL DEFAULT 0", was_cols)
+    _add("whatsapp_sessions", "pending_first_match", "BOOLEAN NOT NULL DEFAULT 0", was_cols)
+
+    # whatsapp_seen_messages — durable webhook dedup. The in-memory set dies
+    # with the process, so a deploy + a Meta retry used to re-process a message
+    # (and spend the user's token twice). Pruned to 48h by the writer.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_seen_messages (
+            msg_id VARCHAR(120) PRIMARY KEY,
+            seen_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_whatsapp_seen_messages_seen_at "
+        "ON whatsapp_seen_messages (seen_at)"
+    )
 
     cp_cols = _existing("crew_profiles")
     _add("crew_profiles", "sex", "VARCHAR(20)", cp_cols)
