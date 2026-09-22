@@ -39,6 +39,7 @@ from app.models import (
     WhatsAppMessage,
     WhatsAppSession,
 )
+from app.routes.whatsapp import outbound_status_summary
 from app.settings import settings
 
 log = get_logger("carver.agent_stats")
@@ -231,6 +232,7 @@ def get_agent_stats(request: Request, db: Session = Depends(get_db)):
             "whatsapp_by_mode": wa_by_mode,
             "whatsapp_magic_tokens": wa_tokens_total,
             "whatsapp_magic_tokens_used": wa_tokens_used,
+            "whatsapp_template_status_7d": outbound_status_summary(db, now - timedelta(days=7)),
         },
         "jobs": {
             "total": jobs_total,

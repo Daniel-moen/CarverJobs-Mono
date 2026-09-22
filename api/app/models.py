@@ -264,6 +264,12 @@ class WhatsAppMessage(Base):
   meta_message_id = Column(String(120), unique=True, nullable=True, index=True)
   graph_phone_number_id = Column(String(80), nullable=True)
   payload_json = Column(Text, nullable=True)
+  # Delivery state from Meta's `statuses` webhook: sent | delivered | read |
+  # failed | deleted. Outbound only — inbound rows never get one.
+  status = Column(String(16), nullable=True, index=True)
+  status_at = Column(DateTime(timezone=True), nullable=True)
+  # "code: title — details" from the first error on a failed status.
+  status_error = Column(String(300), nullable=True)
   created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 

@@ -28,6 +28,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import PlainTextResponse
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -3606,6 +3607,172 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
     return None
 
 
+# ── Delivery status callbacks ─────────────────────────────────────────────────
+# Meta reports the life of an *outbound* message on a separate `statuses` array
+# of the same webhook: sent → delivered → read, or a terminal failed/deleted.
+# Without this a paid template blast is a black box — ten sends and no idea
+# whether they landed, were read, or were refused.
+#
+# Retries re-deliver earlier rungs out of order, so a row only ever climbs the
+# ladder. `failed` is the exception: it overwrites anything, because a message
+# Meta reported as sent and then failed did not arrive.
+_STATUS_RANK: dict[str, int] = {"sent": 1, "delivered": 2, "read": 3}
+_TERMINAL_STATUSES: frozenset[str] = frozenset({"failed", "deleted"})
+
+# Which statuses are worth a funnel event. `sent` is not one — we already know
+# we sent it, that's why there's a row.
+_STATUS_EVENTS: dict[str, str] = {
+    "delivered": "wa_message_delivered",
+    "read": "wa_message_read",
+    "failed": "wa_message_failed",
+}
+
+# Three Meta codes, one meaning: this number will not be given our marketing
+# templates. Spelled out in the log because nobody remembers the numbers.
+_UNREACHABLE_ERROR_CODES: frozenset[str] = frozenset({"131049", "131026", "130472"})
+_UNREACHABLE_NOTE = (
+    "user cannot receive marketing templates — Meta is withholding them; "
+    "re-sending this template to this number will keep failing"
+)
+
+# payload_json `source` tags written by the proactive loops. Conversational
+# replies carry none, and their receipts would drown the funnel table.
+_PROACTIVE_PAYLOAD_SOURCES: frozenset[str] = frozenset({
+    "job_alerts", "apply_followup", "window_winback", "checkout_recovery",
+    "agency_digest", "proactive",
+})
+
+
+def _status_error_summary(errors: list | None) -> tuple[str, str]:
+    """Return (code, "code: title — details") for the first error on a status."""
+    first = (errors or [{}])[0] or {}
+    code = str(first.get("code") or "").strip()
+    title = str(first.get("title") or "").strip()
+    details = str((first.get("error_data") or {}).get("details") or "").strip()
+    text = f"{code}: {title}".strip(": ") if (code or title) else ""
+    if details:
+        text = f"{text} — {details}" if text else details
+    return code, text[:300]
+
+
+def _status_timestamp(raw: object) -> datetime:
+    """Meta sends Unix seconds as a string; fall back to now if it's junk."""
+    try:
+        return datetime.fromtimestamp(int(str(raw)), tz=timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return datetime.now(timezone.utc)
+
+
+def _is_proactive_outbound(row: WhatsAppMessage) -> bool:
+    """True for template sends and proactive-loop pushes — not for replies."""
+    if (row.message_type or "") == "template":
+        return True
+    try:
+        payload = json.loads(row.payload_json or "{}") or {}
+    except (TypeError, ValueError):
+        return False
+    return str(payload.get("source") or "") in _PROACTIVE_PAYLOAD_SOURCES
+
+
+def _apply_status_update(db: Session, item: dict) -> None:
+    """Apply one Meta `statuses[]` entry to its whatsapp_messages row."""
+    meta_id = str(item.get("id") or "").strip()
+    new_status = str(item.get("status") or "").strip().lower()
+    if not meta_id or not new_status:
+        return
+
+    row = db.query(WhatsAppMessage).filter(WhatsAppMessage.meta_message_id == meta_id).first()
+    if row is None:
+        # Sends that predate status recording, and messages sent from the Meta
+        # console, both land here. Normal — not worth a warning.
+        log.debug("WhatsApp status for unknown message | id=%s | status=%s", meta_id, new_status)
+        return
+
+    current = (row.status or "").strip().lower()
+    if new_status == "failed":
+        moved = current != "failed"
+    elif current in _TERMINAL_STATUSES:
+        moved = False
+    elif new_status == "deleted":
+        moved = True
+    else:
+        moved = _STATUS_RANK.get(new_status, 0) > _STATUS_RANK.get(current, 0)
+    if not moved:
+        # A retry of a rung we already have. Silently done — re-recording it
+        # would double-count the funnel event.
+        return
+
+    code = ""
+    row.status = new_status[:16]
+    row.status_at = _status_timestamp(item.get("timestamp"))
+    if new_status == "failed":
+        code, row.status_error = _status_error_summary(item.get("errors"))
+    db.commit()
+
+    if new_status == "failed":
+        phone = (row.phone_number or str(item.get("recipient_id") or "")).strip()
+        log.warning(
+            "WhatsApp outbound failed | phone=****%s | type=%s | code=%s | %s%s",
+            phone[-4:] or "????",
+            row.message_type or "unknown",
+            code or "?",
+            row.status_error or "no detail",
+            f" | {_UNREACHABLE_NOTE}" if code in _UNREACHABLE_ERROR_CODES else "",
+        )
+
+    event = _STATUS_EVENTS.get(new_status)
+    if event and (row.direction or "") == "outbound" and _is_proactive_outbound(row):
+        record_server_event(row.phone_number, event, code or None)
+
+
+def _process_status_callbacks(items: list[dict]) -> None:
+    """Record a webhook's delivery receipts. Owns its DB session; never raises.
+
+    Per-item isolation on purpose: one malformed status must not cost us the
+    other nine receipts in the same callback.
+    """
+    db = SessionLocal()
+    try:
+        for item in items:
+            try:
+                _apply_status_update(db, item or {})
+            except Exception as exc:
+                db.rollback()
+                log.warning(
+                    "WhatsApp status callback failed | id=%s | %s",
+                    (item or {}).get("id"), exc,
+                )
+    except Exception as exc:  # pragma: no cover — session setup only
+        log.warning("WhatsApp status callback batch failed | %s", exc)
+    finally:
+        db.close()
+
+
+def outbound_status_summary(db: Session, since: datetime) -> dict[str, int]:
+    """Counts by delivery status for template sends since `since`.
+
+    Answers the only question a paid reactivation sweep leaves open: of the N
+    templates we bought, how many landed, how many were read, how many bounced.
+    `pending` is the tail Meta has not reported on yet.
+    """
+    rows = (
+        db.query(WhatsAppMessage.status, func.count(WhatsAppMessage.id))
+        .filter(
+            WhatsAppMessage.direction == "outbound",
+            WhatsAppMessage.message_type == "template",
+            WhatsAppMessage.created_at >= since,
+        )
+        .group_by(WhatsAppMessage.status)
+        .all()
+    )
+    summary: dict[str, int] = {"sent": 0, "delivered": 0, "read": 0, "failed": 0, "pending": 0}
+    for status_value, count in rows:
+        key = (status_value or "").strip().lower() or "pending"
+        summary[key] = summary.get(key, 0) + int(count or 0)
+    summary["total"] = sum(summary.values())
+    return summary
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/webhooks/whatsapp", response_class=PlainTextResponse)
@@ -3926,6 +4093,12 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
             return {"ok": True}
 
         graph_phone_number_id = recipient_phone_number_id or (allowed_ids[0] if allowed_ids else "")
+
+        # Delivery receipts ride the same webhook but never the message
+        # pipeline — a status-only callback is parsed, queued, and 200'd.
+        statuses = value.get("statuses") or []
+        if statuses:
+            background_tasks.add_task(_process_status_callbacks, statuses)
 
         messages = value.get("messages") or []
         if not messages:

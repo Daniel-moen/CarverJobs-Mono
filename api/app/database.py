@@ -234,6 +234,17 @@ def run_migrations() -> None:
         "CREATE INDEX IF NOT EXISTS ix_error_logs_created_at ON error_logs (created_at)"
     )
 
+    # Delivery receipts from Meta's `statuses` webhook. Without these an
+    # outbound template send is a black box — no way to tell a delivered
+    # reactivation blast from ten silently-failed ones.
+    wm_cols = _existing("whatsapp_messages")
+    _add("whatsapp_messages", "status", "VARCHAR(16)", wm_cols)
+    _add("whatsapp_messages", "status_at", "DATETIME", wm_cols)
+    _add("whatsapp_messages", "status_error", "VARCHAR(300)", wm_cols)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_whatsapp_messages_status ON whatsapp_messages (status)"
+    )
+
     wmt_cols = _existing("whatsapp_magic_tokens")
     _add("whatsapp_magic_tokens", "redirect_to", "VARCHAR(120)", wmt_cols)
     _add("whatsapp_magic_tokens", "used_at", "DATETIME", wmt_cols)
