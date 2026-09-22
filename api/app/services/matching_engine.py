@@ -20,7 +20,11 @@ from app.services.role_taxonomy import normalize_roles, roles_related
 log = logging.getLogger("carver.matching_engine")
 
 BATCH_SIZE = 8
-MATCH_THRESHOLD = 30
+# Minimum final compatibility for a job to be shown to the candidate as a match.
+# Raised 30 -> 50 (Sep 2026): at 30, 41% of everything ever surfaced was a
+# 30-49 "stretch" fit rendered identically to an 88% fit. A short honest list
+# beats a padded one. Plain module constant — no env override, not in settings.
+MATCH_THRESHOLD = 50
 MAX_WORKERS = 4
 # Deterministic prefilter: only the top N jobs (by role/location/recency) are
 # sent to the LLM — this is what cuts spend 5-10x on a large job board.
@@ -37,9 +41,19 @@ PRIORITY_BOOST = 10.0
 # candidate's desired role — no blend, boost or fallback may lift these into a
 # recommendation. Same-department roles (deckhand -> bosun) are unaffected.
 ROLE_MISMATCH_CAP = 15.0
-# Result tiers by final compatibility.
+# Result tiers by final compatibility. Deliberately independent of
+# MATCH_THRESHOLD: "stretch" stays a describable band (30-49) even though it no
+# longer clears the threshold, so analytics can still see what was suppressed.
 TIER_STRONG_MIN = 75
 TIER_GOOD_MIN = 50
+TIER_STRETCH_MIN = 30
+# Tier names, most to least confident. Every tier-count dict has all of these
+# keys (plus "none"), so callers can format "3 strong · 6 good" without guards.
+TIER_NAMES = ("strong", "good", "stretch")
+# Recency for a job whose created_at is absent from the JobSummary. Neutral
+# (mid-band), never 0.0 — a missing timestamp is unknown age, not "ancient",
+# and 0.0 silently buried whole sources whose sync does not populate it.
+RECENCY_UNKNOWN_SCORE = 0.5
 _MATCH_MAX_TOKENS_PER_JOB = 400
 _MATCH_MIN_MAX_TOKENS = 4096
 _MATCH_REQUEST_TIMEOUT = 90
@@ -121,8 +135,33 @@ class MatchResult:
     strengths: list[str] = field(default_factory=list)
     gaps: list[str] = field(default_factory=list)
     factor_scores: dict[str, float] = field(default_factory=dict)
-    # "strong" (>=75), "good" (50-74), "stretch" (30-49), "" below threshold.
+    # "strong" (>=75), "good" (50-74), "stretch" (30-49), "" below 30.
+    # Only "strong" and "good" clear MATCH_THRESHOLD and set matched=True.
     tier: str = ""
+
+
+class MatchRunResults(list):
+    """The run's MatchResults, plus run-level tier metadata.
+
+    A plain ``list`` subclass, so every existing caller (len, iteration,
+    indexing, slicing, comprehensions) keeps working unchanged. Callers that
+    want to render "3 strong · 6 good" read the extra attributes:
+
+      * ``tier_counts``      — counts over MATCHED results only, keys
+                               "strong"/"good"/"stretch" always present.
+      * ``tier_counts_all``  — counts over every result including suppressed
+                               ones, same keys plus "none" (below 30 /
+                               hard-excluded).
+      * ``matched_count``    — number of results with matched=True.
+      * ``total_count``      — number of results scored (== len(self)).
+    """
+
+    def __init__(self, results=()):
+        super().__init__(results)
+        self.tier_counts = count_tiers(r for r in self if r.matched)
+        self.tier_counts_all = count_tiers(self, include_none=True)
+        self.matched_count = sum(1 for r in self if r.matched)
+        self.total_count = len(self)
 
 
 ProgressCallback = Callable[[int, int, int, int, int], None]
@@ -135,9 +174,23 @@ def tier_for(compatibility: float) -> str:
         return "strong"
     if compatibility >= TIER_GOOD_MIN:
         return "good"
-    if compatibility >= MATCH_THRESHOLD:
+    if compatibility >= TIER_STRETCH_MIN:
         return "stretch"
     return ""
+
+
+def count_tiers(results, *, include_none: bool = False) -> dict[str, int]:
+    """Tally results per tier. All TIER_NAMES keys are always present."""
+    counts = {name: 0 for name in TIER_NAMES}
+    if include_none:
+        counts["none"] = 0
+    for r in results:
+        tier = r.tier or tier_for(r.compatibility)
+        if tier in counts:
+            counts[tier] += 1
+        elif include_none:
+            counts["none"] += 1
+    return counts
 
 
 def _normalise_gender(value: str | None) -> str | None:
@@ -152,16 +205,18 @@ def _normalise_gender(value: str | None) -> str | None:
 
 
 def _job_gender_requirement(job: JobSummary) -> str | None:
-    text = " ".join(
-        part for part in [
-            job.title,
-            job.role,
-            job.description,
-            job.requirements,
-            job.certifications_required,
-            job.languages_required,
-        ] if part
-    ).lower()
+    """Gender the job is restricted to, from its TITLE and ROLE only.
+
+    Deliberately narrow. Scanning description/requirements produced false
+    negatives that hard-excluded candidates at compatibility 0: a chef listing
+    whose description said "you'll work alongside the steward" read as
+    male-only, and any prose mentioning "the stewardess" locked men out. Only
+    the title/role fields name the position being hired, so only they may
+    trigger a hard exclusion. Genuine free-text restrictions ("female
+    candidates only" buried in the description) are still handled by the LLM,
+    which is instructed on them and can read the sentence in context.
+    """
+    text = " ".join(part for part in [job.title, job.role] if part).lower()
     if not text:
         return None
 
@@ -182,6 +237,7 @@ def _gender_mismatch_result(job_id: int, required_gender: str) -> MatchResult:
         compatibility=0.0,
         reason=f"Filtered out: job specifies {required_gender} candidates.",
         gaps=[f"Gender requirement mismatch ({required_gender} only)."],
+        tier=tier_for(0.0),
     )
 
 
@@ -326,9 +382,17 @@ def _is_priority_job(job: JobSummary) -> bool:
 
 
 def _recency_score(job: JobSummary, now: datetime) -> float:
+    """1.0 for a job posted today, decaying to 0.0 at 30 days old.
+
+    A job with no created_at scores RECENCY_UNKNOWN_SCORE (neutral), not 0.0:
+    created_at is optional on JobSummary and several callers build summaries
+    without it, which used to push every one of those jobs to the bottom of
+    the prefilter — and, in the role-unknown fallback, out of the top N
+    entirely — even when the role matched perfectly.
+    """
     created = job.created_at
     if created is None:
-        return 0.0
+        return RECENCY_UNKNOWN_SCORE
     if created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)
     age_days = max(0.0, (now - created).total_seconds() / 86400.0)
@@ -548,15 +612,16 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
                 "Same-department roles at different seniority levels ARE valid matches — score them 35-70 depending on experience gap. E.g. a Deckhand with 3+ years should match Bosun roles at 45-55.",
                 "Adjacent roles within the same department should score highly: Bosun↔Deckhand, Chief Stew↔Stewardess, 2nd Engineer↔Chief Engineer, Sous Chef↔Head Chef.",
                 "Dual roles like Deck/Stew should match BOTH Deck and Interior departments.",
-                f"Set matched=true if compatibility >= {MATCH_THRESHOLD}. Be GENEROUS — if the candidate could reasonably apply and have a shot, mark it matched.",
+                f"Set matched=true only if compatibility >= {MATCH_THRESHOLD}. Score strictly and honestly: {MATCH_THRESHOLD} means you would genuinely expect this candidate to be considered for this specific job, not merely that they could apply.",
                 "Use the candidate's bio, job_history, and document_summary as the PRIMARY evidence of capability. Recent job history (last 2 roles) should carry the most weight — if they did the role before, score 70+.",
                 "If the candidate held the exact same role on a previous vessel, that is a STRONG match (80+) regardless of other factors.",
                 "Do NOT over-penalise for missing certifications unless the job explicitly requires them for safety-critical roles (Captain, Engineer, Officer). Partial cert matches (e.g. has STCW but not ENG1) should only reduce by 5-10 points.",
                 "Location flexibility: yachting is a global industry — location mismatches should only reduce by 3-5 points, not disqualify.",
                 "Pay mismatches: only reduce if the job pay is drastically (>50%) below the candidate's minimum.",
                 "If the candidate has relevant experience for the role, that should outweigh minor gaps in listed requirements.",
-                "AIM to find at least 5+ matches if the candidate has any relevant experience. Be helpful, not punitive.",
-                "Gender requirements are strict. If a job explicitly specifies male/female-only (or uses gendered role labels like stewardess/steward), opposite-gender candidates must be matched=false with compatibility <= 5.",
+                "There is NO target number of matches. Returning two genuine fits — or zero — is a better outcome than padding the list. Never inflate a score to reach a quota.",
+                "A weak fit must be scored as a weak fit. Do not round up borderline jobs so they clear the threshold; the candidate is better served by an honest short list than by hopeful ones they will waste applications on.",
+                "Gender requirements are strict, but only when the job itself is restricted: an explicit male/female-only statement, or a gendered role label (stewardess/steward) in the job title or role. Opposite-gender candidates must then be matched=false with compatibility <= 5. A gendered word appearing only in passing in the description (e.g. describing the existing crew) is NOT a restriction — do not exclude on it.",
                 "Output ONLY raw JSON. No markdown fences, no extra text.",
                 f"You MUST return exactly one entry for every job_id: {json.dumps(job_ids)}. Copy each job_id verbatim.",
                 "Each entry: job_id (integer, verbatim), matched (boolean), compatibility (integer 0-100), reason (1-2 sentences), strengths (list), gaps (list), factor_scores (object).",
@@ -584,8 +649,10 @@ def _build_prompt(candidate: CandidateProfile, jobs: list[JobSummary]) -> str:
 
     return (
         "You are a superyacht crew job matching engine. "
-        "Your goal is to help candidates find every job they could realistically apply for. "
-        "Be thorough and generous — if there is a reasonable fit, surface it.\n"
+        "Your goal is to tell the candidate the truth about where they stand: "
+        "surface the jobs they have a real chance at, and score the rest honestly low. "
+        "Be thorough in your reading of every job, but strict in your scoring — "
+        "an inflated match costs the candidate a wasted application and costs us their trust.\n"
         "CRITICAL: Output ONLY raw JSON matching the schema. No markdown code fences.\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
@@ -655,18 +722,22 @@ def match_candidate_to_jobs(
     jobs: list[JobSummary],
     batch_size: int = BATCH_SIZE,
     on_progress: ProgressCallback | None = None,
-) -> list[MatchResult]:
+) -> MatchRunResults:
     """Score the candidate against the job board.
 
     A deterministic prefilter (role taxonomy, location, recency, hard gender
     exclusion) picks the top jobs first so only those hit the LLM. Batches are
     processed concurrently (up to MAX_WORKERS threads); LLM scores are blended
     with deterministic sub-scores and jobs the LLM skips are retried once,
-    then scored deterministically — nothing is silently dropped. Returns all
-    results sorted by compatibility descending.
+    then scored deterministically — nothing is silently dropped.
+
+    Returns a MatchRunResults — a list of MatchResult sorted by compatibility
+    descending (so existing callers are unaffected) carrying run-level
+    ``tier_counts`` / ``tier_counts_all`` / ``matched_count`` / ``total_count``
+    for callers that want to show "3 strong · 6 good".
     """
     if not jobs:
-        return []
+        return MatchRunResults()
 
     llm_jobs, excluded_results = prefilter_jobs(candidate, jobs)
     jobs_by_id = {j.job_id: j for j in llm_jobs}
@@ -771,9 +842,15 @@ def match_candidate_to_jobs(
         if existing is None or r.compatibility > existing.compatibility:
             deduped[r.job_id] = r
 
-    results = sorted(deduped.values(), key=lambda x: x.compatibility, reverse=True)
-    matched_count = sum(1 for r in results if r.matched)
-    log.info("Matching complete | candidate=%s | total=%d | matched=%d | gender_filtered=%d | top=%.0f",
-             candidate.user_key, len(results), matched_count, len(excluded_results),
-             results[0].compatibility if results else 0)
+    results = MatchRunResults(
+        sorted(deduped.values(), key=lambda x: x.compatibility, reverse=True)
+    )
+    log.info(
+        "Matching complete | candidate=%s | total=%d | matched=%d | "
+        "strong=%d | good=%d | suppressed_stretch=%d | gender_filtered=%d | top=%.0f",
+        candidate.user_key, results.total_count, results.matched_count,
+        results.tier_counts["strong"], results.tier_counts["good"],
+        results.tier_counts_all["stretch"], len(excluded_results),
+        results[0].compatibility if results else 0,
+    )
     return results

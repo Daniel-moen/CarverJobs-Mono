@@ -8,13 +8,19 @@ from app.services.matching_engine import (
     JobSummary,
     MATCH_THRESHOLD,
     PREFILTER_TOP_N,
+    RECENCY_UNKNOWN_SCORE,
     ROLE_MISMATCH_CAP,
+    TIER_STRETCH_MIN,
+    MatchResult,
     _availability_score,
     _build_prompt,
     _deterministic_composite,
     _deterministic_factors,
     _experience_score,
+    _job_gender_requirement,
+    _recency_score,
     _salary_score,
+    count_tiers,
     match_candidate_to_jobs,
     prefilter_jobs,
     tier_for,
@@ -338,9 +344,196 @@ def test_tier_assignment():
     assert tier_for(75) == "strong"
     assert tier_for(74) == "good"
     assert tier_for(50) == "good"
+    # "stretch" is still a nameable band, but it no longer clears the
+    # threshold — tier_for is deliberately independent of MATCH_THRESHOLD.
     assert tier_for(49) == "stretch"
-    assert tier_for(MATCH_THRESHOLD) == "stretch"
+    assert tier_for(TIER_STRETCH_MIN) == "stretch"
+    assert tier_for(MATCH_THRESHOLD) == "good"
     assert tier_for(29) == ""
+
+
+def test_match_threshold_is_fifty_and_suppresses_stretch_fits(monkeypatch):
+    """The Sep 2026 over-promising fix: 30-49 stretch fits are not matches."""
+    assert MATCH_THRESHOLD == 50
+
+    fake, _ = _echo_llm(compatibility=45)
+    monkeypatch.setattr("app.services.matching_engine._call_openai", fake)
+
+    # Taxonomy-unknown roles keep the blend inert so the LLM score is verbatim.
+    candidate = CandidateProfile(user_key="u1", desired_role="Zookeeper")
+    results = match_candidate_to_jobs(
+        api_key="k", model="m", candidate=candidate,
+        jobs=[JobSummary(job_id=1, title="Nanny", role="Nanny")],
+    )
+
+    assert results[0].compatibility == 45.0
+    assert results[0].tier == "stretch"
+    assert results[0].matched is False
+    assert results.matched_count == 0
+
+
+def test_prompt_has_no_quota_or_generosity_instructions():
+    candidate = CandidateProfile(user_key="u1", desired_role="Deckhand")
+    prompt = _build_prompt(candidate, [JobSummary(job_id=1, title="Deckhand", role="Deckhand")])
+    lowered = prompt.lower()
+
+    assert "generous" not in lowered
+    assert "at least 5" not in lowered
+    assert "be helpful, not punitive" not in lowered
+    # ...replaced by honest-scoring guidance.
+    assert "no target number of matches" in lowered
+    assert "never inflate a score" in lowered
+    assert f"compatibility >= {MATCH_THRESHOLD}" in prompt
+
+
+# ── Run-level tier metadata ──────────────────────────────────────────────────
+
+def _scored_llm(scores_by_id):
+    def _fake(api_key, model, prompt, *, job_count):
+        payload = json.loads(prompt[prompt.find("{"):])
+        return json.dumps({"matched_jobs": [
+            {"job_id": j["job_id"], "matched": True,
+             "compatibility": scores_by_id[j["job_id"]], "reason": "r",
+             "strengths": [], "gaps": [], "factor_scores": {}}
+            for j in payload["jobs"]
+        ]})
+    return _fake
+
+
+def test_run_returns_tier_counts(monkeypatch):
+    scores = {1: 90, 2: 80, 3: 60, 4: 55, 5: 40, 6: 10}
+    monkeypatch.setattr("app.services.matching_engine._call_openai", _scored_llm(scores))
+
+    # Taxonomy-unknown roles: LLM scores pass through unblended.
+    candidate = CandidateProfile(user_key="u1", desired_role="Zookeeper")
+    jobs = [JobSummary(job_id=i, title="Nanny", role="Nanny") for i in scores]
+
+    results = match_candidate_to_jobs(api_key="k", model="m", candidate=candidate, jobs=jobs)
+
+    # Still a plain list to every existing caller.
+    assert isinstance(results, list)
+    assert len(results) == 6
+    assert [r.job_id for r in results] == [1, 2, 3, 4, 5, 6]
+
+    # Matched-only counts — what "3 strong · 6 good" is rendered from.
+    assert results.tier_counts == {"strong": 2, "good": 2, "stretch": 0}
+    # Everything scored, including what the threshold suppressed.
+    assert results.tier_counts_all == {"strong": 2, "good": 2, "stretch": 1, "none": 1}
+    assert results.matched_count == 4
+    assert results.total_count == 6
+
+
+def test_tier_counts_keys_always_present_even_with_no_results():
+    empty = match_candidate_to_jobs(
+        api_key="k", model="m",
+        candidate=CandidateProfile(user_key="u1"), jobs=[],
+    )
+    assert list(empty) == []
+    assert empty.tier_counts == {"strong": 0, "good": 0, "stretch": 0}
+    assert empty.tier_counts_all == {"strong": 0, "good": 0, "stretch": 0, "none": 0}
+    assert empty.matched_count == 0
+    assert empty.total_count == 0
+
+
+def test_count_tiers_helper():
+    results = [
+        MatchResult(job_id=1, matched=True, compatibility=88.0, tier="strong"),
+        MatchResult(job_id=2, matched=True, compatibility=51.0, tier="good"),
+        MatchResult(job_id=3, matched=False, compatibility=35.0, tier="stretch"),
+        MatchResult(job_id=4, matched=False, compatibility=0.0, tier=""),
+    ]
+    assert count_tiers(results) == {"strong": 1, "good": 1, "stretch": 1}
+    assert count_tiers(results, include_none=True) == {
+        "strong": 1, "good": 1, "stretch": 1, "none": 1,
+    }
+    # Falls back to the score when tier was never stamped.
+    assert count_tiers([MatchResult(job_id=9, matched=True, compatibility=80.0)]) == {
+        "strong": 1, "good": 0, "stretch": 0,
+    }
+
+
+# ── Gender pre-filter haystack ───────────────────────────────────────────────
+
+def test_gender_requirement_reads_title_and_role_only():
+    # Restriction in the position itself: still detected.
+    assert _job_gender_requirement(_job(1, "Stewardess")) == "female"
+    assert _job_gender_requirement(
+        JobSummary(job_id=2, title="Steward - Private Yacht", role="Steward")
+    ) == "male"
+    # Passing mention in free text: NOT a restriction.
+    assert _job_gender_requirement(
+        JobSummary(job_id=3, title="Chef", role="Chef",
+                   description="You will work alongside the steward and the bosun.")
+    ) is None
+    assert _job_gender_requirement(
+        JobSummary(job_id=4, title="Deckhand", role="Deckhand",
+                   requirements="Must be comfortable assisting the stewardess on charters.")
+    ) is None
+
+
+def test_female_candidate_not_excluded_by_steward_in_description(monkeypatch):
+    """The false negative: a description mentioning 'the steward' scored 0."""
+    fake, _ = _echo_llm(compatibility=80)
+    monkeypatch.setattr("app.services.matching_engine._call_openai", fake)
+
+    candidate = CandidateProfile(user_key="u1", first_name="Mia", sex="female",
+                                 desired_role="Zookeeper")
+    job = JobSummary(
+        job_id=1, title="Nanny", role="Nanny",
+        description="Reports to the chief stew; you will work alongside the steward.",
+    )
+
+    selected, excluded = prefilter_jobs(candidate, [job])
+    assert excluded == []
+    assert selected == [job]
+
+    results = match_candidate_to_jobs(api_key="k", model="m", candidate=candidate, jobs=[job])
+    assert results[0].compatibility == 80.0
+    assert results[0].matched is True
+
+
+def test_gendered_job_title_still_hard_excludes(monkeypatch):
+    def _boom(*args, **kwargs):
+        raise AssertionError("LLM must not be called for hard-excluded jobs")
+
+    monkeypatch.setattr("app.services.matching_engine._call_openai", _boom)
+
+    candidate = CandidateProfile(user_key="u1", sex="male", desired_role="Stewardess")
+    results = match_candidate_to_jobs(
+        api_key="k", model="m", candidate=candidate,
+        jobs=[JobSummary(job_id=1, title="Stewardess", role="Stewardess")],
+    )
+
+    assert results[0].matched is False
+    assert results[0].compatibility == 0.0
+    assert "specifies female candidates" in results[0].reason.lower()
+
+
+# ── Recency degradation ──────────────────────────────────────────────────────
+
+def test_recency_score_missing_created_at_is_neutral_not_zero():
+    now = datetime.now(timezone.utc)
+    no_date = JobSummary(job_id=1, title="Deckhand", role="Deckhand")
+
+    assert _recency_score(no_date, now) == RECENCY_UNKNOWN_SCORE
+    assert RECENCY_UNKNOWN_SCORE > 0.0
+    # Neutral: beaten by a fresh job, but beats a stale one.
+    assert _recency_score(_job(2, days_old=0), now) > _recency_score(no_date, now)
+    assert _recency_score(no_date, now) > _recency_score(_job(3, days_old=40), now)
+
+
+def test_prefilter_does_not_bury_jobs_without_created_at():
+    candidate = CandidateProfile(user_key="u1", desired_role="Zookeeper")
+    # Role unknown to the taxonomy -> recency-only fallback path.
+    stale = [_job(i, "Deckhand", days_old=60) for i in range(1, 51)]
+    undated = [JobSummary(job_id=900 + i, title="Deckhand", role="Deckhand") for i in range(5)]
+
+    selected, _ = prefilter_jobs(candidate, stale + undated, top_n=10)
+    selected_ids = {j.job_id for j in selected}
+
+    # Undated jobs are neutral, so they outrank 60-day-old ones instead of
+    # being dropped outright.
+    assert {900 + i for i in range(5)} <= selected_ids
 
 
 def test_prompt_includes_new_job_fields():
