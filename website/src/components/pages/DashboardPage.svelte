@@ -315,9 +315,9 @@
   const scraperChartLabels = $derived(scraperHistory.map(e => {
     try { return new Date(e.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } catch { return '' }
   }))
-  const _sources = ['apify', 'dockwalk', 'workonayacht', 'faststream', 'crewfinders', 'vikingcrew']
-  const _sourceColors = { apify: '#818cf8', dockwalk: '#34d399', workonayacht: '#38bdf8', faststream: '#fb923c', crewfinders: '#a78bfa', vikingcrew: '#f472b6' }
-  const _sourceDimColors = { apify: '#818cf840', dockwalk: '#34d39940', workonayacht: '#38bdf840', faststream: '#fb923c40', crewfinders: '#a78bfa40', vikingcrew: '#f472b640' }
+  const _sources = ['apify', 'workonayacht', 'faststream']
+  const _sourceColors = { apify: '#818cf8', workonayacht: '#38bdf8', faststream: '#fb923c' }
+  const _sourceDimColors = { apify: '#818cf840', workonayacht: '#38bdf840', faststream: '#fb923c40' }
   const scraperFetchedSeries = $derived(
     _sources.map(src => ({
       name: `${src} fetched`,
@@ -410,7 +410,7 @@
 
   const webLastBySource = $derived(
     Object.fromEntries(
-      ['dockwalk', 'workonayacht'].map(src => {
+      ['workonayacht'].map(src => {
         const last = [...scraperHistory].reverse().find(e => e.source === src)
         return [src, last ?? null]
       })
@@ -976,7 +976,7 @@
             </div>
           {:else if scraperHistory.length}
             <div class="mb-3 space-y-1.5">
-              {#each [['dockwalk','Dockwalk'],['workonayacht','Yotspot'],['faststream','Faststream']] as [src, label]}
+              {#each [['workonayacht','Yotspot'],['faststream','Faststream']] as [src, label]}
                 {@const h = webLastBySource[src]}
                 <div class="flex items-center justify-between text-[10px]">
                   <span class="font-medium text-slate-300">{label}</span>
@@ -1014,7 +1014,7 @@
           <div class="mb-2 flex items-center gap-4">
             <p class="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-500">Jobs Found vs New — per source</p>
             <div class="flex flex-wrap items-center gap-3 text-[10px]">
-              {#each [['apify','#818cf8'],['dockwalk','#34d399'],['workonayacht','#38bdf8'],['faststream','#fb923c'],['crewfinders','#a78bfa'],['vikingcrew','#f472b6']] as [src, col]}
+              {#each [['apify','#818cf8'],['workonayacht','#38bdf8'],['faststream','#fb923c']] as [src, col]}
                 <span class="flex items-center gap-1">
                   <span class="inline-block h-1.5 w-4 rounded-full opacity-30" style="background:{col}"></span>
                   <span class="inline-block h-1.5 w-4 rounded-full" style="background:{col}"></span>

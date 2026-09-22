@@ -217,13 +217,10 @@ class Settings:
   # ingested for this many hours (scraper runs every 12h, so 48h = 3 missed cycles).
   JOB_FRESHNESS_ALERT_HOURS: int = int(os.getenv("JOB_FRESHNESS_ALERT_HOURS", "48"))
 
-  # Web job board scrapers
-  DOCKWALK_ENABLED: bool = os.getenv("DOCKWALK_ENABLED", "true").lower() == "true"
+  # Web job board scrapers (Dockwalk, CrewFinders, VikingCrew and SuperYachtTimes
+  # were removed on 22 Sep 2026 — their sources had stopped working).
   WORKONAYACHT_ENABLED: bool = os.getenv("WORKONAYACHT_ENABLED", "true").lower() == "true"
-  CREWFINDERS_ENABLED: bool = os.getenv("CREWFINDERS_ENABLED", "true").lower() == "true"
-  VIKINGCREW_ENABLED: bool = os.getenv("VIKINGCREW_ENABLED", "true").lower() == "true"
   FASTSTREAM_ENABLED: bool = os.getenv("FASTSTREAM_ENABLED", "true").lower() == "true"
-  SUPERYACHTTIMES_ENABLED: bool = os.getenv("SUPERYACHTTIMES_ENABLED", "true").lower() == "true"
 
   # Telnyx — inbound SMS (Ed25519 public key from Mission Control → API keys → Public key)
   TELNYX_API_KEY: str = os.getenv("TELNYX_API_KEY", "").strip()
