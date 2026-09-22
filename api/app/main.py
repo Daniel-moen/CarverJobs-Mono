@@ -21,7 +21,7 @@ from app import metrics, models
 from app.error_codes import CRV_1003, CRV_1004, CRV_1006, STATUS_CODE_TO_CRV
 from app.health_checker import health_check_loop
 from app.logger import bind_request_id, get_logger, reset_context, setup_logging
-from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_board, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
+from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew_match, digest, documents, feedback, health, interview, job_board, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
 from app.scheduler import scraper_loop
 from app.services.checkout_recovery import checkout_recovery_loop
 from app.services.payment_reconcile import payment_reconcile_loop
@@ -422,6 +422,7 @@ app.include_router(feedback.router)
 app.include_router(telnyx.router)
 app.include_router(whatsapp.router)
 app.include_router(agent_stats.router)
+app.include_router(digest.router)
 app.include_router(articles.public_router)
 app.include_router(articles.agent_router)
 

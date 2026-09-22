@@ -151,9 +151,19 @@ def _slugify(value: str | None, limit: int = 60) -> str:
     return slug[:limit].strip("-")
 
 
+_UNKNOWN_LOCATIONS = {"unknown", "n/a", "na", "tbc", "tbd", "various", "worldwide", "-"}
+
+
+def _loc(job: Job, limit: int) -> str:
+    """Scrubbed location, or "" when the scraper stored a placeholder such as
+    "Unknown" — those must not leak into slugs, titles or JSON-LD."""
+    text = _scrub_short(job.location, limit)
+    return "" if text.strip().lower() in _UNKNOWN_LOCATIONS else text
+
+
 def job_slug(job: Job) -> str:
     """Stable, human-readable slug: role-location-id."""
-    parts = [p for p in (_slugify(job.role, 48), _slugify(job.location, 40)) if p]
+    parts = [p for p in (_slugify(job.role, 48), _slugify(_loc(job, 40), 40)) if p]
     parts.append(str(job.id))
     return "-".join(parts)
 
@@ -262,7 +272,7 @@ def whatsapp_link(message: str) -> str:
 
 def _job_whatsapp_link(job: Job) -> str:
     title = _scrub_short(job.title or job.role, 90)
-    location = _scrub_short(job.location, 40)
+    location = _loc(job, 40)
     where = f" in {location}" if location else ""
     return whatsapp_link(f"Hi Carver, I'd like to apply for {title}{where} (ref {job.id})")
 
@@ -432,7 +442,7 @@ def _render_board_html(rows: list[Job], *, now: datetime | None = None) -> str:
             href = f"/jobs/board/{job_slug(job)}"
             title = _scrub_short(job.title or job.role, 140) or "Superyacht crew role"
             role = _scrub_short(job.role, 60)
-            location = _scrub_short(job.location, 60)
+            location = _loc(job, 60)
             salary = salary_text(job)
             posted = posted_ago(job.created_at, now=now)
             facts = []
@@ -557,7 +567,7 @@ def _job_json_ld(job: Job, canonical: str, description_text: str) -> dict:
             payload["validThrough"] = (
                 expires + timedelta(days=settings.JOB_EXPIRE_AFTER_DAYS)
             ).date().isoformat()
-    location = _scrub_short(job.location, 120)
+    location = _loc(job, 120)
     if location:
         payload["jobLocation"] = {
             "@type": "Place",
@@ -597,7 +607,7 @@ def _render_job_html(
 
     title = _scrub_short(job.title or job.role, 140) or "Superyacht crew role"
     role = _scrub_short(job.role, 80)
-    location = _scrub_short(job.location, 80)
+    location = _loc(job, 80)
     salary = salary_text(job)
     posted = posted_ago(job.created_at, now=now)
     posted_iso = _iso_date(job.created_at)
@@ -674,7 +684,7 @@ def _render_job_html(
                 _scrub_short(other.title or other.role, 120) or "Superyacht crew role"
             )
             other_where = _esc(
-                _join_bits([_scrub_short(other.location, 60), salary_text(other)])
+                _join_bits([_loc(other, 60), salary_text(other)])
             )
             related_items.append(
                 f'<li><a href="{other_href}">{other_title}'

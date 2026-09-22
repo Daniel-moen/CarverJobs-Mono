@@ -31,8 +31,12 @@ from app.settings import settings
 
 # ── Processors (shared by dev + prod) ─────────────────────────────────────────
 
+# NOTE: filter_by_level is deliberately NOT in this list. It is also used as the
+# ProcessorFormatter foreign_pre_chain, where structlog passes logger=None and
+# filter_by_level raises "'NoneType' object has no attribute 'isEnabledFor'" —
+# the record is then lost as a "--- Logging error ---" on stdout. Level
+# filtering for structlog-native calls is done in _processors below.
 _shared_processors: list = [
-    structlog.stdlib.filter_by_level,
     structlog.stdlib.add_logger_name,
     structlog.stdlib.add_log_level,
     structlog.processors.TimeStamper(fmt="iso"),
@@ -43,16 +47,15 @@ _shared_processors: list = [
 ]
 
 # In dev we want nice formatting; in prod we want raw JSON.
-if settings.APP_ENV == "production":
-    _processors = _shared_processors + [
-        structlog.processors.format_exc_info,
-        structlog.processors.JSONRenderer(),
-    ]
-else:
-    _processors = _shared_processors + [
-        structlog.processors.ExceptionPrettyPrinter(),
-        structlog.dev.ConsoleRenderer(colors=True),
-    ]
+# structlog-native calls run the shared chain and then hand the event dict to
+# the stdlib handler's ProcessorFormatter, which does the final render once
+# (previously the chain rendered AND the formatter rendered again, so prod
+# emitted JSON-inside-JSON).
+_processors = [structlog.stdlib.filter_by_level] + _shared_processors + [
+    structlog.processors.format_exc_info if settings.APP_ENV == "production"
+    else structlog.processors.ExceptionPrettyPrinter(),
+    structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+]
 
 
 # ── Setup ────────────────────────────────────────────────────────────────────
@@ -83,9 +86,12 @@ def setup_logging(level: str = "INFO") -> None:
     handler = logging.StreamHandler(sys.stdout)
     # Use structlog's formatter for stdlib records too
     handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processor=structlog.dev.ConsoleRenderer(colors=True)
-        if settings.APP_ENV != "production"
-        else structlog.processors.JSONRenderer(),
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.dev.ConsoleRenderer(colors=True)
+            if settings.APP_ENV != "production"
+            else structlog.processors.JSONRenderer(),
+        ],
         foreign_pre_chain=_shared_processors,
     ))
     root.addHandler(handler)
