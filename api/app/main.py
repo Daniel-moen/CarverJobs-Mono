@@ -21,9 +21,10 @@ from app import metrics, models
 from app.error_codes import CRV_1003, CRV_1004, CRV_1006, STATUS_CODE_TO_CRV
 from app.health_checker import health_check_loop
 from app.logger import bind_request_id, get_logger, reset_context, setup_logging
-from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
+from app.routes import admin, admin_dashboard, agent_stats, articles, auth, crew_match, documents, feedback, health, interview, job_board, job_history, job_submit, jobs, matching, profile, recruiter, scraper, subscription, telnyx, users, whatsapp
 from app.scheduler import scraper_loop
 from app.services.checkout_recovery import checkout_recovery_loop
+from app.services.payment_reconcile import payment_reconcile_loop
 from app.services.apply_followup import apply_followup_loop
 from app.services.window_winback import window_winback_loop
 from app.services.job_alerts import job_alert_loop
@@ -110,6 +111,14 @@ async def lifespan(app: FastAPI):
         background_tasks.append(asyncio.create_task(window_winback_loop()))
         log.info("Starting abandoned-checkout recovery loop (interval=15m)")
         background_tasks.append(asyncio.create_task(checkout_recovery_loop()))
+        log.info(
+            "Starting payment reconcile sweep (interval=%dm, max_age=%dh, %s)",
+            settings.PAYMENT_RECONCILE_INTERVAL_MINUTES,
+            settings.PAYMENT_RECONCILE_MAX_AGE_HOURS,
+            "enabled" if settings.PAYMENT_RECONCILE_ENABLED and settings.YOCO_SECRET_KEY
+            else "dormant — needs PAYMENT_RECONCILE_ENABLED + YOCO_SECRET_KEY",
+        )
+        background_tasks.append(asyncio.create_task(payment_reconcile_loop()))
 
     init_task = asyncio.create_task(_run_init_and_workers())
     yield
@@ -388,6 +397,10 @@ install_go_canary(app)
 
 app.include_router(health.router)
 app.include_router(auth.router)
+# Must precede jobs.router: that router owns the generic `/jobs/{job_id}`
+# path, and routes are matched in registration order — otherwise the public
+# board URLs `/jobs/board` and `/jobs/sitemap.xml` would be swallowed by it.
+app.include_router(job_board.public_router)
 app.include_router(jobs.router)
 app.include_router(job_submit.router)
 app.include_router(users.router)
