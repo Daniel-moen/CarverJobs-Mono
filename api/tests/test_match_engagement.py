@@ -172,12 +172,15 @@ def test_dismissed_jobs_excluded_from_match_job_query(monkeypatch):
         kept = _seed_job(db, "Deckhand — kept", "Antibes")
         db.add(models.MatchInteraction(user_key=PHONE, job_id=dismissed.id, action="dismissed"))
         db.commit()
+        # Read the id up front: a zero-match run now refunds the token, and that
+        # commit expires these instances before the session is closed.
+        kept_id = kept.id
 
         asyncio.run(whatsapp._handle_match_command(PHONE, db))
     finally:
         db.close()
 
-    assert captured["job_ids"] == [kept.id]
+    assert captured["job_ids"] == [kept_id]
 
 
 def test_paywall_teaser_excludes_dismissed_jobs(monkeypatch):

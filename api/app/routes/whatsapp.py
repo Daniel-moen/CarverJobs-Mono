@@ -919,6 +919,12 @@ _INTERACTIVE_CMD_MAP.update({
     "btn_applied_none": "applied none",
 })
 
+# Inverted-onboarding preview buttons ("Rank them for me" / "Just show the list").
+_INTERACTIVE_CMD_MAP.update({
+    "btn_onb_rank": "rank them for me",
+    "btn_onb_list": "just show the list",
+})
+
 
 _ALLOWED_REDIRECTS = frozenset({
     "/profile", "/jobs", "/status", "/", "/subscription", "/?feedback=1",
@@ -1361,51 +1367,38 @@ def _build_onboard_system(profile: dict) -> str:
             seen_labels.add(label)
             readable_missing.append(label)
     missing_text = ", ".join(readable_missing) if readable_missing else "none — all fields collected!"
-    return f"""You are CARVER — an energetic, knowledgeable crew agent who lives and breathes superyachts.
-You're chatting on WhatsApp to build a new crew member's profile. Think of yourself as a friendly Chief Stew or Bosun welcoming someone to the fleet.
+    next_field = _missing_onboard_fields(profile)[0] if missing else ""
+    next_question = _onboard_question(next_field) if next_field else ""
+    return f"""You are the profile EXTRACTOR behind CARVER, a superyacht crew agent on WhatsApp.
 
-Your vibe: warm, upbeat, uses maritime lingo naturally (crew, vessel, galley, bridge, charter season, Med, etc.). You celebrate each answer with a short reaction before the next question — keep it genuine, not robotic.
+You do not run the conversation. The bot asks a fixed sequence of questions in
+code and writes its own replies — your only job is to read the user's latest
+message and pull structured profile fields out of it. Your "message" field is
+ignored, so do not waste effort on it.
 
-Profile so far ({filled}/{len(REQUIRED_ONBOARD_FIELDS)} fields):
+Profile so far ({filled}/{len(REQUIRED_ONBOARD_FIELDS)} required fields):
 {json.dumps(profile, ensure_ascii=True)}
 
 Still missing: {missing_text}
 
-Review the conversation history. NEVER re-ask something already answered.
-This is a 4-question onboarding — fast on purpose. Ask ONLY about the required
-fields, in this order when missing:
-  1. firstName (their name — if they give a surname too, capture it in lastName)
-  2. desiredRole (e.g. Chief Stew, Bosun, Engineer, Chef, Captain, Deckhand)
-  3. currentLocation (city / country)
-  4. yearsExperience (years in yachting or maritime)
+The question the user is answering right now is:
+  [{next_field or "none"}] {next_question or "(profile complete)"}
 
-If the user volunteers extra info (surname, nationality, certifications, salary
-range, contract type, preferred cruising grounds, languages, gender), capture it
-in "updates" — but NEVER ask for it during onboarding. Those details can be
-added later via *edit profile*.
-
-Style rules for WhatsApp:
-- Use *bold* for emphasis (WhatsApp markdown).
-- Use emojis naturally but don't overdo it — 1-2 per message max.
-- Keep messages punchy (2-4 sentences). WhatsApp is a chat, not an email.
-- React to their answer first ("Nice!", "Solid experience!", "Love the Med!") then ask the next thing.
-- When nearly done, build excitement ("Almost there!", "One more and you're set!").
-- When all done, celebrate big — they just joined the fleet.
-
-First reply only (empty conversation history in the messages you receive):
-- Welcome them aboard warmly and set expectations: 4 quick questions, under a minute, then you run their *first AI job match on the house* against live yacht jobs.
-- NEVER mention tokens, prices, buying, or topping up — not in the first message, not during onboarding. Deliver value first; the token system is introduced after their first match.
+So their message is almost certainly that field's answer — map it there unless
+it clearly says something else. If they volunteer extra info (surname,
+nationality, certifications, salary range, contract type, preferred cruising
+grounds, languages, gender), capture that in "updates" too.
+NEVER mention tokens, prices, buying or topping up anywhere in your output.
 
 Data rules:
-- ONLY set "done": true when ALL {len(REQUIRED_ONBOARD_FIELDS)} required fields are collected (missing list is empty).
 - Only populate update fields when the user clearly provided that info.
-- Do not invent or assume any facts.
+- Do not invent or assume any facts. An unparseable message means empty updates.
 - Keep values short and clean (e.g. nationality: "British", contractType: "Seasonal").
 - For salaryMin/salaryMax use numeric strings only (e.g. "4000", "6000").
 - If the user wants to skip a field, set it to "unknown" so it counts as filled.
 
 Return strict JSON only:
-{{"message": "your reply", "done": {str(all_done).lower()}, "updates": {{"firstName": "", "lastName": "", "sex": "", "desiredRole": "", "yearsExperience": "", "nationality": "", "currentLocation": "", "preferredLocations": "", "contractType": "", "salaryMin": "", "salaryMax": "", "certifications": "", "languages": ""}}}}
+{{"message": "", "done": {str(all_done).lower()}, "updates": {{"firstName": "", "lastName": "", "sex": "", "desiredRole": "", "yearsExperience": "", "nationality": "", "currentLocation": "", "preferredLocations": "", "contractType": "", "salaryMin": "", "salaryMax": "", "certifications": "", "languages": ""}}}}
 
 For "sex", ONLY use one of: "male", "female", "other", "prefer_not_to_say". Map the user's answer to the closest value."""
 
@@ -1462,7 +1455,9 @@ def _fallback_extract(partial: dict, user_message: str) -> dict:
     if not text:
         return updates
 
-    missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(partial.get(f, "")).strip()]
+    # Deterministic question order (role first) — must agree with what the user
+    # was actually just asked, or the answer lands in the wrong field.
+    missing = _missing_onboard_fields(partial)
     if not missing:
         return updates
 
@@ -1808,6 +1803,45 @@ async def _send_paywall_teaser(phone_number: str, db: Session, profile, all_jobs
     )
 
 
+# ── Honest result framing ─────────────────────────────────────────────────────
+# The engine grades every result into a tier (strong ≥75, good ≥50, stretch
+# 30-49 — and stretch no longer clears MATCH_THRESHOLD, so it is never sold as
+# a match). Both helpers degrade to something true when the attributes are
+# missing, so an older engine build never breaks the reply.
+
+_TIER_WORDS = {"strong": "strong", "good": "good", "stretch": "a stretch"}
+
+
+def _tier_label(tier: str, compatibility: float = 0.0) -> str:
+    """User-facing word for a result tier; '' when unknown."""
+    tier = (tier or "").strip().lower()
+    if not tier:
+        try:
+            from app.services.matching_engine import tier_for
+            tier = tier_for(float(compatibility or 0.0))
+        except Exception:
+            return ""
+    return _TIER_WORDS.get(tier, "")
+
+
+def _match_summary_header(results, matched_count: int) -> str:
+    """"3 strong · 6 good fits" when the engine graded the run, else a count.
+
+    Never an exclamation mark, never a number the top three can contradict.
+    """
+    counts = getattr(results, "tier_counts", None)
+    if isinstance(counts, dict):
+        parts = []
+        for name in ("strong", "good"):
+            n = int(counts.get(name) or 0)
+            if n:
+                parts.append(f"{n} {name}")
+        if parts:
+            total = sum(int(counts.get(k) or 0) for k in ("strong", "good"))
+            return f"🎯 *{' · '.join(parts)} fit{'s' if total != 1 else ''}* — top 3:"
+    return f"🎯 *{matched_count} job{'s' if matched_count != 1 else ''} ranked* — top 3:"
+
+
 async def _handle_match_command(phone_number: str, db: Session, match_scope: str = _MATCH_SCOPE_ALL) -> None:
     """Run the AI matching engine, save results, and send a website link.
 
@@ -1821,9 +1855,11 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         MAX_WORKERS,
         PREFILTER_TOP_N,
         CandidateProfile,
-        JobSummary,
         match_candidate_to_jobs,
     )
+    # Imported lazily: crew_match never imports whatsapp, so there is no cycle,
+    # but keeping it local matches the other heavy imports in this handler.
+    from app.routes.crew_match import _job_to_summary
 
     profile = db.query(CrewProfile).filter(CrewProfile.user_key == phone_number).first()
     if not profile:
@@ -1843,31 +1879,41 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         return
 
     match_scope = _normalise_match_scope(match_scope)
-    jobs_query = (
-        db.query(Job)
-        .filter(Job.status.in_(["open", "priority"]))
-    )
     # Dismissals shape future runs — never re-scan a job the user said no to.
     dismissed_ids = _dismissed_job_ids(db, phone_number)
-    if dismissed_ids:
-        jobs_query = jobs_query.filter(Job.id.notin_(dismissed_ids))
-    scope_label = "all database jobs"
-    if match_scope == _MATCH_SCOPE_RECENT:
-        recent_days = max(1, settings.WA_MATCH_RECENT_DAYS)
-        cutoff = datetime.now(timezone.utc) - timedelta(days=recent_days)
-        jobs_query = jobs_query.filter(Job.created_at >= cutoff)
-        scope_label = f"recent posts from the last {recent_days} day{'s' if recent_days != 1 else ''}"
+    recent_days = max(1, settings.WA_MATCH_RECENT_DAYS)
 
-    all_jobs = jobs_query.order_by(Job.created_at.desc()).all()
+    def _open_jobs(*, recent: bool) -> list[Job]:
+        q = db.query(Job).filter(Job.status.in_(["open", "priority"]))
+        if dismissed_ids:
+            q = q.filter(Job.id.notin_(dismissed_ids))
+        if recent:
+            q = q.filter(Job.created_at >= datetime.now(timezone.utc) - timedelta(days=recent_days))
+        return q.order_by(Job.created_at.desc()).all()
+
+    widen_note = ""
+    if match_scope == _MATCH_SCOPE_RECENT:
+        all_jobs = _open_jobs(recent=True)
+        scope_label = f"recent posts from the last {recent_days} day{'s' if recent_days != 1 else ''}"
+        # Freshness by default, but never at the price of an empty run: a thin
+        # week silently widens to the whole open board and says so in one line.
+        if len(all_jobs) < _MATCH_MIN_RECENT_RESULTS:
+            narrow_count = len(all_jobs)
+            wide_jobs = _open_jobs(recent=False)
+            if len(wide_jobs) > narrow_count:
+                all_jobs = wide_jobs
+                match_scope = _MATCH_SCOPE_ALL
+                scope_label = "all open jobs"
+                widen_note = f"Only {narrow_count} this week, so I widened to the last month."
+    else:
+        all_jobs = _open_jobs(recent=False)
+        scope_label = "all database jobs"
+
     if not all_jobs:
-        if match_scope == _MATCH_SCOPE_RECENT:
-            await _send_whatsapp(
-                phone_number,
-                "No recent open yacht positions are in the database yet — try *All DB Jobs* instead.",
-            )
-            await _send_match_scope_menu(phone_number)
-        else:
-            await _send_whatsapp(phone_number, "No open yacht positions are in the database right now — check back soon!")
+        await _send_whatsapp(
+            phone_number,
+            "No open yacht positions are on the board right now — I'll ping you the moment fresh ones land.",
+        )
         return
 
     credits_remaining = spend_credits(db, phone_number, amount=1)
@@ -1887,7 +1933,8 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
     await _send_whatsapp(
         phone_number,
         f"💳 *1 token used* — *{credits_remaining}* {tok_left} left.\n\n"
-        f"⏳ Scanning *{len(all_jobs)} positions* from *{scope_label}* and AI-matching your best fits ({est_str}) — hang tight!",
+        + (widen_note + "\n\n" if widen_note else "")
+        + f"⏳ Ranking *{len(all_jobs)} positions* from *{scope_label}* against your profile ({est_str}) — hang tight.",
     )
 
     certs = [c.strip() for c in (profile.certifications or "").replace("\n", ",").split(",") if c.strip()]
@@ -1935,22 +1982,12 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         document_summary=doc_summary,
     )
 
-    job_summaries = [
-        JobSummary(
-            job_id=j.id, title=j.title, role=j.role or "", department=j.department or "",
-            location=j.location, yacht_type=j.yacht_type or "", yacht_length_m=j.yacht_length_m,
-            start_date=j.start_date or "", contract_type=j.contract_type or "",
-            rotation=j.rotation or "", season=j.season or "",
-            salary_min=j.salary_min, salary_max=j.salary_max,
-            salary_currency=j.salary_currency or "EUR",
-            experience_required_years=j.experience_required_years,
-            certifications_required=j.certifications_required or "",
-            languages_required=j.languages_required or "",
-            description=j.description or "",
-            status=j.status or "open",
-        )
-        for j in all_jobs
-    ]
+    # Parity with the web path. The old inline literal here dropped created_at,
+    # requirements, responsibilities, urgent_hire, minimum_license and
+    # rank_level — which killed recency scoring on WhatsApp outright and handed
+    # the LLM a thinner record than routes/crew_match.py builds. One helper, one
+    # record shape, both channels.
+    job_summaries = [_job_to_summary(j) for j in all_jobs]
     jobs_by_id = {j.id: j for j in all_jobs}
 
     try:
@@ -1973,9 +2010,19 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
 
     matched = [r for r in (results or []) if r.matched]
     if not matched:
+        # A run that surfaces nothing delivered nothing — the user does not pay
+        # for it. add_credits is the refund path (same as the engine-error
+        # branch above) and returns the new balance.
+        credits_remaining = add_credits(db, phone_number, amount=1)
+        record_server_event(phone_number, "match_zero_refund", str(len(all_jobs)))
+        bal_w = "token" if credits_remaining == 1 else "tokens"
         await _send_whatsapp(
             phone_number,
-            "No strong matches right now. A complete profile with certs and docs boosts your chances!",
+            f"I ranked {len(all_jobs)} live position{'s' if len(all_jobs) != 1 else ''} "
+            "and none of them clear the bar for you right now — so I've put your "
+            f"token back. You're at *{credits_remaining}* {bal_w}.\n\n"
+            "Certs, preferred cruising grounds and a salary range usually turn "
+            "this around on the next run.",
         )
         await _send_whatsapp_buttons(
             phone_number,
@@ -2017,16 +2064,22 @@ async def _handle_match_command(phone_number: str, db: Session, match_scope: str
         _clear_saved_list_context(wa_session)  # digit replies now target the fresh run
         db.commit()
 
-    # Build brief summary for WhatsApp (top 3)
+    # Build brief summary for WhatsApp (top 3).
+    #
+    # "Found 35 matches!" was the single most dishonest line in the product —
+    # it hyped a number the user could see was mostly irrelevant the moment
+    # they read the top three. Lead with what the engine actually concluded.
     top = matched[:3]
-    lines = [f"🎯 *Found {len(matched)} match{'es' if len(matched) != 1 else ''}!*\n"]
+    lines = [_match_summary_header(results, len(matched)) + "\n"]
     lines.append(f"_Scanned {scope_label}._\n")
     for i, m in enumerate(top, 1):
         job = jobs_by_id.get(m.job_id)
         if not job:
             continue
         compat = int(m.compatibility)
-        lines.append(f"{i}. *{job.title}* — {job.location} ({compat}%)")
+        tier = _tier_label(getattr(m, "tier", "") or "", m.compatibility)
+        tier_bit = f" · {tier}" if tier else ""
+        lines.append(f"{i}. *{job.title}* — {job.location} ({compat}%{tier_bit})")
     if len(matched) > 3:
         lines.append(f"   _...and {len(matched) - 3} more_")
 
@@ -2218,7 +2271,11 @@ async def _send_match_detail(phone: str, db: Session, wa_session: WhatsAppSessio
     if job.start_date:
         facts.append(f"🗓️ Starts {job.start_date}")
     lines.append("\n".join(facts))
-    lines.append(f"\n*Match: {int(result.compatibility)}%* — {result.reason or 'good overall fit.'}")
+    # MatchSessionResult has no tier column, so derive it from the stored score
+    # with the engine's own thresholds — same word the summary used.
+    tier = _tier_label("", result.compatibility)
+    tier_bit = f" · {tier} fit" if tier and tier != "a stretch" else (f" · {tier}" if tier else "")
+    lines.append(f"\n*Match: {int(result.compatibility)}%{tier_bit}* — {result.reason or 'good overall fit.'}")
 
     try:
         strengths = json.loads(result.strengths or "[]")
@@ -2508,156 +2565,421 @@ async def _send_saved_job_detail(phone: str, db: Session, wa_session: WhatsAppSe
 
 # ── Onboarding flow ───────────────────────────────────────────────────────────
 
-# Value first, economics later: the first message a brand-new user ever sees
-# must promise jobs, not introduce tokens — 39% of users were dropping out at
-# this exact message when it led with "buy tokens".
-_FALLBACK_GREETING = (
-    "Ahoy! 🛥️ Welcome to *CARVER* — your personal superyacht crew agent.\n\n"
-    "Tell me a bit about yourself — *4 quick questions, under a minute* — and "
-    "I'll scan the live job board and run your *first AI job match on the house*.\n\n"
-    "First up: what's your *full name*? 🪪"
+# Inverted onboarding: value before profile.
+#
+# The 22 Sep transcript review found 15 of 20 stalled users sent exactly ONE
+# message and never replied, and that a user who *did* finish needed ~5 messages
+# and ~90 seconds before seeing a single job title. So the first message a
+# brand-new user ever sees is fixed, LLM-free and deterministic — auditable,
+# A/B-able, identical for everyone, no round-trip latency, and free of any
+# token/pricing talk. It asks for ONE word, because one word is all we need to
+# put real jobs on their screen on message two.
+_FIRST_MESSAGE = (
+    "I scan every live superyacht job and tell you which ones fit you. "
+    "One word to start — what role are you after? "
+    "(e.g. Deckhand, Stewardess, Engineer, Chef)"
 )
+# Back-compat alias — the old name is referenced by tests and win-back copy.
+_FALLBACK_GREETING = _FIRST_MESSAGE
+
+# Deterministic question order. Role comes first (it is the first message), then
+# the three fields the matching engine still needs. The *sequence* is code, not
+# an LLM decision; the LLM is only kept for extracting answers (and capturing
+# volunteered extras) once the role preview has landed.
+_ONBOARD_QUESTION_ORDER = ["desiredRole", "firstName", "currentLocation", "yearsExperience"]
+
+# Short, one-at-a-time replacements for the chatty _FIELD_QUESTIONS copy.
+_ONBOARD_QUESTIONS: dict[str, str] = {
+    "desiredRole": "What role are you after? (e.g. Deckhand, Stewardess, Engineer, Chef)",
+    "firstName": "What's your first name?",
+    "currentLocation": "Where are you based right now? City or country is fine.",
+    "yearsExperience": "How many years have you worked on boats? A rough number works.",
+}
+
+# Widen the role preview to a month when the last WA_MATCH_RECENT_DAYS are empty.
+_ONBOARD_PREVIEW_FALLBACK_DAYS = 30
+# Below this many recent jobs, a match run widens to all open jobs by itself.
+_MATCH_MIN_RECENT_RESULTS = 3
+
+_ONBOARD_NO_JOBS = (
+    "Nothing live for that role this week — I'll ping you the moment one lands."
+)
+
+# The two buttons under the role preview. Routed by button *id*, but the plain
+# text is accepted too so typing works as well as tapping.
+_ONBOARD_RANK_CMDS: frozenset[str] = frozenset({
+    "rank them for me", "rank them", "rank", "rank all", "rank me",
+})
+_ONBOARD_LIST_CMDS: frozenset[str] = frozenset({
+    "just show the list", "just show me the list", "show me the list",
+    "show the list", "just the list", "the list",
+})
+
+
+def _missing_onboard_fields(partial: dict) -> list[str]:
+    """Required fields still unanswered, in deterministic question order."""
+    return [f for f in _ONBOARD_QUESTION_ORDER if not str(partial.get(f, "")).strip()]
+
+
+def _onboard_question(field: str) -> str:
+    return _ONBOARD_QUESTIONS.get(field) or _FIELD_QUESTIONS.get(
+        field, f"Could you tell me your {_FIELD_LABELS.get(field, field)}?"
+    )
+
+
+def _extract_role(text: str) -> str:
+    """Pull a role out of a one-word-ish answer. '' when it isn't one.
+
+    Deliberately deterministic and LLM-free: this answer gates the job preview,
+    so it must be instant. Anything long or wordy falls through to a re-ask.
+    """
+    raw = (text or "").strip().strip(".,!?;:")
+    if not raw or len(raw) > 60 or not re.search(r"[A-Za-z]", raw):
+        return ""
+    raw = re.sub(
+        r"^(i'?m\s+an?|im\s+an?|i\s+am\s+an?|looking\s+for(\s+an?)?|a|an|the)\s+",
+        "", raw, flags=re.IGNORECASE,
+    ).strip()
+    if not raw or len(raw.split()) > 4:
+        return ""
+    return raw.title()
+
+
+def _posted_age(created_at: datetime | None) -> str:
+    """'today' / 'yesterday' / '5d ago' — '' when the timestamp is missing."""
+    if not created_at:
+        return ""
+    dt = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+    days = (datetime.now(timezone.utc) - dt).days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    return f"{days}d ago"
+
+
+def _job_preview_line(job: Job) -> str:
+    """'Deckhand · Antibes · 45m MY' — whatever of that the row actually has."""
+    bits: list[str] = [str(job.role or job.title or "").strip()]
+    if job.location:
+        bits.append(str(job.location).strip())
+    vessel = ""
+    if job.yacht_length_m:
+        vessel = f"{job.yacht_length_m:g}m"
+    if job.yacht_type and len(str(job.yacht_type)) <= 12:
+        vessel = f"{vessel} {job.yacht_type}".strip()
+    if vessel:
+        bits.append(vessel)
+    return " · ".join(b for b in bits if b)
+
+
+def _role_preview_jobs(db: Session, role: str) -> tuple[list[Job], int, bool]:
+    """Cheap, deterministic role match over live jobs. (jobs, days, widened).
+
+    Reuses the same zero-LLM substring/taxonomy matcher the paywall teaser uses,
+    scoped to the last WA_MATCH_RECENT_DAYS. An empty week honestly falls back
+    to the last month rather than pretending the board is dead.
+    """
+    from app.services.job_alerts import _matching_jobs
+
+    def _window(days: int) -> list[Job]:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        rows = (
+            db.query(Job)
+            .filter(Job.status.in_(["open", "priority"]), Job.created_at >= cutoff)
+            .order_by(Job.created_at.desc())
+            .all()
+        )
+        return _matching_jobs(rows, role)
+
+    recent_days = max(1, settings.WA_MATCH_RECENT_DAYS)
+    jobs = _window(recent_days)
+    if jobs:
+        return jobs, recent_days, False
+    wide = _window(_ONBOARD_PREVIEW_FALLBACK_DAYS)
+    return wide, _ONBOARD_PREVIEW_FALLBACK_DAYS, bool(wide)
+
+
+async def _send_role_job_preview(
+    phone: str, db: Session, role: str, partial: dict
+) -> tuple[bool, str]:
+    """Real job titles on message two. (preview_sent, text_for_history)."""
+    jobs, _days, widened = _role_preview_jobs(db, role)
+    record_server_event(phone, "onboard_role_jobs_shown", str(len(jobs)))
+    if not jobs:
+        return False, _ONBOARD_NO_JOBS
+
+    n = len(jobs)
+    plural = "s" if n != 1 else ""
+    if widened:
+        head = (
+            f"Nothing new this week for *{role}* — but *{n}* job{plural} "
+            f"landed in the last month."
+        )
+    else:
+        head = f"Good — *{n}* live {role} job{plural} this week."
+
+    shown = jobs[:3]
+    head += " Freshest three:" if len(shown) == 3 else (" Here it is:" if len(shown) == 1 else " Freshest:")
+    lines = [head]
+    lines += ["• " + _job_preview_line(j) for j in shown]
+
+    remaining = len([f for f in _missing_onboard_fields(partial) if f != "desiredRole"])
+    target = f"all {n}" if n > 1 else "it"
+    lines.append(
+        f"\nWant me to rank {target} against your profile? "
+        f"{remaining} quick question{'s' if remaining != 1 else ''} and your first run is free."
+    )
+
+    text = "\n".join(lines)
+    await _send_whatsapp(phone, text)
+    await _send_whatsapp_buttons(
+        phone,
+        "How do you want them?",
+        [
+            ("btn_onb_rank", "Rank them for me"),
+            ("btn_onb_list", "Just show the list"),
+        ],
+    )
+    return True, text
+
+
+async def _send_role_job_list(phone: str, db: Session, role: str) -> int:
+    """"Just show me the list" — top 10, title / location / posted age."""
+    jobs, _days, _widened = _role_preview_jobs(db, role)
+    if not jobs:
+        await _send_whatsapp(phone, _ONBOARD_NO_JOBS)
+        return 0
+
+    n = len(jobs)
+    lines = [f"*{n} live {role} job{'s' if n != 1 else ''}* — newest first:\n"]
+    for i, job in enumerate(jobs[:10], 1):
+        tail = [str(job.location).strip()] if job.location else []
+        age = _posted_age(job.created_at)
+        if age:
+            tail.append(age)
+        suffix = " — " + " · ".join(tail) if tail else ""
+        lines.append(f"{i}. *{job.title or job.role or role}*{suffix}")
+    if n > 10:
+        lines.append(f"\n_…and {n - 10} more._")
+    await _send_whatsapp(phone, "\n".join(lines))
+    return n
+
+
+def _onboard_retry_prompt(partial: dict, field: str) -> str:
+    """Re-ask `field`, escalating to a dead-straight prompt after two misses.
+
+    Keeps the user off the "didn't quite catch that" treadmill that the review
+    found people abandoning.
+    """
+    question = _onboard_question(field)
+    if partial.get("_retryField") == field:
+        partial["_retryCount"] = int(partial.get("_retryCount", 0)) + 1
+    else:
+        partial["_retryField"] = field
+        partial["_retryCount"] = 1
+    if int(partial["_retryCount"]) >= 2:
+        return (
+            f"Let's keep it simple 👍 {question}\n\n"
+            "_Just reply with the answer on its own — nothing else needed._"
+        )
+    return f"Hmm, didn't quite catch that — no worries! {question}"
 
 
 async def _run_onboarding(wa_session: WhatsAppSession, user_message: str, db: Session) -> str | None:
+    """Inverted onboarding: value first, profile second.
+
+    1. Fixed, LLM-free first message asking for one word (the role).
+    2. The role answer immediately buys real job titles — count + freshest 3 —
+       with a *Rank them for me* / *Just show the list* choice.
+    3. Only then the remaining required fields, one deterministic question at a
+       time (the LLM still extracts the answers and any volunteered extras).
+    """
     history = json.loads(wa_session.history)
     partial = json.loads(wa_session.partial_profile)
+    phone = wa_session.phone_number
 
+    # ── 1. Brand-new user ────────────────────────────────────────────────────
+    # No LLM call at all: deterministic, auditable, A/B-able, and instant.
+    if not history:
+        history.append({"role": "user", "content": user_message})
+        history.append({"role": "assistant", "content": _FIRST_MESSAGE})
+        _save_session(wa_session, db, history, partial)
+        return _FIRST_MESSAGE
+
+    cmd = (user_message or "").strip().lower()
+    role_so_far = str(partial.get("desiredRole", "")).strip()
+
+    # ── 2. The role answer → real jobs on screen ─────────────────────────────
+    if not role_so_far:
+        role = _extract_role(user_message)
+        if not role:
+            message = _onboard_retry_prompt(partial, "desiredRole")
+            history.append({"role": "user", "content": user_message})
+            history.append({"role": "assistant", "content": message})
+            _save_session(wa_session, db, history, partial)
+            return message
+
+        _before = dict(partial)
+        partial["desiredRole"] = role
+        _record_onboard_fields(phone, _before, partial)
+        partial.pop("_retryField", None)
+        partial.pop("_retryCount", None)
+        history.append({"role": "user", "content": user_message})
+
+        preview_sent, preview_text = await _send_role_job_preview(phone, db, role, partial)
+        if preview_sent:
+            # Buttons are on screen — wait for the tap rather than piling on
+            # another question in the same breath.
+            history.append({"role": "assistant", "content": preview_text})
+            _save_session(wa_session, db, history, partial)
+            return None
+
+        # Honest about an empty board, but onboarding continues.
+        message = preview_text + "\n\n" + _onboard_question(_missing_onboard_fields(partial)[0])
+        history.append({"role": "assistant", "content": message})
+        _save_session(wa_session, db, history, partial)
+        return message
+
+    # ── 3. Preview buttons ───────────────────────────────────────────────────
+    if cmd in _ONBOARD_LIST_CMDS or cmd in _ONBOARD_RANK_CMDS:
+        tapped_list = cmd in _ONBOARD_LIST_CMDS
+        listed = 0
+        if tapped_list:
+            record_server_event(phone, "onboard_list_tapped", role_so_far)
+            listed = await _send_role_job_list(phone, db, role_so_far)
+        history.append({"role": "user", "content": user_message})
+
+        missing = _missing_onboard_fields(partial)
+        if missing:
+            if tapped_list:
+                lead = "Want them ranked, strongest fit first? " if listed else ""
+            else:
+                lead = "Good — "
+            message = lead + _onboard_question(missing[0])
+            history.append({"role": "assistant", "content": message})
+            _save_session(wa_session, db, history, partial)
+            return message
+
+        # Nothing left to ask — finish the profile instead of looping.
+        message = "That's a wrap — your crew profile is set. 🎉"
+        history.append({"role": "assistant", "content": message})
+        return await _finish_onboarding(wa_session, db, history, partial, message)
+
+    # ── 4. Ordinary field answer ─────────────────────────────────────────────
+    # The LLM still does extraction (and captures volunteered extras), but the
+    # question sequence below is deterministic — never an LLM decision.
     system = _build_onboard_system(partial)
     try:
         parsed = await _call_openai(system, history, user_message)
     except Exception as exc:
         # Deterministic fallback extraction below keeps onboarding moving.
-        log.exception(
-            "Onboarding LLM call failed | phone=%s | %s",
-            wa_session.phone_number[:6] + "****", exc,
-        )
+        log.exception("Onboarding LLM call failed | phone=%s | %s", phone[:6] + "****", exc)
         parsed = {}
 
-    # First message: use AI greeting, fall back to static if AI fails
-    if not history:
-        message = (parsed.get("message") or "").strip() or _FALLBACK_GREETING
-        updates = parsed.get("updates") if isinstance(parsed.get("updates"), dict) else {}
-        clean_updates = {k: str(v).strip() for k, v in updates.items() if isinstance(k, str) and v and str(v).strip()}
-        _before = dict(partial)
-        partial = _apply_updates(partial, clean_updates)
-        _record_onboard_fields(wa_session.phone_number, _before, partial)
-        history.append({"role": "user", "content": user_message})
-        history.append({"role": "assistant", "content": message})
-        _save_session(wa_session, db, history, partial)
-        return message
-
-    # parsed already populated above for non-first messages
-
-    message = (parsed.get("message") or "").strip()
-    done = bool(parsed.get("done"))
     updates = parsed.get("updates") if isinstance(parsed.get("updates"), dict) else {}
-    clean_updates = {k: str(v).strip() for k, v in updates.items() if isinstance(k, str) and v and str(v).strip()}
-
-    # When the LLM completely fails, try basic extraction from the user's message
-    # so the conversation can still make progress.
-    llm_failed = not parsed
-    if llm_failed:
+    clean_updates = {
+        k: str(v).strip() for k, v in updates.items()
+        if isinstance(k, str) and v and str(v).strip()
+    }
+    if not parsed:
         clean_updates = _fallback_extract(partial, user_message)
         log.warning("LLM failed — fallback extraction | updates=%s", clean_updates)
 
     _before = dict(partial)
     partial = _apply_updates(partial, clean_updates)
-    _record_onboard_fields(wa_session.phone_number, _before, partial)
+    _record_onboard_fields(phone, _before, partial)
     if clean_updates:
         # Progress made — clear the consecutive-retry tracker for the stuck field.
         partial.pop("_retryField", None)
         partial.pop("_retryCount", None)
 
-    if not message:
-        missing = [f for f in REQUIRED_ONBOARD_FIELDS if not str(partial.get(f, "")).strip()]
-        filled = len(REQUIRED_ONBOARD_FIELDS) - len(missing)
-        if missing:
-            question = _FIELD_QUESTIONS.get(missing[0], f"Could you tell me your {_FIELD_LABELS.get(missing[0], missing[0])}?")
-            if clean_updates:
-                _acks = ["Nice one! ✅", "Got it, thanks! 👍", "Solid — noted! ✅", "Great stuff! 🙌"]
-                ack = _acks[filled % len(_acks)]
-                if filled >= len(REQUIRED_ONBOARD_FIELDS) - 2:
-                    message = f"{ack} Almost there — just a couple more! {question}"
-                else:
-                    message = f"{ack} {question}"
+    missing = _missing_onboard_fields(partial)
+    done = not missing
+    if missing:
+        question = _onboard_question(missing[0])
+        if clean_updates:
+            filled = len(_ONBOARD_QUESTION_ORDER) - len(missing)
+            _acks = ["Got it.", "Noted.", "Thanks.", "Nice one."]
+            ack = _acks[filled % len(_acks)]
+            if len(missing) == 1:
+                message = f"{ack} Last one — {question[0].lower() + question[1:]}"
             else:
-                # Track consecutive extraction failures on the same field so the
-                # user never loops on "didn't quite catch that" forever. After
-                # two misses, drop the chit-chat and ask the field question
-                # dead-straight with an example of what to reply.
-                if partial.get("_retryField") == missing[0]:
-                    partial["_retryCount"] = int(partial.get("_retryCount", 0)) + 1
-                else:
-                    partial["_retryField"] = missing[0]
-                    partial["_retryCount"] = 1
-                if int(partial["_retryCount"]) >= 2:
-                    message = (
-                        f"Let's keep it simple 👍 {question}\n\n"
-                        "_Just reply with the answer on its own — nothing else needed._"
-                    )
-                else:
-                    message = f"Hmm, didn't quite catch that — no worries! {question}"
+                message = f"{ack} {question}"
         else:
-            message = "That's a wrap — your crew profile is *complete*! 🎉"
-            done = True
+            message = _onboard_retry_prompt(partial, missing[0])
+    else:
+        message = "That's a wrap — your crew profile is set. 🎉"
 
     history.append({"role": "user", "content": user_message})
     history.append({"role": "assistant", "content": message})
 
     if done:
-        _save_profile_to_db(wa_session.phone_number, partial, db)
-        _save_session(wa_session, db, history, partial, mode="chat")
-        metrics.increment("onboard_completed")
-        record_server_event(wa_session.phone_number, "onboard_completed")
-        link = _make_magic_link(wa_session.phone_number, db)
-        name = partial.get("firstName", "crew")
-
-        # Activation moment: run the first match immediately on the free signup
-        # token instead of hoping the user discovers the *match* command later.
-        balance = get_credit_balance(db, wa_session.phone_number)
-        first_match_started = balance > 0 and _try_start_match_run(wa_session.phone_number)
-        if first_match_started:
-            record_server_event(wa_session.phone_number, "first_match_auto_run", "whatsapp")
-            graph_phone_number_id = _wa_graph_phone_id.get() or ""
-            phone = wa_session.phone_number
-
-            async def _first_match_run() -> None:
-                # Small delay so the welcome message lands before match updates.
-                await asyncio.sleep(3)
-                await _run_match_command_background(phone, graph_phone_number_id, _MATCH_SCOPE_ALL)
-                # Results are on screen — best moment to ask for the one optional
-                # field that sharpens matching most (certs left out of the
-                # 4-question onboarding on purpose).
-                await _send_post_match_enrichment(phone)
-
-            asyncio.create_task(_first_match_run())
-
-        message += (
-            f"\n\n🎉 *Welcome to the fleet, {name}!* Your crew profile is live.\n\n"
-        )
-        if first_match_started:
-            message += (
-                "🚀 I'm already running your *first Find Matches* on the house — "
-                "your top matches will land right here in a minute or two.\n\n"
-            )
-        message += (
-            f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
-            f"type *buy tokens* to top up, or submit a valid job to earn a free token. "
-            f"_Type *help* anytime to see what I can do for you._ ⚡"
-        )
-        await _send_whatsapp(wa_session.phone_number, message)
-        await _send_whatsapp_cta_url(
-            wa_session.phone_number,
-            body="To really stand out, upload your docs — CV, passport, STCW & certs:",
-            button_text="Upload docs",
-            url_link=link,
-            footer=_link_expiry_note().strip("_"),
-        )
-        return None
+        return await _finish_onboarding(wa_session, db, history, partial, message)
 
     _save_session(wa_session, db, history, partial)
     return message
+
+
+async def _finish_onboarding(
+    wa_session: WhatsAppSession,
+    db: Session,
+    history: list,
+    partial: dict,
+    message: str,
+) -> None:
+    """Profile complete: persist it, kick the free first run, send the welcome."""
+    _save_profile_to_db(wa_session.phone_number, partial, db)
+    _save_session(wa_session, db, history, partial, mode="chat")
+    metrics.increment("onboard_completed")
+    record_server_event(wa_session.phone_number, "onboard_completed")
+    link = _make_magic_link(wa_session.phone_number, db)
+    name = partial.get("firstName", "crew")
+
+    # Activation moment: run the first match immediately on the free signup
+    # token instead of hoping the user discovers the *match* command later.
+    balance = get_credit_balance(db, wa_session.phone_number)
+    first_match_started = balance > 0 and _try_start_match_run(wa_session.phone_number)
+    if first_match_started:
+        record_server_event(wa_session.phone_number, "first_match_auto_run", "whatsapp")
+        graph_phone_number_id = _wa_graph_phone_id.get() or ""
+        phone = wa_session.phone_number
+
+        async def _first_match_run() -> None:
+            # Small delay so the welcome message lands before match updates.
+            await asyncio.sleep(3)
+            # Freshness first: the automatic run scans the last
+            # WA_MATCH_RECENT_DAYS and widens itself when that is too thin.
+            await _run_match_command_background(phone, graph_phone_number_id, _MATCH_SCOPE_RECENT)
+            # Results are on screen — best moment to ask for the one optional
+            # field that sharpens matching most (certs left out of the
+            # 4-question onboarding on purpose).
+            await _send_post_match_enrichment(phone)
+
+        asyncio.create_task(_first_match_run())
+
+    message += (
+        f"\n\n🎉 *Welcome to the fleet, {name}!* Your crew profile is live.\n\n"
+    )
+    if first_match_started:
+        message += (
+            "🚀 I'm already ranking the live jobs against your profile, on the house — "
+            "your results land right here in a minute or two.\n\n"
+        )
+    message += (
+        f"💳 *Tokens:* Each *Find Matches* run uses *1 token* — "
+        f"type *buy tokens* to top up, or submit a valid job to earn a free token. "
+        f"_Type *help* anytime to see what I can do for you._ ⚡"
+    )
+    await _send_whatsapp(wa_session.phone_number, message)
+    await _send_whatsapp_cta_url(
+        wa_session.phone_number,
+        body="To really stand out, upload your docs — CV, passport, STCW & certs:",
+        button_text="Upload docs",
+        url_link=link,
+        footer=_link_expiry_note().strip("_"),
+    )
+    return None
 
 
 # ── Chat / interview flow ─────────────────────────────────────────────────────
@@ -2667,7 +2989,7 @@ async def _run_chat(wa_session: WhatsAppSession, user_message: str, db: Session)
     cmd = user_message.strip().lower()
     phone = wa_session.phone_number
 
-    if cmd in ("help", "commands", "menu", "hi", "hello"):
+    if cmd in ("help", "commands", "menu", "hi", "hey", "hello"):
         await _send_help_menu(phone, db)
         return None
 
@@ -2926,6 +3248,18 @@ _GLOBAL_CMDS: frozenset[str] = frozenset({
     "feedback", "give feedback", "review", "survey",
 })
 
+# Extra commands that work *during* onboarding, but only once the fixed first
+# message has been sent. The gate matters: the website's wa.me CTAs prefill
+# "match · <tag>", so a brand-new user's very first message is literally
+# "match" — intercepting that would swallow the greeting. Everything here is
+# read-only or a menu, so it never strands a half-finished profile; the next
+# message resumes onboarding where it left off.
+_ONBOARDING_ALLOWED_CMDS: frozenset[str] = frozenset({
+    "jobs", "open jobs", "positions", "vacancies",
+    "match", "find jobs", "find matches", "matching", "find me jobs", "job match",
+    "hey", "hi", "hello",
+})
+
 
 async def _process_whatsapp_message(
     phone_number: str,
@@ -2985,7 +3319,14 @@ async def _process_whatsapp_message(
 
         # Global commands bypass onboarding / job-submit modes so the user
         # can always buy tokens, check balance, or open the help menu.
-        if wa_session.mode != "chat" and _cmd in _GLOBAL_CMDS:
+        # `jobs` / `match` / `hey` additionally work mid-onboarding, but only
+        # after the first message — see _ONBOARDING_ALLOWED_CMDS.
+        _onboarding_cmd_ok = (
+            wa_session.mode == "onboarding"
+            and _cmd in _ONBOARDING_ALLOWED_CMDS
+            and (getattr(wa_session, "history", None) or "[]") != "[]"
+        )
+        if (wa_session.mode != "chat" and _cmd in _GLOBAL_CMDS) or _onboarding_cmd_ok:
             reply = await _run_chat(wa_session, user_text, db)
             if reply is not None:
                 await _send_whatsapp(phone_number, reply)

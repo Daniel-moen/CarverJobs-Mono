@@ -230,7 +230,9 @@ def test_onboarding_retry_escalates_to_explicit_question(monkeypatch):
                 {"role": "user", "content": "hi"},
                 {"role": "assistant", "content": "welcome"},
             ]),
-            partial_profile="{}",
+            # Role already captured, so the run is past the job preview and
+            # into the deterministic field sequence (firstName next).
+            partial_profile=json.dumps({"desiredRole": "Deckhand"}),
         )
         db.add(ws)
         db.commit()
@@ -240,7 +242,7 @@ def test_onboarding_retry_escalates_to_explicit_question(monkeypatch):
 
         second = asyncio.run(whatsapp._run_onboarding(ws, "🤷", db))
         assert "didn't quite catch that" not in second
-        assert whatsapp._FIELD_QUESTIONS["firstName"] in second
+        assert whatsapp._ONBOARD_QUESTIONS["firstName"] in second
     finally:
         db.close()
 

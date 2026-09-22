@@ -203,6 +203,12 @@ class Settings:
   # Job retention — prunes the ever-growing `jobs` table (see services/job_retention.py).
   # Active jobs older than this are soft-expired (status -> "expired").
   JOB_EXPIRE_AFTER_DAYS: int = int(os.getenv("JOB_EXPIRE_AFTER_DAYS", "30"))
+  # Facebook-group sourced jobs go stale far faster than board listings: a crew
+  # post in a group is usually filled within days, so a 30-day window leaves the
+  # WhatsApp bot recommending vacancies that closed weeks ago. This is the
+  # shorter soft-expiry window for those rows (source == facebook / apify).
+  # NOTE: declared here only — services/job_retention.py does not read it yet.
+  JOB_EXPIRE_AFTER_DAYS_FB: int = int(os.getenv("JOB_EXPIRE_AFTER_DAYS_FB", "14"))
   # Any job older than this is deleted outright to keep the table small.
   JOB_DELETE_AFTER_DAYS: int = int(os.getenv("JOB_DELETE_AFTER_DAYS", "90"))
   # How often the retention background loop runs.

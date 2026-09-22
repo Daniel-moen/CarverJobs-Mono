@@ -65,7 +65,8 @@ def test_fallback_greeting_has_no_token_or_buy_language():
     low = whatsapp._FALLBACK_GREETING.lower()
     for banned in ("token", "buy", "top up", "r25", "pay"):
         assert banned not in low
-    assert "name" in low  # still asks the first onboarding question
+    # Inverted onboarding: the first question is the role, not the name.
+    assert "role" in low
 
 
 def test_onboard_system_prompt_forbids_token_talk_on_first_reply():
