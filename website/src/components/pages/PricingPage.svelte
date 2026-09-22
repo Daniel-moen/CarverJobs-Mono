@@ -5,13 +5,26 @@
    * pages so prices and objection-handling never drift between surfaces.
    */
   import { trackOutboundClick } from '../../config/analytics'
-  import { WA_TAGS, waMessage, whatsapp } from '../../config/site'
+  import {
+    RECRUITER_UNLOCK_COST_TOKENS,
+    WA_TAGS,
+    unlocksPerTokens,
+    waMessage,
+    whatsapp,
+  } from '../../config/site'
   import TokenPacksSection from '../sections/TokenPacksSection.svelte'
   import FaqSection from '../sections/FaqSection.svelte'
   import ScrollProgress from '../sections/ScrollProgress.svelte'
   import WhatsAppFab from '../sections/WhatsAppFab.svelte'
+  import { defaultTokenPackages } from '../../config/subscriptionCheckout'
 
   const startMessage = waMessage(WA_TAGS.pricing)
+
+  // "Starter ≈ 1 unlock" — derived from the pack sizes and the unlock cost
+  // so the line cannot go stale when either number moves.
+  const unlockEquivalents = defaultTokenPackages()
+    .map((p) => `${p.label} ≈ ${unlocksPerTokens(p.tokens)} unlock${unlocksPerTokens(p.tokens) === 1 ? '' : 's'}`)
+    .join(' · ')
 </script>
 
 <div class="pricing">
@@ -45,20 +58,30 @@
         <p class="engraved">For agencies &amp; recruiters</p>
         <h2 class="p-recruiter-title">Pay only for the crew you want to reach.</h2>
         <p class="p-recruiter-body">
-          Post roles and browse matched candidates for free. Spend 5 tokens to unlock a
-          candidate's contact details — once unlocked, they stay open for you at no extra cost.
+          Post roles and browse matched candidates for free. Your first contact unlock is free;
+          after that it's {RECRUITER_UNLOCK_COST_TOKENS} tokens to unlock a candidate's email and
+          phone — once unlocked, they stay open for you at no extra cost.
         </p>
         <p class="p-recruiter-note">
-          In recruiter terms: Starter ≈ 1 unlock · Standard ≈ 4 unlocks · Premium ≈ 15 unlocks.
+          In recruiter terms: {unlockEquivalents}.
         </p>
       </div>
-      <a
-        href="/signup/agency"
-        class="cta-ivory p-recruiter-cta"
-        onclick={() => trackOutboundClick('pricing_agency_signup')}
-      >
-        Create an agency account
-      </a>
+      <div class="p-recruiter-actions">
+        <a
+          href="/signup/agency"
+          class="cta-ivory p-recruiter-cta"
+          onclick={() => trackOutboundClick('pricing_agency_signup')}
+        >
+          Create an agency account
+        </a>
+        <a
+          href="/find-crew"
+          class="p-recruiter-alt"
+          onclick={() => trackOutboundClick('crew_preview_cta', { label: 'pricing' })}
+        >
+          Preview the crew pool first
+        </a>
+      </div>
     </div>
   </section>
 
@@ -164,6 +187,12 @@
     color: var(--text-muted);
     font-size: 12px;
   }
+  .p-recruiter-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.7rem;
+  }
   .p-recruiter-cta {
     display: inline-flex;
     align-items: center;
@@ -174,6 +203,19 @@
     font-weight: 600;
     text-decoration: none;
     white-space: nowrap;
+  }
+  .p-recruiter-alt {
+    color: var(--text-muted);
+    font-size: 12.5px;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(243, 234, 216, 0.2);
+    padding-bottom: 2px;
+    white-space: nowrap;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  .p-recruiter-alt:hover {
+    color: var(--ivory);
+    border-bottom-color: rgba(243, 234, 216, 0.45);
   }
 
   .p-foot {

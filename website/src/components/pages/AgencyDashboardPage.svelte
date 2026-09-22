@@ -93,13 +93,26 @@
   {:else if jobs.length === 0}
     <div class="rounded-2xl border border-white/8 bg-zinc-950 p-8 text-center">
       <p class="text-sm text-slate-300">You haven't posted any jobs yet.</p>
-      <button
-        type="button"
-        onclick={() => onNavigate('agency-submit')}
-        class="mt-4 rounded-lg border border-cyan-400/40 bg-cyan-400/15 px-4 py-2 text-xs font-bold text-cyan-100 transition hover:bg-cyan-400/25"
-      >
-        Post your first job
-      </button>
+      <p class="mx-auto mt-2 max-w-sm text-[13px] text-slate-500">
+        Post a role and Carver pushes it to every matching candidate — or go straight to the
+        crew list and approach someone yourself.
+      </p>
+      <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
+        <button
+          type="button"
+          onclick={() => onNavigate('agency-submit')}
+          class="rounded-lg border border-cyan-400/40 bg-cyan-400/15 px-4 py-2 text-xs font-bold text-cyan-100 transition hover:bg-cyan-400/25"
+        >
+          Post your first job
+        </button>
+        <button
+          type="button"
+          onclick={() => onNavigate('crew')}
+          class="text-xs font-semibold text-slate-400 underline-offset-4 transition hover:text-white hover:underline"
+        >
+          Browse crew instead →
+        </button>
+      </div>
     </div>
   {:else}
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">

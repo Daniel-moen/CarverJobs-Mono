@@ -1,4 +1,5 @@
 from app.models import CrewProfile
+from app.routes.recruiter import PREVIEW_LIMIT, _limiter
 from app.services.credits import add_credits
 from app.settings import settings
 from tests.conftest import _TestingSession
@@ -123,3 +124,86 @@ def test_candidates_require_agency_or_admin(auth_client):
     # auth_client has no session → must be rejected (not a 200).
     resp = auth_client.get("/recruiter/candidates")
     assert resp.status_code in (401, 403)
+
+
+# ── Public anonymised preview (/recruiter/preview) ───────────────────────────
+# `auth_client` has no session overrides, so every test below also proves the
+# route is reachable logged-out — that is the whole point of the page.
+
+def test_public_preview_is_login_free_and_anonymous(auth_client):
+    _insert_profile(
+        "pub00001",
+        "pub@example.com",
+        first_name="Alex",
+        last_name="Crewman",
+        phone="+27123456789",
+        desired_role="Deckhand",
+        current_location="Antibes, France",
+        nationality="South African",
+        years_experience="3",
+        certifications="STCW, ENG1, Powerboat Level 2",
+        bio="Reach me on +27123456789",
+    )
+
+    resp = auth_client.get("/recruiter/preview")
+    assert resp.status_code == 200
+    body = resp.json()
+    card = body["candidates"][0]
+
+    assert card["initials"] == "A.C."
+    assert card["desired_role"] == "Deckhand"
+    assert card["region"] == "France"          # town dropped, region kept
+    assert card["certifications_count"] == 3   # count, never the cert text
+    assert body["unlock_cost"] == settings.RECRUITER_UNLOCK_COST_TOKENS
+
+    # The paid shape's identifying fields must not exist at all — not empty,
+    # absent — so a future addition to RecruiterCandidate cannot leak here.
+    for key in (
+        "profile_slug", "first_name", "last_name", "email", "phone",
+        "bio", "photo_url", "certifications",
+    ):
+        assert key not in card, f"{key} leaked into the public preview"
+
+    raw = resp.text
+    for leak in ("pub00001", "Alex", "Crewman", "+27123456789", "pub@example.com", "Antibes"):
+        assert leak not in raw, f"{leak!r} leaked into the public preview"
+
+
+def test_public_preview_excludes_non_discoverable(auth_client):
+    _insert_profile("hidden02", "hidden2@example.com", desired_role="Chef", discoverable=False)
+    _insert_profile("shown002", "shown@example.com", desired_role="Deckhand")
+
+    body = auth_client.get("/recruiter/preview").json()
+    assert body["total"] == 1
+    assert [c["desired_role"] for c in body["candidates"]] == ["Deckhand"]
+
+
+def test_public_preview_caps_the_page(auth_client):
+    for i in range(PREVIEW_LIMIT + 3):
+        _insert_profile(f"bulk{i:04d}", f"bulk{i}@example.com", desired_role="Deckhand")
+
+    body = auth_client.get("/recruiter/preview").json()
+    assert len(body["candidates"]) == PREVIEW_LIMIT
+    assert body["total"] == PREVIEW_LIMIT + 3
+
+
+def test_public_preview_handles_a_bare_profile(auth_client):
+    """A profile with nothing filled in must still render, not 500."""
+    _insert_profile("bare0001", "bare@example.com")
+
+    body = auth_client.get("/recruiter/preview").json()
+    card = body["candidates"][0]
+    assert card["initials"] == ""
+    assert card["desired_role"] is None
+    assert card["certifications_count"] == 0
+
+
+def test_public_preview_is_rate_limited(auth_client):
+    """Anonymous + unauthenticated means the limiter is the only brake."""
+    _insert_profile("rate0001", "rate@example.com", desired_role="Deckhand")
+    _limiter.reset()
+    try:
+        codes = {auth_client.get("/recruiter/preview").status_code for _ in range(35)}
+        assert 429 in codes
+    finally:
+        _limiter.reset()

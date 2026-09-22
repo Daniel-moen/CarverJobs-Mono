@@ -5,33 +5,58 @@
   import RecruiterCandidatesPage from '../pages/RecruiterCandidatesPage.svelte'
   import SubscriptionPage from '../pages/SubscriptionPage.svelte'
   import { trackPageView } from '../../config/analytics'
+  import { AGENCY_UNLOCK_PROMISE } from '../../config/site'
 
   let { agencyName = '', onLogout = () => {} } = $props()
 
   // Local routing — agency sub-pages live here.
+  //
+  // `/agency` is Find Crew, not My Jobs. Every agency arrives with zero jobs
+  // posted, so the old default dropped them on an empty table and the crew
+  // list — the only thing they can spend a token on — was a tab they had to
+  // discover (22 Sep 2026 review: 2 agency accounts, 0 unlocks ever).
+  // `/agency/crew` is kept as an alias so older links still resolve.
   const PATH_TO_PAGE = {
-    '/agency': 'dashboard',
-    '/agency/submit': 'submit',
+    '/agency': 'crew',
     '/agency/crew': 'crew',
+    '/agency/jobs': 'dashboard',
+    '/agency/submit': 'submit',
     '/agency/tokens': 'tokens',
   }
   const PAGE_TO_PATH = {
-    dashboard: '/agency',
+    crew: '/agency',
+    dashboard: '/agency/jobs',
     submit: '/agency/submit',
-    crew: '/agency/crew',
     tokens: '/agency/tokens',
   }
 
   function pageFromPath(pathname) {
     // Yoco checkout return URLs land on /subscription?status=… — show the
     // tokens page so the agency sees the payment result instead of bouncing
-    // to the dashboard.
+    // to the crew list.
     if (pathname.startsWith('/subscription')) return 'tokens'
-    return PATH_TO_PAGE[pathname] ?? 'dashboard'
+    return PATH_TO_PAGE[pathname] ?? 'crew'
+  }
+
+  function readWelcomeFlag() {
+    try {
+      return new URLSearchParams(window.location.search).get('welcome') === '1'
+    } catch {
+      return false
+    }
   }
 
   let currentPage = $state(pageFromPath(window.location.pathname))
   let mobileOpen = $state(false)
+  // Set by App.svelte immediately after an agency signup (?welcome=1).
+  let showWelcome = $state(readWelcomeFlag())
+
+  function dismissWelcome() {
+    showWelcome = false
+    if (readWelcomeFlag()) {
+      history.replaceState(history.state, '', window.location.pathname)
+    }
+  }
 
   function navigate(pageKey) {
     if (currentPage === pageKey) {
@@ -51,13 +76,13 @@
 
   onMount(() => {
     // If we landed on a non-agency path (e.g. user typed /dashboard) snap back
-    // to the agency dashboard so the URL matches what's actually rendered.
+    // to the agency home so the URL matches what's actually rendered.
     if (!window.location.pathname.startsWith('/agency')) {
       if (window.location.pathname.startsWith('/subscription')) {
         history.replaceState({ page: 'tokens', scope: 'agency' }, '', '/agency/tokens')
       } else {
-        history.replaceState({ page: 'dashboard', scope: 'agency' }, '', '/agency')
-        currentPage = 'dashboard'
+        history.replaceState({ page: 'crew', scope: 'agency' }, '', '/agency')
+        currentPage = 'crew'
       }
     }
     trackPageView(`agency-${currentPage}`)
@@ -68,10 +93,12 @@
     window.removeEventListener('popstate', onPopState)
   })
 
+  // Find Crew first: it is both the landing tab and the only tab that leads
+  // to a token spend.
   const tabs = [
-    { key: 'dashboard', label: 'My Jobs' },
-    { key: 'submit',    label: 'Post a Job' },
     { key: 'crew',      label: 'Find Crew' },
+    { key: 'submit',    label: 'Post a Job' },
+    { key: 'dashboard', label: 'My Jobs' },
     { key: 'tokens',    label: 'Buy Tokens' },
   ]
 </script>
@@ -117,15 +144,31 @@
     {/if}
   </header>
 
+  {#if showWelcome}
+    <div class="border-b border-emerald-400/20 bg-emerald-400/10 px-4 py-2.5 sm:px-6">
+      <div class="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
+        <p class="text-sm text-emerald-100">{AGENCY_UNLOCK_PROMISE}</p>
+        <button
+          type="button"
+          onclick={dismissWelcome}
+          class="shrink-0 text-emerald-300/60 transition hover:text-emerald-200"
+          aria-label="Dismiss"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <main class="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 md:px-8">
-    {#if currentPage === 'crew'}
-      <RecruiterCandidatesPage onNavigate={(key) => navigate(key === 'subscription' ? 'tokens' : key)} />
+    {#if currentPage === 'dashboard'}
+      <AgencyDashboardPage onNavigate={(key) => navigate(key === 'agency-submit' ? 'submit' : key === 'agency-dashboard' ? 'dashboard' : key === 'crew' ? 'crew' : currentPage)} />
     {:else if currentPage === 'tokens'}
       <SubscriptionPage onNavigate={(key) => navigate(key === 'subscription' ? 'tokens' : key)} />
     {:else if currentPage === 'submit'}
       <AgencySubmitJobPage onNavigate={(key) => navigate(key === 'agency-dashboard' ? 'dashboard' : key === 'agency-submit' ? 'submit' : currentPage)} />
     {:else}
-      <AgencyDashboardPage onNavigate={(key) => navigate(key === 'agency-submit' ? 'submit' : key === 'agency-dashboard' ? 'dashboard' : currentPage)} />
+      <RecruiterCandidatesPage onNavigate={(key) => navigate(key === 'subscription' ? 'tokens' : key)} />
     {/if}
   </main>
 </div>

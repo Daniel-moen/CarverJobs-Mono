@@ -3,8 +3,16 @@
    * AgencySection — pitch for crew agencies & captains hiring directly.
    *
    * No metrics, no fake testimonials. Three plain value props + a single
-   * primary CTA wired to the existing /signup/agency flow.
+   * primary CTA wired to the existing /signup/agency flow, plus a secondary
+   * link to the login-free crew preview at /find-crew.
+   *
+   * The third point used to read "Free during private beta", which
+   * contradicted the 5-tokens-per-unlock price shown on /pricing and inside
+   * the app. Both now come from the same constant.
    */
+  import { trackOutboundClick } from '../../config/analytics'
+  import { RECRUITER_UNLOCK_COST_TOKENS } from '../../config/site'
+
   let { onAgencySignup = () => {} } = $props()
 
   const points = [
@@ -19,9 +27,9 @@
         'Candidates are filtered by role, certs, visa, salary band and availability before they ever reach your inbox.',
     },
     {
-      title: 'Free during private beta',
+      title: 'Your first contact unlock is free',
       body:
-        'No contract, no per-placement fee, no card on file. Cancel any time — the listing comes down within minutes.',
+        `Posting roles and browsing crew costs nothing. Revealing a candidate's email and phone costs ${RECRUITER_UNLOCK_COST_TOKENS} tokens after the first — no contract, no per-placement fee, no card on file.`,
     },
   ]
 </script>
@@ -59,6 +67,13 @@
         Post a position
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
       </button>
+      <a
+        class="agencies-cta-alt"
+        href="/find-crew"
+        onclick={() => trackOutboundClick('crew_preview_cta', { label: 'agency_section' })}
+      >
+        Or see who's looking — no account needed
+      </a>
       <p class="agencies-cta-foot">
         Takes about a minute · no payment details required
       </p>
@@ -185,6 +200,22 @@
     outline-offset: 3px;
   }
   .agencies-cta svg { width: 14px; height: 14px; }
+  .agencies-cta-alt {
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(243, 234, 216, 0.22);
+    padding-bottom: 2px;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  .agencies-cta-alt:hover {
+    color: var(--ivory);
+    border-bottom-color: rgba(243, 234, 216, 0.5);
+  }
+  .agencies-cta-alt:focus-visible {
+    outline: 2px solid var(--brass-bright);
+    outline-offset: 3px;
+  }
   .agencies-cta-foot {
     margin: 0;
     color: var(--text-muted);

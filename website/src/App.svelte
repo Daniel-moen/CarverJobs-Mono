@@ -68,6 +68,9 @@
     '/refund-policy': 'refund-policy',
     '/data-deletion': 'data-deletion',
     '/articles':      'articles',
+    // Login-free anonymised crew preview for agencies. Not '/crew' — that
+    // prefix already belongs to the public crew profile route /crew/{slug}.
+    '/find-crew':     'find-crew',
   }
   const PAGE_TO_PATH = Object.fromEntries(
     Object.entries(PATH_TO_PAGE).map(([p, k]) => [k, p])
@@ -98,7 +101,7 @@
   }
 
   function isPublicContentPage(key) {
-    return isLegalDocumentPage(key) || key === 'articles' || key === 'pricing'
+    return isLegalDocumentPage(key) || key === 'articles' || key === 'pricing' || key === 'find-crew'
   }
 
   function pageFromPath(pathname) {
@@ -106,6 +109,7 @@
     if (pathname === '/terms') return 'terms'
     if (pathname === '/refund-policy') return 'refund-policy'
     if (pathname === '/pricing') return 'pricing'
+    if (pathname === '/find-crew') return 'find-crew'
     if (pathname === '/data-deletion') return 'data-deletion'
     if (pathname === '/articles' || pathname.startsWith('/articles/')) return 'articles'
     if (!SITE_LAUNCHED) return 'launch-signup'
@@ -494,6 +498,7 @@
       path === '/privacy' ||
       path === '/terms' ||
       path === '/data-deletion' ||
+      path === '/find-crew' ||
       path === '/articles' ||
       path.startsWith('/articles/')
     ) {
@@ -665,6 +670,25 @@
     {:catch err}
       <RouteError error={err} page={currentPage} />
     {/await}
+  {:else if currentPage === 'find-crew'}
+    <!-- Public, login-free crew preview. Sits above the session gate on
+         purpose: an agency must be able to see the pool before it is asked
+         to create an account. -->
+    {#await pageChunk('find-crew', () => import('./components/pages/CrewPreviewPage.svelte'))}
+      <RouteLoading />
+    {:then { default: CrewPreviewPage }}
+      <CrewPreviewPage
+        onAgencySignup={() => {
+          authError = ''
+          showLogin = false
+          showSignup = true
+          currentPage = 'signup'
+          history.pushState({ page: 'signup' }, '', '/signup/agency')
+        }}
+      />
+    {:catch err}
+      <RouteError error={err} page={currentPage} />
+    {/await}
   {:else if waToken}
     {#await pageChunk('whatsapp-auth', () => import('./components/pages/WhatsAppAuthPage.svelte'))}
       <RouteLoading />
@@ -705,7 +729,16 @@
           await loginWithGoogleToken(token)
           if (isAuthenticated) {
             showSignup = false
-            trackFunnel('signup_complete', { label: 'google' })
+            trackFunnel('signup_complete', { label: userRole === 'agency' ? 'agency' : 'google' })
+            if (userRole === 'agency') {
+              // Without this the agency fell through to the crew branch below,
+              // which rewrote the URL to `/` and made AgencyShell snap back to
+              // its default tab — the welcome banner never showed.
+              showOnboarding = false
+              showDocsReminder = false
+              history.replaceState({}, '', '/agency?welcome=1')
+              return
+            }
             try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }
             showOnboarding = checkOnboardingNeeded()
             if (!showOnboarding) showDocsReminder = checkDocsReminder()
@@ -720,7 +753,9 @@
           if (result?.intent === 'agency') {
             showOnboarding = false
             showDocsReminder = false
-            history.replaceState({}, '', '/agency')
+            // `/agency` is Find Crew; ?welcome=1 raises the free-first-unlock
+            // banner once inside AgencyShell.
+            history.replaceState({}, '', '/agency?welcome=1')
             return
           }
           try { localStorage.removeItem('carver_onboarding_complete') } catch { /* ignore */ }

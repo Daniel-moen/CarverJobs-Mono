@@ -54,6 +54,35 @@ export const FREE_MATCH_RUNS = 5
 export const LIVE_JOBS_BLURB = '250+ live yacht jobs'
 
 /**
+ * Recruiter contact-unlock economics — the agency side of the token economy.
+ *
+ * Mirrors the API: `RECRUITER_UNLOCK_COST_TOKENS` (app/settings.py, 5) is what
+ * an agency spends to reveal one crew member's email + phone, and the signup
+ * grant `FREE_SIGNUP_TOKENS` (also 5) exactly covers the first one — that, and
+ * nothing more, is what "your first unlock is free" means. Already-unlocked
+ * contacts stay free to re-view forever.
+ *
+ * Before this constant existed the agency story was told three different ways
+ * on three surfaces ("free during private beta" on the landing page, "5 tokens"
+ * hand-typed on /pricing, a server number in the app). Import it; never type
+ * the digit. Prices themselves are a founder decision — changing the number
+ * here means changing RECRUITER_UNLOCK_COST_TOKENS in the API too.
+ */
+export const RECRUITER_UNLOCK_COST_TOKENS = 5
+
+/** True while the signup token grant still covers a whole unlock. */
+export const RECRUITER_FIRST_UNLOCK_FREE = true
+
+/** The one-line agency promise, used verbatim on every agency surface. */
+export const AGENCY_UNLOCK_PROMISE =
+  `Your first contact unlock is free — after that it's ${RECRUITER_UNLOCK_COST_TOKENS} tokens per unlock.`
+
+/** "Starter ≈ 1 unlock" style maths, derived so it can never drift. */
+export function unlocksPerTokens(tokens) {
+  return Math.floor(Number(tokens || 0) / RECRUITER_UNLOCK_COST_TOKENS)
+}
+
+/**
  * Source tags appended to every wa.me prefill so the WhatsApp backend can
  * attribute a signup to the surface that produced it. The tag is always the
  * trailing token of the prefilled message, separated by a space.

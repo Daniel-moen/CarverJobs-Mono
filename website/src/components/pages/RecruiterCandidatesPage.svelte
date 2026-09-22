@@ -2,12 +2,15 @@
   import { onMount } from 'svelte'
   import { API_BASE_URL, apiFetch } from '../../config/api'
   import { trackEvent } from '../../config/analytics'
+  import { AGENCY_UNLOCK_PROMISE, RECRUITER_UNLOCK_COST_TOKENS } from '../../config/site'
 
   let { onNavigate = () => {} } = $props()
 
   let candidates = $state([])
   let total = $state(0)
-  let unlockCost = $state(0)
+  // Seeded from the shared constant so the first paint never advertises
+  // "0 tokens"; the server value replaces it as soon as the list lands.
+  let unlockCost = $state(RECRUITER_UNLOCK_COST_TOKENS)
   let balance = $state(0)
   let isLoading = $state(true)
   let errorMessage = $state('')
@@ -43,7 +46,7 @@
       }
       candidates = Array.isArray(data?.candidates) ? data.candidates : []
       total = data?.total ?? candidates.length
-      unlockCost = data?.unlock_cost ?? 0
+      unlockCost = Number(data?.unlock_cost) || RECRUITER_UNLOCK_COST_TOKENS
       balance = data?.balance ?? 0
     } catch {
       errorMessage = 'Could not reach the server.'
@@ -86,7 +89,10 @@
     return name || 'Crew member'
   }
 
-  onMount(loadCandidates)
+  onMount(() => {
+    trackEvent('agency_find_crew_view')
+    loadCandidates()
+  })
 </script>
 
 <section class="grid gap-4">
@@ -95,6 +101,7 @@
       <h1 class="text-xl font-semibold text-white">Find Crew</h1>
       <p class="mt-1 text-sm text-slate-400">
         Search the crew pool and unlock contact details with tokens.
+        {AGENCY_UNLOCK_PROMISE}
       </p>
     </div>
     <div class="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-right">

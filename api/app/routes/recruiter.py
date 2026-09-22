@@ -5,8 +5,17 @@ Agencies browse the crew candidate pool (no contact details shown) and spend
 tokens to unlock a candidate's email/phone. Once unlocked, that contact stays
 free to re-view. Token spend reuses the shared CreditAccount keyed by the
 session email — the same currency crew buy on the subscription page.
+
+`GET /recruiter/preview` is the one public route here: an anonymised shop
+window for the candidate pool so an agency can see there ARE crew before it
+is asked to create an account (22 Sep 2026 review — 2 agency accounts, 0
+unlocks ever, because nobody ever reached the crew list).
 """
+import re
+from typing import Annotated, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import or_
@@ -17,7 +26,12 @@ from app.analytics import record_server_event
 from app.database import get_db
 from app.logger import get_logger
 from app.models import ContactUnlock, CrewProfile, Document, User
-from app.schemas import RecruiterCandidate, RecruiterCandidateList, RecruiterUnlockResponse
+from app.schemas import (
+    APIModel,
+    RecruiterCandidate,
+    RecruiterCandidateList,
+    RecruiterUnlockResponse,
+)
 from app.security import require_agency_or_admin_session
 from app.services.credits import add_credits, get_credit_balance, spend_credits
 from app.settings import settings
@@ -26,6 +40,9 @@ log = get_logger("carver.recruiter")
 _limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/recruiter", tags=["recruiter"])
+
+#: How many anonymised cards the public preview ever returns.
+PREVIEW_LIMIT = 12
 
 
 def _doc_flags(db: Session, user_key: str, slug: str) -> tuple[bool, bool, str | None]:
@@ -77,6 +94,95 @@ def _candidate(profile: CrewProfile, *, unlocked: bool, db: Session,
         unlocked=unlocked,
         email=email,
         phone=phone,
+    )
+
+
+# ── Public anonymised preview ────────────────────────────────────────────────
+
+class CrewPreviewCard(APIModel):
+    """One crew member as shown to a logged-out visitor.
+
+    Deliberately not a `RecruiterCandidate`: no slug, no name, no bio, no
+    photo URL, no certification text and no contact fields — nothing that
+    could identify the person or be scraped into a competing database. The
+    card is *derived* from `_candidate()` (see `_anonymise`) so any field
+    added to the paid shape later has to be opted in here to escape.
+    """
+    initials: str = ""
+    desired_role: Optional[str] = None
+    nationality: Optional[str] = None
+    region: Optional[str] = None
+    years_experience: Optional[str] = None
+    languages: Optional[str] = None
+    certifications_count: int = 0
+    available_from: Optional[str] = None
+    has_cv: bool = False
+    has_photo: bool = False
+
+
+class CrewPreviewList(APIModel):
+    candidates: Annotated[list[CrewPreviewCard], Field(default_factory=list)]
+    total: int = 0
+    unlock_cost: int = 0
+    first_unlock_free: bool = True
+
+
+def _initials(first: str | None, last: str | None) -> str:
+    """"Alex Crew" → "A.C." — enough to make a card feel human, not a name."""
+    letters = [part.strip()[0].upper() for part in (first, last) if (part or "").strip()]
+    return "".join(f"{c}." for c in letters)
+
+
+def _region(location: str | None) -> str | None:
+    """Coarsen "Antibes, France" → "France" so a card is not a home address."""
+    if not location:
+        return None
+    tail = location.split(",")[-1].strip() or location.strip()
+    return tail[:60] or None
+
+
+def _certification_count(certifications: str | None) -> int:
+    if not certifications:
+        return 0
+    return len([c for c in re.split(r"[,;\n]+", certifications) if c.strip()])
+
+
+def _anonymise(c: RecruiterCandidate) -> CrewPreviewCard:
+    return CrewPreviewCard(
+        initials=_initials(c.first_name, c.last_name),
+        desired_role=c.desired_role,
+        nationality=c.nationality,
+        region=_region(c.current_location),
+        years_experience=c.years_experience,
+        languages=c.languages,
+        certifications_count=_certification_count(c.certifications),
+        available_from=c.available_from,
+        has_cv=c.has_cv,
+        has_photo=c.has_photo,
+    )
+
+
+@router.get("/preview", response_model=CrewPreviewList)
+@_limiter.limit("30/minute")
+def preview_candidates(request: Request, db: Session = Depends(get_db)):
+    """Public, login-free, anonymised sample of the discoverable crew pool.
+
+    Rate-limited like the other public GETs (articles, job board). No session
+    is required and none is read — this is the page an agency sees *before*
+    it signs up.
+    """
+    base = db.query(CrewProfile).filter(CrewProfile.discoverable.is_(True))
+    total = base.count()
+    profiles = base.order_by(CrewProfile.updated_at.desc()).limit(PREVIEW_LIMIT).all()
+    cards = [
+        _anonymise(_candidate(p, unlocked=False, db=db, with_contact=False))
+        for p in profiles
+    ]
+    return CrewPreviewList(
+        candidates=cards,
+        total=total,
+        unlock_cost=settings.RECRUITER_UNLOCK_COST_TOKENS,
+        first_unlock_free=settings.FREE_SIGNUP_TOKENS >= settings.RECRUITER_UNLOCK_COST_TOKENS,
     )
 
 
